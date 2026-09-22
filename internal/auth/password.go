@@ -38,8 +38,10 @@ const (
 	minPasswordBytes = 8
 )
 
-// hashPassword returns an argon2id PHC-formatted hash of the password.
-func hashPassword(password string) (string, error) {
+// HashPassword returns an argon2id PHC-formatted hash of the password.
+// Exported for reuse by subsystems that must protect secrets (share
+// passwords); the hashing configuration lives here, in one place.
+func HashPassword(password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate salt: %w", err)
@@ -52,10 +54,10 @@ func hashPassword(password string) (string, error) {
 	), nil
 }
 
-// verifyPassword checks password against an argon2id PHC hash using the
+// VerifyPassword checks password against an argon2id PHC hash using the
 // parameters recorded in the hash itself (so parameters can evolve without
 // invalidating existing accounts).
-func verifyPassword(password, encoded string) (bool, error) {
+func VerifyPassword(password, encoded string) (bool, error) {
 	salt, params, key, err := parsePhc(encoded)
 	if err != nil {
 		return false, err
