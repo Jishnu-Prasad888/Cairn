@@ -23,7 +23,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 1
+	SchemaVersion = 2
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.
@@ -146,4 +146,48 @@ CREATE TABLE IF NOT EXISTS index_jobs (
 CREATE INDEX IF NOT EXISTS index_jobs_status_idx      ON index_jobs (status);
 CREATE INDEX IF NOT EXISTS index_jobs_next_run_idx    ON index_jobs (next_run_at)
 	WHERE status IN ('queued', 'failed');
+
+-- folders tracks directories under the library root that contain indexed files.
+CREATE TABLE IF NOT EXISTS folders (
+	id           TEXT PRIMARY KEY,
+	rel_path     TEXT NOT NULL UNIQUE,
+	parent_id    TEXT REFERENCES folders(id),
+	name         TEXT NOT NULL,
+	file_count   INTEGER NOT NULL DEFAULT 0,
+	created_at   TEXT NOT NULL,
+	updated_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS folders_rel_path_idx ON folders (rel_path);
+CREATE INDEX IF NOT EXISTS folders_parent_idx   ON folders (parent_id);
+
+-- media_metadata stores media-specific attributes derived from indexed files.
+-- Rows are regenerable; keyed on indexed_files.id for efficient joins.
+CREATE TABLE IF NOT EXISTS media_metadata (
+	file_id       TEXT PRIMARY KEY REFERENCES indexed_files(id) ON DELETE CASCADE,
+	media_type    TEXT NOT NULL DEFAULT 'other'
+		CHECK (media_type IN ('photo','video','audio','document','other')),
+	mime_type     TEXT,
+	width         INTEGER,
+	height        INTEGER,
+	duration_secs REAL,
+	taken_at      TEXT,
+	camera_make   TEXT,
+	camera_model  TEXT,
+	latitude      REAL,
+	longitude     REAL,
+	has_thumbnail INTEGER NOT NULL DEFAULT 0,
+	updated_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS media_metadata_type_idx ON media_metadata (media_type);
+
+-- trash records soft-deleted files for restore or permanent deletion.
+CREATE TABLE IF NOT EXISTS trash (
+	file_id         TEXT PRIMARY KEY REFERENCES indexed_files(id) ON DELETE CASCADE,
+	original_path   TEXT NOT NULL,
+	trash_path      TEXT NOT NULL,
+	deleted_at      TEXT NOT NULL,
+	deleted_by      TEXT
+);
 `
