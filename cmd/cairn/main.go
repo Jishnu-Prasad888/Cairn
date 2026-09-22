@@ -17,6 +17,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/config"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/httpapi"
+	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/logging"
 	"github.com/Jishnu-Prasad888/Cairn/internal/version"
@@ -85,6 +86,9 @@ func run() error {
 	}
 	cancelRefresh()
 
+	// Incremental indexer: manages per-library scan jobs.
+	idxManager := indexer.NewIndexManager(logger)
+
 	// Frontend: the embedded build by default, an on-disk build in development.
 	webHandler, err := webui.Handler(cfg.WebDistDir)
 	if err != nil {
@@ -97,6 +101,7 @@ func run() error {
 		DB:            pool,
 		Auth:          authSvc,
 		Libraries:     libraries,
+		Indexer:       idxManager,
 		SecureCookies: cfg.CookieSecure,
 		WebUI:         webHandler,
 	})
