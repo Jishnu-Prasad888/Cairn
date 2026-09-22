@@ -74,9 +74,9 @@ func TestMigrateFSAppliesInOrder(t *testing.T) {
 	pool := openTestDB(t)
 
 	fsys := fstest.MapFS{
-		"m/0002_second.sql":  {Data: []byte(`CREATE TABLE second (id INTEGER PRIMARY KEY);`)},
-		"m/0001_first.sql":   {Data: []byte(`CREATE TABLE first (id INTEGER PRIMARY KEY);`)},
-		"m/README.md":        {Data: []byte(`not a migration`)},
+		"m/0002_second.sql": {Data: []byte(`CREATE TABLE second (id INTEGER PRIMARY KEY);`)},
+		"m/0001_first.sql":  {Data: []byte(`CREATE TABLE first (id INTEGER PRIMARY KEY);`)},
+		"m/README.md":       {Data: []byte(`not a migration`)},
 	}
 
 	if err := MigrateFS(pool, fsys, "m"); err != nil {

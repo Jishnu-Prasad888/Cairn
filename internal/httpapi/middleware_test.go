@@ -75,7 +75,7 @@ func TestRecoverPanicsIntoJSONError(t *testing.T) {
 func TestRecoverSetStatusBeforePanic(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("partial"))
+		_, _ = w.Write([]byte("partial"))
 		panic("late")
 	})
 
