@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/markdown"
@@ -100,6 +101,9 @@ func (s *Server) handleListMemories(w http.ResponseWriter, r *http.Request, u *a
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapRead) {
+		return
+	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
 	if !ok {
 		return
@@ -136,6 +140,9 @@ func (s *Server) handleCreateMemory(w http.ResponseWriter, r *http.Request, u *a
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapCreate) {
 		return
 	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
@@ -180,6 +187,9 @@ func (s *Server) handleGetMemory(w http.ResponseWriter, r *http.Request, u *auth
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.EntityKey("m", lib.ID, r.PathValue("memoryID")), authz.CapRead) {
+		return
+	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
 	if !ok {
 		return
@@ -202,6 +212,9 @@ func (s *Server) handleUpdateMemory(w http.ResponseWriter, r *http.Request, u *a
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.EntityKey("m", lib.ID, r.PathValue("memoryID")), authz.CapEdit) {
 		return
 	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
@@ -251,6 +264,9 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request, u *a
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.EntityKey("m", lib.ID, r.PathValue("memoryID")), authz.CapDelete) {
+		return
+	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
 	if !ok {
 		return
@@ -269,6 +285,9 @@ func (s *Server) handleRestoreMemory(w http.ResponseWriter, r *http.Request, u *
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.EntityKey("m", lib.ID, r.PathValue("memoryID")), authz.CapEdit) {
 		return
 	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
@@ -318,6 +337,9 @@ func (s *Server) handleListMemoryVersions(w http.ResponseWriter, r *http.Request
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.EntityKey("m", lib.ID, r.PathValue("memoryID")), authz.CapRead) {
+		return
+	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
 	if !ok {
 		return
@@ -337,6 +359,9 @@ func (s *Server) handleGetMemoryVersion(w http.ResponseWriter, r *http.Request, 
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.EntityKey("m", lib.ID, r.PathValue("memoryID")), authz.CapRead) {
 		return
 	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)
@@ -364,6 +389,9 @@ func (s *Server) handleListMemoryRefs(w http.ResponseWriter, r *http.Request, u 
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.EntityKey("m", lib.ID, r.PathValue("memoryID")), authz.CapRead) {
 		return
 	}
 	store, cleanup, ok := s.openMemoryStore(w, r, lib)

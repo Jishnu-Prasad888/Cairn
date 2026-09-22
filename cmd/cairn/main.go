@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/config"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/httpapi"
@@ -76,6 +77,10 @@ func run() error {
 	}
 	cancelPrune()
 
+	// Resource-based authorization (ADR-0005): grants and public shares over
+	// registered libraries. Backed by the server database and audit log.
+	authzSvc := authz.NewService(pool, logger, auditSvc)
+
 	// Registered storage libraries; reconcile connectivity at startup so a
 	// disconnected disk is surfaced as offline immediately.
 	libraries := library.NewManager(pool, logger, auditSvc)
@@ -100,6 +105,7 @@ func run() error {
 		Logger:        logger,
 		DB:            pool,
 		Auth:          authSvc,
+		Authz:         authzSvc,
 		Libraries:     libraries,
 		Indexer:       idxManager,
 		SecureCookies: cfg.CookieSecure,

@@ -87,7 +87,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string, meta
 		return nil, "", err
 	}
 
-	hash, err := hashPassword(password)
+	hash, err := HashPassword(password)
 	if err != nil {
 		return nil, "", err
 	}
@@ -131,7 +131,7 @@ func (s *Service) Login(ctx context.Context, username, password string, meta Met
 		return nil, "", ErrUnauthorized
 	}
 
-	ok, err := verifyPassword(password, user.PasswordHash)
+	ok, err := VerifyPassword(password, user.PasswordHash)
 	if err != nil {
 		s.logger.Warn("login: unparsable stored hash", "user_id", user.ID, "error", err)
 		s.recordLoginFailure(ctx, user.Username, meta)
@@ -236,7 +236,7 @@ func (s *Service) CreateUser(ctx context.Context, username, password, role strin
 		return nil, err
 	}
 
-	hash, err := hashPassword(password)
+	hash, err := HashPassword(password)
 	if err != nil {
 		return nil, err
 	}

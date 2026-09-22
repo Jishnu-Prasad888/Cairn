@@ -511,6 +511,301 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /libraries/{libraryID}/permissions:
+    get:
+      tags: [Authorization]
+      operationId: listGrants
+      summary: List grants rooted in the library
+      description: >
+        Requires the `manage` capability on the library. Returns every grant
+        whose resource key is the library or a descendant. Grants are
+        resource-scoped (ADR-0005) and inherit down folders.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Grants rooted in the library
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Authorization]
+      operationId: createGrant
+      summary: Grant capabilities on a resource to a user
+      description: >
+        Requires the `manage` capability on the library. The `key` is a
+        resource key; a bare path is scoped to this library (folder keys gain
+        the library prefix automatically). A grant on a container inherits down
+        the hierarchy until a more specific `deny` overrides it.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantRequest'
+      responses:
+        '201':
+          description: The persisted grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /libraries/{libraryID}/permissions/{grantID}:
+    delete:
+      tags: [Authorization]
+      operationId: revokeGrant
+      summary: Revoke a grant
+      description: >
+        Requires the `manage` capability on the library and that the grant is
+        rooted in it. Revocation is immediate: cached decisions are invalidated
+        on the next evaluation.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: grantID
+          in: path
+          required: true
+          description: Grant id (returned by the grant endpoints).
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Grant revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /libraries/{libraryID}/shares:
+    get:
+      tags: [Authorization]
+      operationId: listShares
+      summary: List shares rooted in the library
+      description: >
+        Requires the `manage` capability on the library. Returns share metadata
+        only; the raw share token is shown once at creation and never again.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Shares rooted in the library
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Authorization]
+      operationId: createShare
+      summary: Create a public share
+      description: >
+        Requires the `manage` capability on the library. The share scopes a set
+        of capabilities to a resource key (library, folder, or entity) and is
+        accessed anonymously with the returned token. The token is returned
+        exactly once; only its SHA-256 digest is stored. An optional password
+        and/or expiry gates access.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareRequest'
+      responses:
+        '201':
+          description: The share and its one-time token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /libraries/{libraryID}/shares/{shareID}:
+    delete:
+      tags: [Authorization]
+      operationId: revokeShare
+      summary: Revoke a public share
+      description: >
+        Requires the `manage` capability on the library and that the share is
+        rooted in it. The token stops working immediately.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: shareID
+          in: path
+          required: true
+          description: Share id (returned by the share endpoints).
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Share revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /shares/{token}:
+    get:
+      tags: [Shares]
+      operationId: shareInfo
+      summary: Inspect a public share
+      description: >
+        Public. Authenticates the share token (and optional password). Returns
+        non-sensitive share metadata.
+      security:
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+      responses:
+        '200':
+          description: Share metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareInfoEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /shares/{token}/authenticate:
+    post:
+      tags: [Shares]
+      operationId: authenticateShare
+      summary: Confirm a share token and password
+      description: >
+        Public. Returns `{"authenticated": true}` when the token (and optional
+        password) are valid. The UI calls this before navigating so it can
+        prompt for a password up front.
+      security:
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+      responses:
+        '200':
+          description: Valid share token
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /shares/{token}/files:
+    get:
+      tags: [Shares]
+      operationId: shareListFiles
+      summary: List files inside the shared subtree
+      description: >
+        Public. Requires the `read` capability on the share for the requested
+        folder. Results are filtered to the share's scope; a folder above the
+        shared resource is forbidden.
+      security:
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - name: folder
+          in: query
+          required: false
+          description: Folder path (relative to the library). Omit for the library root.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Files in the shared folder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /shares/{token}/files/{fileID}:
+    get:
+      tags: [Shares]
+      operationId: shareGetFile
+      summary: Get file metadata through a share
+      security:
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - name: fileID
+          in: path
+          required: true
+          description: File id.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File metadata (only when the file is in the share scope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /shares/{token}/files/{fileID}/download:
+    get:
+      tags: [Shares]
+      operationId: shareDownload
+      summary: Download original bytes through a share
+      description: >
+        Public. Requires both `read` and `download` capabilities on the share for
+        the file, and that the file is inside the share scope. Serves with Range
+        support.
+      security:
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - name: fileID
+          in: path
+          required: true
+          description: File id.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The original file bytes
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  
 components:
   schemas:
     ErrorBody:
@@ -766,6 +1061,209 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MemoryRef'
+    Capability:
+      type: string
+      enum: [read, download, create, edit, move, delete, share, manage]
+      description: >
+        A single operation a principal may perform on a resource. `manage` is the
+        highest capability and implies administering permissions and shares on the
+        resource.
+    Effect:
+      type: string
+      enum: [allow, deny]
+      description: >
+        Whether a grant permits (`allow`) or forbids (`deny`) its capabilities.
+        A `deny` on a more specific key beats any inherited `allow`.
+    Grant:
+      type: object
+      required: [id, user_id, resource_key, capabilities, effect, created_at]
+      properties:
+        id:
+          type: string
+          description: Stable opaque grant id.
+        user_id:
+          type: string
+          description: Account the grant applies to.
+        resource_key:
+          type: string
+          description: >
+            Resource key (ADR-0005). Examples: `lib-1` (library),
+            `lib-1/f:2024` (folder), `lib-1/f:2024/x:img.jpg` (file),
+            `lib-1/a:albumID` (entity). Grants inherit down the hierarchy.
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Capability'
+        effect:
+          $ref: '#/components/schemas/Effect'
+        created_at:
+          type: string
+          format: date-time
+    GrantRequest:
+      type: object
+      required: [user_id, key, caps, effect]
+      properties:
+        user_id:
+          type: string
+          description: Account to grant. Must already exist.
+        key:
+          type: string
+          description: >
+            Resource key. A bare path (e.g. `2024/Japan`) is scoped to the
+            library in the URL; a fully-qualified key of the same library is
+            accepted as-is. Omit for the library itself.
+        caps:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Capability'
+        effect:
+          $ref: '#/components/schemas/Effect'
+    GrantEnvelope:
+      type: object
+      required: [grant]
+      properties:
+        grant:
+          $ref: '#/components/schemas/Grant'
+    GrantListEnvelope:
+      type: object
+      required: [grants]
+      properties:
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Grant'
+    Share:
+      type: object
+      required: [id, resource_key, capabilities, has_password, created_at]
+      properties:
+        id:
+          type: string
+        resource_key:
+          type: string
+          description: Resource the share scopes capabilities to.
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Capability'
+        has_password:
+          type: boolean
+          description: Whether the share requires a password.
+        expires_at:
+          type: string
+          format: date-time
+          description: Present until this instant, then the share is dead.
+        revoked_at:
+          type: string
+          format: date-time
+          description: Set once revoked; a revoked share is immediately dead.
+        created_at:
+          type: string
+          format: date-time
+    ShareRequest:
+      type: object
+      required: [key, caps]
+      properties:
+        key:
+          type: string
+          description: Resource key; bare paths are scoped to the library in the URL.
+        caps:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Capability'
+        password:
+          type: string
+          description: Optional password (min 8 characters when set).
+        expires_at:
+          type: string
+          format: date-time
+          description: Optional RFC3339 expiry.
+    ShareEnvelope:
+      type: object
+      required: [share, token]
+      properties:
+        share:
+          $ref: '#/components/schemas/Share'
+        token:
+          type: string
+          description: >
+            The raw share token. Returned exactly once; only its digest is stored
+            server-side. Present only on creation.
+    ShareListEnvelope:
+      type: object
+      required: [shares]
+      properties:
+        shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/Share'
+    ShareInfoEnvelope:
+      type: object
+      required: [share]
+      properties:
+        share:
+          type: object
+          required: [resource_key, library, has_password]
+          properties:
+            resource_key:
+              type: string
+            library:
+              type: string
+            has_password:
+              type: boolean
+            expires_at:
+              type: string
+              format: date-time
+    File:
+      type: object
+      required: [id, library_id, rel_path, name, folder_path, size_bytes, mod_time, media_type, mime_type, status]
+      properties:
+        id:
+          type: string
+        library_id:
+          type: string
+        rel_path:
+          type: string
+        name:
+          type: string
+        folder_path:
+          type: string
+          description: Parent folder relative to the library root; empty for root files.
+        size_bytes:
+          type: integer
+          format: int64
+        mod_time:
+          type: string
+          format: date-time
+        media_type:
+          type: string
+          enum: [photo, video, audio, document, other]
+        mime_type:
+          type: string
+        status:
+          type: string
+          enum: [present, missing, deleted]
+        content_hash:
+          type: string
+    FileEnvelope:
+      type: object
+      required: [file]
+      properties:
+        file:
+          $ref: '#/components/schemas/File'
+    FileListEnvelope:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/File'
+        next_cursor:
+          type: string
+        total:
+          type: integer
   parameters:
     LibraryID:
       name: libraryID
@@ -788,6 +1286,25 @@ components:
       description: >
         Client-provided request identifier echoed in the response header and in
         error bodies. Must be 1-128 chars of letters, digits, '-', '_', ':'.
+      schema:
+        type: string
+    ShareToken:
+      name: token
+      in: path
+      required: true
+      description: >
+        The raw share token returned once by createShare. Authenticates the
+        share; a password-protected share also requires the `X-Cairn-Share-Password`
+        header.
+      schema:
+        type: string
+    SharePasswordHeader:
+      name: X-Cairn-Share-Password
+      in: header
+      required: false
+      description: >
+        Optional password for a password-protected public share. Sent with every
+        request to a share endpoint that gates a password.
       schema:
         type: string
   responses:

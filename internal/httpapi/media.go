@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
@@ -53,6 +54,9 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, u *auth
 	defer cleanup()
 
 	opts := parseListOptions(r)
+	if !s.requireCap(w, r, u, folderKeyFromParent(lib.ID, opts.FolderPath), authz.CapRead) {
+		return
+	}
 	page, err := svc.Store().List(r.Context(), opts)
 	if err != nil {
 		s.logger.Error("list files", "error", err)
@@ -85,6 +89,9 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request, u *auth.U
 		s.writeMediaError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, f.RelPath), authz.CapRead) {
+		return
+	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"file": toFileResponse(f)})
 }
 
@@ -111,6 +118,9 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request, u *a
 			return
 		}
 	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, f.RelPath), authz.CapDownload) {
+		return
+	}
 
 	fh, _, err := svc.OpenFile(r.Context(), f.RelPath)
 	if err != nil {
@@ -133,12 +143,6 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request, u *aut
 		s.writeLibraryError(w, r, err)
 		return
 	}
-	svc, cleanup, ok := s.openMediaService(w, r, lib)
-	if !ok {
-		return
-	}
-	defer cleanup()
-
 	// 32 MiB in memory, rest spooled to disk.
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
@@ -157,6 +161,15 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request, u *aut
 	if destPath == "" {
 		destPath = header.Filename
 	}
+	if !s.requireCap(w, r, u, parentFolderKey(lib.ID, destPath), authz.CapCreate) {
+		return
+	}
+
+	svc, cleanup, ok := s.openMediaService(w, r, lib)
+	if !ok {
+		return
+	}
+	defer cleanup()
 
 	created, err := svc.WriteUpload(r.Context(), destPath, mf)
 	if err != nil {
@@ -192,6 +205,9 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request, u *aut
 			CodeBadRequest, "new_name is required.")
 		return
 	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, body.Path), authz.CapEdit) {
+		return
+	}
 	updated, err := svc.Rename(r.Context(), body.Path, body.NewName)
 	if err != nil {
 		s.writeMediaError(w, r, err)
@@ -219,6 +235,9 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request, u *auth.
 	}
 	if err := readJSON(w, r, &body); err != nil {
 		writeDomainError(w, s.logger, requestIDOrEmpty(r), err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, body.Path), authz.CapMove) {
 		return
 	}
 	updated, err := svc.Move(r.Context(), body.Path, body.NewPath)
@@ -250,6 +269,12 @@ func (s *Server) handleCopyFile(w http.ResponseWriter, r *http.Request, u *auth.
 		writeDomainError(w, s.logger, requestIDOrEmpty(r), err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, body.Path), authz.CapRead) {
+		return
+	}
+	if !s.requireCap(w, r, u, parentFolderKey(lib.ID, body.DestPath), authz.CapCreate) {
+		return
+	}
 	created, err := svc.Copy(r.Context(), body.Path, body.DestPath)
 	if err != nil {
 		s.writeMediaError(w, r, err)
@@ -278,6 +303,9 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request, u *aut
 		writeDomainError(w, s.logger, requestIDOrEmpty(r), err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, body.Path), authz.CapDelete) {
+		return
+	}
 	actorID := ""
 	if u != nil {
 		actorID = u.ID
@@ -302,6 +330,9 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request, u *au
 	}
 	defer cleanup()
 
+	if !s.fileKeyFor(w, r, u, lib, r.PathValue("fileID"), authz.CapEdit) {
+		return
+	}
 	restored, err := svc.Restore(r.Context(), r.PathValue("fileID"))
 	if err != nil {
 		s.writeMediaError(w, r, err)
@@ -323,6 +354,9 @@ func (s *Server) handlePermanentDeleteFile(w http.ResponseWriter, r *http.Reques
 	}
 	defer cleanup()
 
+	if !s.fileKeyFor(w, r, u, lib, r.PathValue("fileID"), authz.CapDelete) {
+		return
+	}
 	if err := svc.PermanentDelete(r.Context(), r.PathValue("fileID")); err != nil {
 		s.writeMediaError(w, r, err)
 		return
@@ -344,6 +378,9 @@ func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request, u *au
 	defer cleanup()
 
 	parent := r.URL.Query().Get("parent")
+	if !s.requireCap(w, r, u, folderKeyFromParent(lib.ID, parent), authz.CapRead) {
+		return
+	}
 	folders, err := svc.Store().ListFolders(r.Context(), parent)
 	if err != nil {
 		s.logger.Error("list folders", "error", err)
@@ -367,6 +404,9 @@ func (s *Server) handleListTrash(w http.ResponseWriter, r *http.Request, u *auth
 	}
 	defer cleanup()
 
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapRead) {
+		return
+	}
 	files, err := svc.Store().ListTrash(r.Context())
 	if err != nil {
 		s.logger.Error("list trash", "error", err)
