@@ -37,6 +37,10 @@ const (
 // KindIndex is the job kind for a library filesystem scan.
 const KindIndex = "index"
 
+// KindProcessMedia is the job kind for extracting metadata and generating
+// thumbnails for a single media file.
+const KindProcessMedia = "process_media"
+
 // DefaultMaxAttempts is the default number of times a job is retried before
 // being marked permanently failed.
 const DefaultMaxAttempts = 3

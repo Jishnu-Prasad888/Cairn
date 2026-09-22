@@ -104,7 +104,8 @@ func (m *IndexManager) Status(ctx context.Context, libraryID, root string) (*Ind
 }
 
 // RunScanJob is the jobs.Handler for KindIndex. It reads the root from the job
-// payload, opens the library DB, and runs a full scanner pass.
+// payload, opens the library DB, runs a full scanner pass, then enqueues
+// process_media jobs for all new and modified files.
 func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 	libraryID, _ := job.Payload["library_id"].(string)
 	root, _ := job.Payload["root"].(string)
@@ -112,6 +113,7 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 		return fmt.Errorf("index job %s missing root", job.ID)
 	}
 
+	cairnDir := root + "/.cairn"
 	ldb, err := m.openLibraryDB(root)
 	if err != nil {
 		return fmt.Errorf("open library db: %w", err)
@@ -132,5 +134,28 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 		"moved", result.Moved,
 		"missing", result.Missing,
 	)
+
+	// Enqueue media-processing jobs for new and modified files.
+	q := jobs.NewQueue(ldb.DB(), m.logger)
+	enqueued := 0
+	for _, change := range result.Changes {
+		if change.Kind != ChangeNew && change.Kind != ChangeModified {
+			continue
+		}
+		if _, err := q.Enqueue(ctx, jobs.KindProcessMedia, map[string]any{
+			"library_id": libraryID,
+			"file_id":    change.File.ID,
+			"rel_path":   change.File.RelPath,
+			"root":       root,
+			"cairn_dir":  cairnDir,
+		}); err != nil {
+			m.logger.Warn("enqueue process_media job", "file_id", change.File.ID, "error", err)
+		} else {
+			enqueued++
+		}
+	}
+	if enqueued > 0 {
+		m.logger.Info("enqueued media processing jobs", "library_id", libraryID, "count", enqueued)
+	}
 	return nil
 }
