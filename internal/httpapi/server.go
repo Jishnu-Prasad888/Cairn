@@ -116,6 +116,30 @@ func (s *Server) Handler() http.Handler {
 		// Folders and trash.
 		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAdmin, s.handleListFolders))
 		mux.Handle("GET /api/v1/libraries/{id}/trash", s.withAuth(allowAdmin, s.handleListTrash))
+
+		// Search.
+		mux.Handle("GET /api/v1/libraries/{id}/search", s.withAuth(allowAdmin, s.handleSearch))
+
+		// Tags.
+		mux.Handle("GET /api/v1/libraries/{id}/tags", s.withAuth(allowAdmin, s.handleListTags))
+		mux.Handle("POST /api/v1/libraries/{id}/tags", s.withAuth(allowAdmin, s.handleCreateTag))
+		mux.Handle("DELETE /api/v1/libraries/{id}/tags/{tagID}", s.withAuth(allowAdmin, s.handleDeleteTag))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/tags", s.withAuth(allowAdmin, s.handleListFileTags))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/tags", s.withAuth(allowAdmin, s.handleAddFileTag))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/tags/{tagID}", s.withAuth(allowAdmin, s.handleRemoveFileTag))
+
+		// Albums.
+		mux.Handle("GET /api/v1/libraries/{id}/albums", s.withAuth(allowAdmin, s.handleListAlbums))
+		mux.Handle("POST /api/v1/libraries/{id}/albums", s.withAuth(allowAdmin, s.handleCreateAlbum))
+		mux.Handle("DELETE /api/v1/libraries/{id}/albums/{albumID}", s.withAuth(allowAdmin, s.handleDeleteAlbum))
+		mux.Handle("GET /api/v1/libraries/{id}/albums/{albumID}/files", s.withAuth(allowAdmin, s.handleListAlbumFiles))
+		mux.Handle("POST /api/v1/libraries/{id}/albums/{albumID}/files/{fileID}", s.withAuth(allowAdmin, s.handleAddAlbumFile))
+		mux.Handle("DELETE /api/v1/libraries/{id}/albums/{albumID}/files/{fileID}", s.withAuth(allowAdmin, s.handleRemoveAlbumFile))
+
+		// Favorites.
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAdmin, s.handleAddFavorite))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAdmin, s.handleRemoveFavorite))
+		mux.Handle("GET /api/v1/libraries/{id}/favorites", s.withAuth(allowAdmin, s.handleListFavorites))
 	}
 
 	mux.Handle("/api/", s.handleAPIUnknown())
