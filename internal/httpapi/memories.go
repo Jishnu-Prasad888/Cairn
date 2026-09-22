@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
+	"github.com/Jishnu-Prasad888/Cairn/internal/fts"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/markdown"
@@ -124,6 +125,11 @@ func (s *Server) handleListMemories(w http.ResponseWriter, r *http.Request, u *a
 		ms, next, err = store.List(r.Context(), cursor, limit)
 	}
 	if err != nil {
+		if errors.Is(err, fts.ErrInvalid) {
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+				CodeBadRequest, "Invalid search query.")
+			return
+		}
 		s.logger.Error("list memories", "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to list memories.")
