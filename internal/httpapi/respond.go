@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 )
@@ -108,6 +109,40 @@ func writeDomainError(w http.ResponseWriter, logger *slog.Logger, requestID stri
 		writeError(w, logger, requestID, http.StatusInternalServerError, CodeInternal, "Internal server error.")
 	}
 }
+
+// maxBodyBytes bounds authenticated JSON bodies (login, user creation). Bodies
+// larger than this are rejected with 413 before parsing.
+const maxBodyBytes = 1 << 20 // 1 MiB
+
+// readJSON decodes a request body of at most maxBodyBytes into dst, returning a
+// statusError the caller can hand to writeDomainError.
+func readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	err := json.NewDecoder(r.Body).Decode(dst)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return &statusErr{status: http.StatusRequestEntityTooLarge,
+				msg: "Request body too large."}
+		}
+		if err == io.EOF {
+			return &statusErr{status: http.StatusBadRequest,
+				msg: "Request body must be a JSON object."}
+		}
+		return &statusErr{status: http.StatusBadRequest,
+			msg: "Request body must be valid JSON."}
+	}
+	return nil
+}
+
+// statusErr is a small error carrying an HTTP status; it implements statusError.
+type statusErr struct {
+	status int
+	msg    string
+}
+
+func (e *statusErr) Error() string { return e.msg }
+func (e *statusErr) Status() int   { return e.status }
 
 func codeForStatus(status int) string {
 	switch status {

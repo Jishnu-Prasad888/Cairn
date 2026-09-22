@@ -4,15 +4,19 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 )
 
 // Server is the Cairn HTTP application. It is a small composition of the
 // routes and shared dependencies; individual handlers stay in their own
 // files.
 type Server struct {
-	logger *slog.Logger
-	db     *sql.DB
-	web    http.Handler
+	logger        *slog.Logger
+	db            *sql.DB
+	web           http.Handler
+	auth          *auth.Service
+	secureCookies bool
 }
 
 // Dependencies are the services the HTTP layer needs. Keeping them explicit
@@ -20,6 +24,13 @@ type Server struct {
 type Dependencies struct {
 	Logger *slog.Logger
 	DB     *sql.DB
+	// Auth resolves principals from sessions. It may be nil, in which case the
+	// protected authentication and user-management endpoints return
+	// UNAUTHORIZED.
+	Auth *auth.Service
+	// SecureCookies forces the Secure flag on session cookies even when the
+	// server did not observe TLS (e.g. behind a TLS-terminating proxy).
+	SecureCookies bool
 	// WebUI serves the embedded (or overridden) frontend at "/". It may be
 	// nil, in which case API routes still work but the web UI is unavailable.
 	WebUI http.Handler
@@ -29,18 +40,40 @@ type Dependencies struct {
 // call Handler() to obtain the http.Handler.
 func New(deps Dependencies) *Server {
 	return &Server{
-		logger: deps.Logger,
-		db:     deps.DB,
-		web:    deps.WebUI,
+		logger:        deps.Logger,
+		db:            deps.DB,
+		web:           deps.WebUI,
+		auth:          deps.Auth,
+		secureCookies: deps.SecureCookies,
 	}
 }
 
-// Handler builds the fully-middlware-wrapped http.Handler for this Server.
+// Handler builds the fully-middleware-wrapped http.Handler for this Server.
+//
+// Route policy: everything under /api/v1/ is registered explicitly; health,
+// version, auth bootstrap/status/login are public, and the remaining auth and
+// user-management routes require a session (admin role where noted). Unknown
+// /api/ routes still receive the JSON 404 envelope.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/version", s.handleVersion)
+
+	// Public authentication surface.
+	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/v1/auth/bootstrap", s.handleBootstrap)
+	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+
+	// Session-required surface.
+	mux.HandleFunc("POST /api/v1/auth/logout", s.requireSession(s.handleLogout))
+	mux.Handle("GET /api/v1/auth/me", s.withAuth(allowAny, s.handleMe))
+
+	// Admin surface.
+	mux.Handle("GET /api/v1/users", s.withAuth(allowAdmin, s.handleListUsers))
+	mux.Handle("POST /api/v1/users", s.withAuth(allowAdmin, s.handleCreateUser))
+	mux.Handle("POST /api/v1/users/{id}/sessions/revoke", s.withAuth(allowAdmin, s.handleRevokeUserSessions))
+
 	mux.Handle("/api/", s.handleAPIUnknown())
 
 	if s.web != nil {
@@ -53,6 +86,18 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	return WithMiddleware(s.logger, mux)
+}
+
+// requireSession wraps a plain http.HandlerFunc with authentication. The
+// session is authenticated and discarded; handlers that need the principal use
+// withAuth instead.
+func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.currentUser(w, r); !ok {
+			return
+		}
+		next(w, r)
+	}
 }
 
 // handleAPIUnknown returns a JSON 404 for any unmatched /api/ request,
