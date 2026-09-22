@@ -1,0 +1,101 @@
+/**
+ * Cairn design tokens.
+ *
+ * The palette is inspired by natural pebbles and handmade clay: warm clay,
+ * terracotta, peach, sunlight, moss, and river stones. Dark mode is deep clay
+ * and river stones at evening — never pure black.
+ *
+ * Tokens are consumed as CSS custom properties on :root and [data-theme].
+ */
+:root,
+:root[data-theme='light'] {
+  --bg: #f7ede2;
+  --surface: #fff7ef;
+  --surface-elevated: #fffdfc;
+
+  --text-primary: #3d332d;
+  --text-secondary: #77675d;
+  --text-muted: #a59488;
+
+  --border: #e8d5c5;
+  --border-subtle: #f0e4da;
+
+  --primary: #c96f52;
+  --primary-hover: #b95f45;
+
+  --accent: #e89a63;
+  --accent-soft: #f5c7a5;
+
+  --yellow: #e8be62;
+  --green: #8da878;
+  --blue: #82a9b8;
+  --pink: #d9908d;
+
+  --selection: #f3cdb4;
+
+  --success: #7f9d72;
+  --warning: #d39a4e;
+  --danger: #c96a61;
+
+  --shadow-1: 0 1px 2px rgba(61, 51, 45, 0.08);
+  --shadow-2: 0 2px 8px rgba(61, 51, 45, 0.1);
+  --shadow-3: 0 6px 20px rgba(61, 51, 45, 0.16);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --font-brand: 'Handlee', cursive;
+  --font-ui: 'Fira Sans', system-ui, -apple-system, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --sidebar-width: 240px;
+}
+
+:root[data-theme='dark'] {
+  --bg: #29221f;
+  --surface: #352b27;
+  --surface-elevated: #40332e;
+
+  --text-primary: #f5e8dc;
+  --text-secondary: #c5b3a5;
+  --text-muted: #907f74;
+
+  --border: #4c3d35;
+  --border-subtle: #40342f;
+
+  --primary: #e28a68;
+  --primary-hover: #ed9a76;
+
+  --accent: #f0aa70;
+  --accent-soft: #62443a;
+
+  --yellow: #e5bc68;
+  --green: #9caf86;
+  --blue: #88b0bc;
+  --pink: #d99792;
+
+  --selection: #5a4036;
+
+  --success: #91aa82;
+  --warning: #d6a45a;
+  --danger: #d77b70;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+  }
+}

@@ -1,0 +1,142 @@
+openapi: 3.0.3
+info:
+  title: Cairn API
+  version: 0.1.0
+  description: >
+    Cairn is a self-hosted personal media, file, and memory server. This
+    specification is the complete contract for the HTTP API. A client (web app,
+    React Native, desktop, CLI) can be built against this document alone.
+
+    The API is versioned in the URL. Response bodies and error envelopes follow
+    the conventions in docs/api.md — in particular every error is a JSON object
+    of the shape defined by the ErrorResponse schema, and every response carries
+    an X-Request-ID header.
+  termsOfService: https://example.com/terms # placeholder until licensing is decided
+  contact:
+    name: Cairn
+    url: https://github.com/Jishnu-Prasad888/Cairn
+servers:
+  - url: http://127.0.0.1:8715/api/v1
+    description: Local default
+tags:
+  - name: System
+    description: Liveness, versions, and server-wide metadata
+paths:
+  /health:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: Report server liveness and dependency health
+      description: >
+        Pings the server database with a short timeout. Suitable for container
+        health checks and orchestration probes. The endpoint returns 200 even
+        when dependencies are down so probes can distinguish a live-but-degraded
+        server from an unreachable one.
+      responses:
+        '200':
+          description: Server status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              examples:
+                ok:
+                  value:
+                    status: ok
+                    database: ok
+                degraded:
+                  summary: Database unavailable, server still running
+                  value:
+                    status: degraded
+                    database: error
+
+  /version:
+    get:
+      tags: [System]
+      operationId: getVersion
+      summary: Report the running binary's build metadata
+      responses:
+        '200':
+          description: Build metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Version'
+
+components:
+  schemas:
+    ErrorBody:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+          description: >
+            Stable machine-readable error code. Clients branch on this value.
+            See docs/api.md for the canonical list.
+          example: NOT_FOUND
+        message:
+          type: string
+          description: Human-readable message. May change; do not match on it.
+          example: The requested resource was not found.
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured context.
+        request_id:
+          type: string
+          description: Correlates this error with server logs.
+          example: b6f3329ae5c8f1d04c5a22e3a1b2c3d4
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+    Health:
+      type: object
+      required: [status, database]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          description: Overall server status.
+        database:
+          type: string
+          enum: [ok, error]
+          description: Status of the server-level database check.
+    Version:
+      type: object
+      required: [version, commit, build_date, go_version, platform]
+      properties:
+        version:
+          type: string
+          description: Semantic version; "dev" for local builds.
+          example: dev
+        commit:
+          type: string
+          description: Git commit the binary was built from.
+          example: 1a2b3c4
+        build_date:
+          type: string
+          example: 2026-09-22T14:06:56Z
+        go_version:
+          type: string
+          example: go1.26.4
+        platform:
+          type: string
+          description: os/arch the binary was built for.
+          example: linux/amd64
+  parameters:
+    RequestIdHeader:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: >
+        Client-provided request identifier echoed in the response header and in
+        error bodies. Must be 1-128 chars of letters, digits, '-', '_', ':'.
+      schema:
+        type: string
+  # Security schemes are intentionally empty in Phase 0. Authentication
+  # (sessions via HTTP-only cookies, and bearer support for server-to-server
+  # clients) arrives in Phase 1 and will be declared here.
