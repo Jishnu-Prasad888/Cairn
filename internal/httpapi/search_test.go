@@ -11,14 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
-	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
-	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 )
 
 // --- shared test infrastructure ---
@@ -71,34 +68,6 @@ func newSearchTestServer(t *testing.T) (http.Handler, *testClient, string) {
 }
 
 // seedLibraryFile inserts a file directly into the per-library database.
-func seedLibraryFile(t *testing.T, libRoot, relPath string) string {
-	t.Helper()
-	cairnDir := filepath.Join(libRoot, ".cairn")
-	ldb, err := librarydb.Open(cairnDir)
-	if err != nil {
-		t.Fatalf("open library db: %v", err)
-	}
-	defer func() { _ = ldb.Close() }()
-
-	fs := media.NewFileStore(ldb, "lib")
-	if err := fs.UpsertFromPath(context.Background(), relPath, 100, time.Now()); err != nil {
-		t.Fatalf("seed %s: %v", relPath, err)
-	}
-	f, err := fs.GetByRelPath(context.Background(), relPath)
-	if err != nil {
-		t.Fatalf("get seeded file: %v", err)
-	}
-	return f.ID
-}
-
-// libRootOf returns the library root for a registered library.
-func libRootOf(t *testing.T, pool interface {
-	QueryRowContext(context.Context, string, ...any) interface{ Scan(...any) error }
-}, libID string) string {
-	t.Helper()
-	return "" // We'll derive it differently below.
-}
-
 // doJSON2 is a helper that sends an authenticated request.
 func (c *testClient) do(t *testing.T, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -175,10 +144,10 @@ func TestHandleListTags_Empty(t *testing.T) {
 	var resp struct {
 		Tags []any `json:"tags"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
-	if resp.Tags == nil {
-		// nil or empty slice; both acceptable, JSON marshalled as [].
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
+	// nil or empty slice both acceptable
 }
 
 func TestHandleCreateTag(t *testing.T) {
@@ -239,7 +208,9 @@ func TestHandleDeleteTag(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"tag"`
 	}
-	json.Unmarshal(create.Body.Bytes(), &cr)
+	if err := json.Unmarshal(create.Body.Bytes(), &cr); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
 
 	rec := client.do(t, http.MethodDelete,
 		"/api/v1/libraries/"+libID+"/tags/"+cr.Tag.ID, nil)
@@ -275,7 +246,9 @@ func TestHandleListTags_AfterCreate(t *testing.T) {
 			Name string `json:"name"`
 		} `json:"tags"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(resp.Tags) != 2 {
 		t.Errorf("tag count = %d, want 2", len(resp.Tags))
 	}
