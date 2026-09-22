@@ -112,10 +112,10 @@ func TestResetStuck(t *testing.T) {
 
 	// Manually insert a "running" job to simulate a stuck state.
 	id, _ := q.Enqueue(ctx, jobs.KindIndex, nil)
-	db := q.RawDB() // exposed for testing only
+	rawDB := q.RawDB()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := db.ExecContext(ctx,
+	if _, err := rawDB.ExecContext(ctx,
 		`UPDATE index_jobs SET status = 'running', started_at = ? WHERE id = ?`,
 		now, id); err != nil {
 		t.Fatalf("set running: %v", err)
@@ -141,27 +141,18 @@ func TestWorkerExecutesJob(t *testing.T) {
 	ctx := context.Background()
 
 	var executed atomic.Bool
-	w.Register(jobs.KindIndex, func(ctx context.Context, job *jobs.Job) error {
+	w.Register(jobs.KindIndex, func(_ context.Context, _ *jobs.Job) error {
 		executed.Store(true)
 		return nil
 	})
 
 	id, _ := q.Enqueue(ctx, jobs.KindIndex, nil)
 
-	// Run with a context that cancels after the first job.
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	done := make(chan struct{})
-	go func() {
-		w.RunOnce(runCtx)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("worker did not finish in time")
+	if err := w.RunOnce(runCtx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
 	}
 
 	if !executed.Load() {
@@ -179,18 +170,19 @@ func TestWorkerRetryOnFailure(t *testing.T) {
 	w := newTestWorker(t, q)
 	ctx := context.Background()
 
-	var attempts atomic.Int32
-	w.Register(jobs.KindIndex, func(ctx context.Context, job *jobs.Job) error {
-		attempts.Add(1)
+	w.Register(jobs.KindIndex, func(_ context.Context, _ *jobs.Job) error {
 		return errors.New("transient error")
 	})
 
 	id, _ := q.Enqueue(ctx, jobs.KindIndex, nil)
 
-	// Execute the job once; it should fail and be re-queued for retry.
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	w.RunOnce(runCtx)
+
+	// Execute the job once; it should fail and be re-queued for retry.
+	if err := w.RunOnce(runCtx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
 
 	job, _ := q.Get(ctx, id)
 	// After one failure below max_attempts, should be back to queued.
@@ -207,22 +199,25 @@ func TestWorkerPermanentFailure(t *testing.T) {
 	w := newTestWorker(t, q)
 	ctx := context.Background()
 
-	w.Register(jobs.KindIndex, func(ctx context.Context, job *jobs.Job) error {
+	w.Register(jobs.KindIndex, func(_ context.Context, _ *jobs.Job) error {
 		return errors.New("permanent error")
 	})
 
 	id, _ := q.Enqueue(ctx, jobs.KindIndex, nil)
 
 	// Force max_attempts to 1 so a single failure results in permanent failure.
-	db := q.RawDB()
-	if _, err := db.ExecContext(ctx,
+	rawDB := q.RawDB()
+	if _, err := rawDB.ExecContext(ctx,
 		`UPDATE index_jobs SET max_attempts = 1 WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	w.RunOnce(runCtx)
+
+	if err := w.RunOnce(runCtx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
 
 	job, _ := q.Get(ctx, id)
 	if job.Status != jobs.StatusFailed {
