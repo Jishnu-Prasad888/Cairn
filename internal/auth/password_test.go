@@ -6,22 +6,22 @@ import (
 )
 
 func TestHashAndVerifyPassword(t *testing.T) {
-	hash, err := hashPassword("correct horse battery staple")
+	hash, err := HashPassword("correct horse battery staple")
 	if err != nil {
-		t.Fatalf("hashPassword: %v", err)
+		t.Fatalf("HashPassword: %v", err)
 	}
 
-	ok, err := verifyPassword("correct horse battery staple", hash)
+	ok, err := VerifyPassword("correct horse battery staple", hash)
 	if err != nil {
-		t.Fatalf("verifyPassword: %v", err)
+		t.Fatalf("VerifyPassword: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected password to verify")
 	}
 
-	ok, err = verifyPassword("wrong password", hash)
+	ok, err = VerifyPassword("wrong password", hash)
 	if err != nil {
-		t.Fatalf("verifyPassword (wrong): %v", err)
+		t.Fatalf("VerifyPassword (wrong): %v", err)
 	}
 	if ok {
 		t.Fatal("wrong password must not verify")
@@ -29,11 +29,11 @@ func TestHashAndVerifyPassword(t *testing.T) {
 }
 
 func TestHashesAreSalted(t *testing.T) {
-	h1, err := hashPassword("same password")
+	h1, err := HashPassword("same password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	h2, err := hashPassword("same password")
+	h2, err := HashPassword("same password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,22 +49,22 @@ func TestVerifyPasswordRejectsMalformedHash(t *testing.T) {
 		"$argon2id$v=19$m=65536,t=3,p=2$c2FsdA",
 		"not-a-phc-hash",
 	} {
-		if _, err := verifyPassword("pw", bad); err == nil {
-			t.Errorf("verifyPassword(%q): expected error, got nil", bad)
+		if _, err := VerifyPassword("pw", bad); err == nil {
+			t.Errorf("VerifyPassword(%q): expected error, got nil", bad)
 		}
 	}
 }
 
 func TestVerifyPasswordRejectsCorruptedKey(t *testing.T) {
-	hash, err := hashPassword("pw")
+	hash, err := HashPassword("pw")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Flip the final base64 char, corrupting the stored key.
 	corrupted := hash[:len(hash)-1] + "a"
-	ok, err := verifyPassword("pw", corrupted)
+	ok, err := VerifyPassword("pw", corrupted)
 	if err != nil {
-		t.Fatalf("verifyPassword corrupt: %v", err)
+		t.Fatalf("VerifyPassword corrupt: %v", err)
 	}
 	if ok {
 		t.Fatal("corrupted hash must not verify")
@@ -72,7 +72,7 @@ func TestVerifyPasswordRejectsCorruptedKey(t *testing.T) {
 }
 
 func TestParsePhcParamsRoundtrip(t *testing.T) {
-	hash, err := hashPassword("pw")
+	hash, err := HashPassword("pw")
 	if err != nil {
 		t.Fatal(err)
 	}

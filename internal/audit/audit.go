@@ -35,6 +35,10 @@ const (
 	ActionLibraryAdopted     = "libraries.adopted"
 	ActionLibraryRefreshed   = "libraries.refreshed"
 	ActionLibraryDeleted     = "libraries.deleted"
+	ActionGrantCreated       = "authz.grant_created"
+	ActionGrantRevoked       = "authz.grant_revoked"
+	ActionShareCreated       = "authz.share_created"
+	ActionShareRevoked       = "authz.share_revoked"
 )
 
 // Event is one audit record ready for persistence.
