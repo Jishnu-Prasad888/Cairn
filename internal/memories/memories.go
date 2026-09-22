@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/fts"
 	"github.com/Jishnu-Prasad888/Cairn/internal/markdown"
 )
 
@@ -317,13 +318,23 @@ func (s *MemoryStore) Search(ctx context.Context, q, cursor string, limit int) (
 		limit = 200
 	}
 
-	expr := sanitizeFTS(q)
+	expr, err := fts.BuildExpression(q)
+	if err != nil {
+		return nil, "", err
+	}
 	query := `
 		SELECT m.id, m.title, m.body, m.memory_date, m.deleted, m.created_at, m.updated_at
-		FROM fts_memories
-		JOIN memories m ON fts_memories.memory_id = m.id
-		WHERE fts_memories MATCH ? AND m.deleted = 0`
-	args := []any{expr}
+		FROM memories m
+		WHERE m.deleted = 0`
+	args := []any{}
+	if expr != "" {
+		query = `
+			SELECT m.id, m.title, m.body, m.memory_date, m.deleted, m.created_at, m.updated_at
+			FROM fts_memories
+			JOIN memories m ON fts_memories.memory_id = m.id
+			WHERE fts_memories MATCH ? AND m.deleted = 0`
+		args = append(args, expr)
+	}
 	if cursor != "" {
 		updatedAt, id, ok := decodeCursor(cursor)
 		if ok {
@@ -573,30 +584,4 @@ func parseOrNow(s string) time.Time {
 		return time.Now()
 	}
 	return t
-}
-
-// sanitizeFTS converts a raw user query into a safe FTS5 expression. Each
-// word is quoted and suffixed with * for prefix matching; characters that
-// could alter the query grammar are stripped.
-func sanitizeFTS(raw string) string {
-	replacer := strings.NewReplacer(
-		`*`, ``,
-		`(`, ``,
-		`)`, ``,
-		`^`, ``,
-		`-`, ` `,
-		`+`, ` `,
-		`:`, ` `,
-	)
-	clean := strings.TrimSpace(replacer.Replace(raw))
-	if clean == "" {
-		return `""`
-	}
-	words := strings.Fields(clean)
-	quoted := make([]string, 0, len(words))
-	for _, w := range words {
-		w = strings.ReplaceAll(w, `"`, `""`)
-		quoted = append(quoted, `"`+w+`"*`)
-	}
-	return strings.Join(quoted, " ")
 }
