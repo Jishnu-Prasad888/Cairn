@@ -317,7 +317,9 @@ func TestDeleteAlbumCascades(t *testing.T) {
 
 	fileID := seedFile(t, fs, "photo.jpg")
 	a, _ := store.Create(ctx, "cascade-album", "")
-	store.AddFile(ctx, a.ID, fileID)
+	if err := store.AddFile(ctx, a.ID, fileID); err != nil {
+		t.Fatalf("AddFile: %v", err)
+	}
 
 	// Delete the album; album_files rows should be gone.
 	if err := store.Delete(ctx, a.ID); err != nil {
