@@ -11,18 +11,21 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
+	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 )
 
 // --- shared test infrastructure ---
 
 // newSearchTestServer creates a fully-wired server with auth and a test library.
-// It returns the handler, an authenticated admin client, and the library ID.
-func newSearchTestServer(t *testing.T) (http.Handler, *testClient, string) {
+// It returns the handler, an authenticated admin client, the library ID, and the
+// library root (so tests can seed the per-library database).
+func newSearchTestServer(t *testing.T) (http.Handler, *testClient, string, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	pool, err := db.Open(filepath.Join(tmpDir, "test.db"))
@@ -64,7 +67,23 @@ func newSearchTestServer(t *testing.T) (http.Handler, *testClient, string) {
 	client.roundTrip(t, http.MethodPost, "/api/v1/auth/login",
 		`{"username":"admin","password":"correct-horse-battery"}`)
 
-	return handler, client, lib.ID
+	return handler, client, lib.ID, libRoot
+}
+
+// seedLibraryFile inserts an indexed file directly into the per-library DB.
+func seedLibraryFile(t *testing.T, libRoot, id, relPath string, size int64) error {
+	t.Helper()
+	ldb, err := librarydb.Open(filepath.Join(libRoot, ".cairn"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ldb.Close() }()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = ldb.Exec(`INSERT INTO indexed_files
+		(id, rel_path, size_bytes, mod_time, content_hash, status, first_seen_at, last_seen_at, indexed_at)
+		VALUES (?, ?, ?, ?, NULL, 'present', ?, ?, ?)`,
+		id, relPath, size, now, now, now, now)
+	return err
 }
 
 // seedLibraryFile inserts a file directly into the per-library database.
@@ -97,7 +116,7 @@ func (c *testClient) do(t *testing.T, method, path string, body any) *httptest.R
 // --- search tests ---
 
 func TestHandleSearch_EmptyQuery(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodGet,
 		"/api/v1/libraries/"+libID+"/search", nil)
@@ -113,7 +132,7 @@ func TestHandleSearch_EmptyQuery(t *testing.T) {
 }
 
 func TestHandleSearch_Unauthenticated(t *testing.T) {
-	h, _, libID := newSearchTestServer(t)
+	h, _, libID, _ := newSearchTestServer(t)
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/libraries/"+libID+"/search", nil)
 	rec := httptest.NewRecorder()
@@ -124,7 +143,7 @@ func TestHandleSearch_Unauthenticated(t *testing.T) {
 }
 
 func TestHandleSearch_LibraryNotFound(t *testing.T) {
-	_, client, _ := newSearchTestServer(t)
+	_, client, _, _ := newSearchTestServer(t)
 	rec := client.do(t, http.MethodGet,
 		"/api/v1/libraries/nonexistent/search", nil)
 	if rec.Code != http.StatusNotFound {
@@ -135,7 +154,7 @@ func TestHandleSearch_LibraryNotFound(t *testing.T) {
 // --- tags tests ---
 
 func TestHandleListTags_Empty(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodGet, "/api/v1/libraries/"+libID+"/tags", nil)
 	if rec.Code != http.StatusOK {
@@ -151,7 +170,7 @@ func TestHandleListTags_Empty(t *testing.T) {
 }
 
 func TestHandleCreateTag(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/tags",
 		map[string]string{"name": "nature", "color": "#00ff00"})
@@ -177,7 +196,7 @@ func TestHandleCreateTag(t *testing.T) {
 }
 
 func TestHandleCreateTag_MissingName(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/tags",
 		map[string]string{"color": "#ff0000"})
@@ -187,7 +206,7 @@ func TestHandleCreateTag_MissingName(t *testing.T) {
 }
 
 func TestHandleCreateTag_Duplicate(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/tags",
 		map[string]string{"name": "dup"})
@@ -199,7 +218,7 @@ func TestHandleCreateTag_Duplicate(t *testing.T) {
 }
 
 func TestHandleDeleteTag(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	create := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/tags",
 		map[string]string{"name": "to-delete"})
@@ -220,7 +239,7 @@ func TestHandleDeleteTag(t *testing.T) {
 }
 
 func TestHandleDeleteTag_NotFound(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodDelete,
 		"/api/v1/libraries/"+libID+"/tags/ghost", nil)
@@ -230,7 +249,7 @@ func TestHandleDeleteTag_NotFound(t *testing.T) {
 }
 
 func TestHandleListTags_AfterCreate(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/tags",
 		map[string]string{"name": "beta"})
@@ -257,7 +276,7 @@ func TestHandleListTags_AfterCreate(t *testing.T) {
 // --- albums tests ---
 
 func TestHandleListAlbums_Empty(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodGet, "/api/v1/libraries/"+libID+"/albums", nil)
 	if rec.Code != http.StatusOK {
@@ -266,7 +285,7 @@ func TestHandleListAlbums_Empty(t *testing.T) {
 }
 
 func TestHandleCreateAlbum(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/albums",
 		map[string]string{"name": "Summer Trip", "description": "2023 Italy"})
@@ -295,7 +314,7 @@ func TestHandleCreateAlbum(t *testing.T) {
 }
 
 func TestHandleCreateAlbum_MissingName(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/albums",
 		map[string]string{"description": "no name"})
@@ -305,7 +324,7 @@ func TestHandleCreateAlbum_MissingName(t *testing.T) {
 }
 
 func TestHandleDeleteAlbum(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	create := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/albums",
 		map[string]string{"name": "to-delete"})
@@ -326,7 +345,7 @@ func TestHandleDeleteAlbum(t *testing.T) {
 }
 
 func TestHandleDeleteAlbum_NotFound(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodDelete,
 		"/api/v1/libraries/"+libID+"/albums/ghost", nil)
@@ -336,7 +355,7 @@ func TestHandleDeleteAlbum_NotFound(t *testing.T) {
 }
 
 func TestHandleListAlbumFiles_Empty(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	create := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/albums",
 		map[string]string{"name": "empty"})
@@ -359,7 +378,7 @@ func TestHandleListAlbumFiles_Empty(t *testing.T) {
 // --- favorites tests ---
 
 func TestHandleListFavorites_Empty(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodGet, "/api/v1/libraries/"+libID+"/favorites", nil)
 	if rec.Code != http.StatusOK {
@@ -374,7 +393,7 @@ func TestHandleListFavorites_Empty(t *testing.T) {
 }
 
 func TestHandleAddFavorite_NotFound(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	// Adding a favorite for a file that doesn't exist in indexed_files
 	// will fail with a DB constraint or return an error based on the
@@ -389,7 +408,7 @@ func TestHandleAddFavorite_NotFound(t *testing.T) {
 }
 
 func TestHandleRemoveFavorite_NotFavorited(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	// Try to remove a favorite that doesn't exist.
 	rec := client.do(t, http.MethodDelete,
@@ -399,8 +418,155 @@ func TestHandleRemoveFavorite_NotFavorited(t *testing.T) {
 	}
 }
 
+func TestHandleSearch_InvalidQuery(t *testing.T) {
+	_, client, libID, _ := newSearchTestServer(t)
+
+	rec := client.do(t, http.MethodGet,
+		"/api/v1/libraries/"+libID+"/search?q=%22unterminated", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Error.Code != "BAD_REQUEST" {
+		t.Errorf("code = %q, want BAD_REQUEST", resp.Error.Code)
+	}
+}
+
+func TestHandleSearch_TagFilter(t *testing.T) {
+	_, client, libID, libRoot := newSearchTestServer(t)
+
+	if err := seedLibraryFile(t, libRoot, "f1", "holiday/beach.jpg", 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedLibraryFile(t, libRoot, "f2", "work/report.pdf", 200); err != nil {
+		t.Fatal(err)
+	}
+
+	var tagResp struct {
+		Tag struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"tag"`
+	}
+	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/tags",
+		map[string]string{"name": "Holiday"})
+	if err := json.Unmarshal(rec.Body.Bytes(), &tagResp); err != nil {
+		t.Fatalf("unmarshal tag: %v", err)
+	}
+
+	rec = client.do(t, http.MethodPost,
+		"/api/v1/libraries/"+libID+"/files/f1/tags",
+		map[string]string{"tag_id": tagResp.Tag.ID})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("attach status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = client.do(t, http.MethodGet,
+		"/api/v1/libraries/"+libID+"/search?tag=holiday", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Files) != 1 || resp.Files[0].ID != "f1" {
+		t.Errorf("tag filter returned %+v, want [f1]", resp.Files)
+	}
+}
+
+func TestHandleSearch_AlbumFilter(t *testing.T) {
+	_, client, libID, libRoot := newSearchTestServer(t)
+
+	if err := seedLibraryFile(t, libRoot, "f1", "a.jpg", 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedLibraryFile(t, libRoot, "f2", "b.jpg", 200); err != nil {
+		t.Fatal(err)
+	}
+
+	var albumResp struct {
+		Album struct {
+			ID string `json:"id"`
+		} `json:"album"`
+	}
+	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/albums",
+		map[string]string{"name": "Summer"})
+	if err := json.Unmarshal(rec.Body.Bytes(), &albumResp); err != nil {
+		t.Fatalf("unmarshal album: %v", err)
+	}
+
+	rec = client.do(t, http.MethodPost,
+		"/api/v1/libraries/"+libID+"/albums/"+albumResp.Album.ID+"/files/f1", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("add to album status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = client.do(t, http.MethodGet,
+		"/api/v1/libraries/"+libID+"/search?album="+albumResp.Album.ID, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Files) != 1 || resp.Files[0].ID != "f1" {
+		t.Errorf("album filter returned %+v, want [f1]", resp.Files)
+	}
+}
+
+func TestHandleSearch_SizeFilter(t *testing.T) {
+	_, client, libID, libRoot := newSearchTestServer(t)
+
+	if err := seedLibraryFile(t, libRoot, "small", "small.jpg", 1000); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedLibraryFile(t, libRoot, "big", "big.jpg", 9000); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := client.do(t, http.MethodGet,
+		"/api/v1/libraries/"+libID+"/search?min_size=5000", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Files) != 1 || resp.Files[0].ID != "big" {
+		t.Errorf("min_size filter returned %+v, want [big]", resp.Files)
+	}
+
+	rec = client.do(t, http.MethodGet,
+		"/api/v1/libraries/"+libID+"/search?min_size=10&max_size=5&q=beach", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("min>max status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleSearchUnauthenticated(t *testing.T) {
-	h, _, libID := newSearchTestServer(t)
+	h, _, libID, _ := newSearchTestServer(t)
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/libraries/"+libID+"/tags", nil)
 	rec := httptest.NewRecorder()
@@ -411,7 +577,7 @@ func TestHandleSearchUnauthenticated(t *testing.T) {
 }
 
 func TestHandleAlbumsUnauthenticated(t *testing.T) {
-	h, _, libID := newSearchTestServer(t)
+	h, _, libID, _ := newSearchTestServer(t)
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/libraries/"+libID+"/albums", nil)
 	rec := httptest.NewRecorder()
@@ -422,7 +588,7 @@ func TestHandleAlbumsUnauthenticated(t *testing.T) {
 }
 
 func TestHandleFavoritesUnauthenticated(t *testing.T) {
-	h, _, libID := newSearchTestServer(t)
+	h, _, libID, _ := newSearchTestServer(t)
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/libraries/"+libID+"/favorites", nil)
 	rec := httptest.NewRecorder()
