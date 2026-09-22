@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
@@ -35,6 +36,9 @@ func (s *Server) handleGetFileMetadata(w http.ResponseWriter, r *http.Request, u
 	f, err := store.GetByID(r.Context(), r.PathValue("fileID"))
 	if err != nil {
 		s.writeMediaError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, f.RelPath), authz.CapRead) {
 		return
 	}
 
@@ -131,6 +135,26 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 	fileID := r.PathValue("fileID")
 	thumbPath := metadata.ThumbPath(cairnDir, fileID)
 
+	// Resolve the file so the capability check runs on its resource key even
+	// when the thumbnail already exists on disk.
+	db, err := librarydb.Open(cairnDir)
+	if err != nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to open library database.")
+		return
+	}
+	defer func() { _ = db.Close() }()
+
+	store := media.NewFileStore(db, lib.ID)
+	f, err := store.GetByID(r.Context(), fileID)
+	if err != nil {
+		s.writeMediaError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, f.RelPath), authz.CapRead) {
+		return
+	}
+
 	// If thumbnail exists, serve it directly.
 	if info, err := os.Stat(thumbPath); err == nil {
 		tf, err := os.Open(thumbPath)
@@ -146,21 +170,6 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 	}
 
 	// Thumbnail not found — try on-demand generation.
-	db, err := librarydb.Open(cairnDir)
-	if err != nil {
-		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
-			CodeInternal, "Failed to open library database.")
-		return
-	}
-	defer func() { _ = db.Close() }()
-
-	store := media.NewFileStore(db, lib.ID)
-	f, err := store.GetByID(r.Context(), fileID)
-	if err != nil {
-		s.writeMediaError(w, r, err)
-		return
-	}
-
 	absPath := filepath.Join(lib.Root, filepath.FromSlash(f.RelPath))
 	generated, err := metadata.GenerateThumbnail(absPath, cairnDir, fileID)
 	if err != nil || !generated {

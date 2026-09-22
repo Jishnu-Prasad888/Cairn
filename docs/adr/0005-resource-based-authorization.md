@@ -1,6 +1,6 @@
 # 0005 — Resource-based authorization with inheritance
 
-- Status: accepted
+- Status: implemented
 - Date: 2026-09-22
 
 ## Context
@@ -36,5 +36,6 @@ Authorization is implemented as a dedicated subsystem, never as scattered
 - Permission logic is testable against large trees (dedicated authorization test
   suite).
 - New resource types integrate by declaring their place in the hierarchy.
-- This model is implemented in a later phase but the package boundary and
-  testing commitment are architectural, hence recorded now.
+- Implemented in Phase 6: the `internal/authz` subsystem backs every content
+  handler, with grants/shares persisted server-side and evaluated per
+  ADR-0005 semantics. See docs/permissions.md and docs/sharing.md.
