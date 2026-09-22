@@ -17,6 +17,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/config"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/httpapi"
+	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/logging"
 	"github.com/Jishnu-Prasad888/Cairn/internal/version"
 	"github.com/Jishnu-Prasad888/Cairn/internal/webui"
@@ -74,6 +75,16 @@ func run() error {
 	}
 	cancelPrune()
 
+	// Registered storage libraries; reconcile connectivity at startup so a
+	// disconnected disk is surfaced as offline immediately.
+	libraries := library.NewManager(pool, logger, auditSvc)
+	refreshCtx, cancelRefresh := context.WithTimeout(ctx, 15*time.Second)
+	if err := libraries.RefreshAll(refreshCtx); err != nil {
+		cancelRefresh()
+		return err
+	}
+	cancelRefresh()
+
 	// Frontend: the embedded build by default, an on-disk build in development.
 	webHandler, err := webui.Handler(cfg.WebDistDir)
 	if err != nil {
@@ -85,6 +96,7 @@ func run() error {
 		Logger:        logger,
 		DB:            pool,
 		Auth:          authSvc,
+		Libraries:     libraries,
 		SecureCookies: cfg.CookieSecure,
 		WebUI:         webHandler,
 	})
