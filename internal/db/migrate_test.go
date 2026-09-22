@@ -29,8 +29,8 @@ func TestMigrateAppliesEmbeddedMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LatestVersion: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("LatestVersion = %d, want 1", version)
+	if version != 2 {
+		t.Errorf("LatestVersion = %d, want 2", version)
 	}
 
 	// Baseline table must exist.
@@ -41,13 +41,21 @@ func TestMigrateAppliesEmbeddedMigrations(t *testing.T) {
 		t.Fatalf("server_settings table missing: %v", err)
 	}
 
-	// schema_migrations must record the applied migration.
+	// Auth tables from migration 0002 must exist.
+	for _, table := range []string{"users", "sessions", "audit_log"} {
+		q := `SELECT name FROM sqlite_master WHERE type='table' AND name='` + table + `'`
+		if err := pool.QueryRow(q).Scan(&name); err != nil {
+			t.Errorf("table %s missing: %v", table, err)
+		}
+	}
+
+	// schema_migrations must record the applied migrations.
 	var count int
 	if err := pool.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1", count)
+	if count != 2 {
+		t.Errorf("schema_migrations rows = %d, want 2", count)
 	}
 }
 
@@ -65,8 +73,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := pool.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1 after re-run", count)
+	if count != 2 {
+		t.Errorf("schema_migrations rows = %d, want 2 after re-run", count)
 	}
 }
 
