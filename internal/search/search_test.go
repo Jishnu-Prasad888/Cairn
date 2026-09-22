@@ -14,21 +14,6 @@ import (
 
 // --- test helpers ---
 
-func newTestStore(t *testing.T) *search.SearchStore {
-	t.Helper()
-	root := t.TempDir()
-	cairnDir := filepath.Join(root, ".cairn")
-	if err := os.MkdirAll(cairnDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	db, err := librarydb.Open(cairnDir)
-	if err != nil {
-		t.Fatalf("open library db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return search.NewSearchStore(db, "lib1")
-}
-
 // newTestStoreWithMediaStore returns a SearchStore and a FileStore backed by
 // the same database so tests can seed indexed_files.
 func newTestStoreWithMediaStore(t *testing.T) (*search.SearchStore, *media.FileStore) {
@@ -54,13 +39,6 @@ func seedFile(t *testing.T, fs *media.FileStore, relPath string) {
 	if err != nil {
 		t.Fatalf("seed %s: %v", relPath, err)
 	}
-}
-
-// populateFTS inserts a file_id + path directly into fts_files for tests that
-// don't rely on triggers (the pure-Go SQLite driver supports FTS5 triggers but
-// we seed via UpsertFromPath, which fires the INSERT trigger).
-func populateFTS(_ *testing.T, _ *media.FileStore, _ string) {
-	// The trigger on indexed_files fires automatically; nothing extra needed.
 }
 
 // --- tests ---

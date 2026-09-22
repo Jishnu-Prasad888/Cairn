@@ -130,9 +130,15 @@ func TestList(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	store.Create(ctx, "Charlie", "")
-	store.Create(ctx, "Alpha", "")
-	store.Create(ctx, "Bravo", "")
+	if _, err := store.Create(ctx, "Charlie", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, "Alpha", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, "Bravo", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	as, err := store.List(ctx)
 	if err != nil {
@@ -229,8 +235,12 @@ func TestAddFileIdempotent(t *testing.T) {
 	fileID := seedFile(t, fs, "photo.jpg")
 	a, _ := store.Create(ctx, "Album", "")
 
-	store.AddFile(ctx, a.ID, fileID)
-	store.AddFile(ctx, a.ID, fileID) // second add is no-op
+	if err := store.AddFile(ctx, a.ID, fileID); err != nil {
+		t.Fatalf("first AddFile: %v", err)
+	}
+	if err := store.AddFile(ctx, a.ID, fileID); err != nil { // second add is no-op
+		t.Fatal(err)
+	}
 
 	files, _ := store.ListFiles(ctx, a.ID)
 	if len(files) != 1 {
@@ -263,9 +273,15 @@ func TestListFilesOrder(t *testing.T) {
 	a, _ := store.Create(ctx, "Ordered", "")
 
 	// Add in order; positions should be 0, 1, 2.
-	store.AddFile(ctx, a.ID, f1)
-	store.AddFile(ctx, a.ID, f2)
-	store.AddFile(ctx, a.ID, f3)
+	if err := store.AddFile(ctx, a.ID, f1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddFile(ctx, a.ID, f2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddFile(ctx, a.ID, f3); err != nil {
+		t.Fatal(err)
+	}
 
 	files, err := store.ListFiles(ctx, a.ID)
 	if err != nil {

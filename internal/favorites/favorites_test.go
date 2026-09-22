@@ -67,7 +67,9 @@ func TestAddFavoriteAlreadyFavorited(t *testing.T) {
 	ctx := context.Background()
 
 	fileID := seedFile(t, fs, "photo.jpg")
-	store.Add(ctx, fileID)
+	if err := store.Add(ctx, fileID); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
 
 	err := store.Add(ctx, fileID)
 	if !errors.Is(err, favorites.ErrAlreadyFavorited) {
@@ -131,8 +133,12 @@ func TestListFiles(t *testing.T) {
 	f2 := seedFile(t, fs, "photo2.jpg")
 	seedFile(t, fs, "photo3.jpg") // not favorited
 
-	store.Add(ctx, f1)
-	store.Add(ctx, f2)
+	if err := store.Add(ctx, f1); err != nil {
+		t.Fatalf("Add f1: %v", err)
+	}
+	if err := store.Add(ctx, f2); err != nil {
+		t.Fatalf("Add f2: %v", err)
+	}
 
 	files, err := store.ListFiles(ctx)
 	if err != nil {
@@ -159,7 +165,9 @@ func TestListFilesHasMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	fileID := seedFile(t, fs, "cat.jpg")
-	store.Add(ctx, fileID)
+	if err := store.Add(ctx, fileID); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
 
 	files, err := store.ListFiles(ctx)
 	if err != nil {

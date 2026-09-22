@@ -201,7 +201,7 @@ func TestListEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if ts != nil && len(ts) != 0 {
+	if len(ts) != 0 {
 		t.Errorf("expected empty list, got %v", ts)
 	}
 }
@@ -307,8 +307,12 @@ func TestListByFile(t *testing.T) {
 	t1, _ := store.Create(ctx, "nature", "")
 	t2, _ := store.Create(ctx, "travel", "")
 
-	store.Attach(ctx, fileID, t1.ID)
-	store.Attach(ctx, fileID, t2.ID)
+	if err := store.Attach(ctx, fileID, t1.ID); err != nil {
+		t.Fatalf("Attach t1: %v", err)
+	}
+	if err := store.Attach(ctx, fileID, t2.ID); err != nil {
+		t.Fatalf("Attach t2: %v", err)
+	}
 
 	ts, err := store.ListByFile(ctx, fileID)
 	if err != nil {
@@ -341,8 +345,12 @@ func TestListByTag(t *testing.T) {
 	f2 := seedFile(t, fs, "b.jpg")
 	tag, _ := store.Create(ctx, "shared-tag", "")
 
-	store.Attach(ctx, f1, tag.ID)
-	store.Attach(ctx, f2, tag.ID)
+	if err := store.Attach(ctx, f1, tag.ID); err != nil {
+		t.Fatalf("Attach f1: %v", err)
+	}
+	if err := store.Attach(ctx, f2, tag.ID); err != nil {
+		t.Fatalf("Attach f2: %v", err)
+	}
 
 	fileIDs, err := store.ListByTag(ctx, tag.ID)
 	if err != nil {
