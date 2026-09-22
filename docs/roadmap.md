@@ -50,15 +50,16 @@ clusters, and cleanup workflows — driven by the in-place indexing contract.
 Resource-based permissions and public share links implemented per ADR-0005 and
 docs/permissions.md, docs/sharing.md.
 
-## Phase 7 — Memories and full-text search (planned)
+## Phase 7 — Memories and full-text search (implemented)
 
 Markdown memories, internal references, keyword search over filenames/paths/
 memories with FTS5. Design: docs/memories.md, docs/search.md.
 
-## Phase 8 — Memories, editor, wikilinks (planned)
+## Phase 8 — Memories, editor, wikilinks (implemented)
 
 Obsidian-style editor with live preview, autosave, version history, wiki-style
-object links, and MediaEmbed rendering. Design: docs/markdown.md.
+object links, and MediaEmbed rendering (MediaEmbed still pending).
+Design: docs/markdown.md.
 
 ## Phase 9 — Search depth (planned)
 
