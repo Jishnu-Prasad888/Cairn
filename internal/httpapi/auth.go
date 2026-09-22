@@ -106,8 +106,8 @@ func (s *Server) currentUser(w http.ResponseWriter, r *http.Request) (*auth.User
 }
 
 // AllowFunc decides whether an authenticated principal may reach a handler.
-// Phase 9 replaces this with the resource-based permission subsystem; for now
-// one sanctioned gate (admin vs any user) keeps role checks in a single place.
+// Resource-based authorization (ADR-0005) enforces per-handler capabilities;
+// for now one sanctioned gate (admin vs any user) keeps role checks in a single place.
 type AllowFunc func(*auth.User) bool
 
 func allowAdmin(u *auth.User) bool { return u.Role == auth.RoleAdmin }
