@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 )
 
@@ -18,6 +19,7 @@ type Server struct {
 	web           http.Handler
 	auth          *auth.Service
 	libraries     *library.Manager
+	indexer       *indexer.IndexManager
 	secureCookies bool
 }
 
@@ -33,6 +35,9 @@ type Dependencies struct {
 	// Libraries registers and reconciles storage libraries. It may be nil, in
 	// which case the library-management endpoints return INTERNAL.
 	Libraries *library.Manager
+	// Indexer manages per-library scan jobs and index status. It may be nil,
+	// in which case the indexing endpoints return SERVICE_UNAVAILABLE.
+	Indexer *indexer.IndexManager
 	// SecureCookies forces the Secure flag on session cookies even when the
 	// server did not observe TLS (e.g. behind a TLS-terminating proxy).
 	SecureCookies bool
@@ -50,6 +55,7 @@ func New(deps Dependencies) *Server {
 		web:           deps.WebUI,
 		auth:          deps.Auth,
 		libraries:     deps.Libraries,
+		indexer:       deps.Indexer,
 		secureCookies: deps.SecureCookies,
 	}
 }
@@ -89,6 +95,9 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /api/v1/libraries/{id}", s.withAuth(allowAdmin, s.handleGetLibrary))
 		mux.Handle("POST /api/v1/libraries/{id}/refresh", s.withAuth(allowAdmin, s.handleRefreshLibrary))
 		mux.Handle("DELETE /api/v1/libraries/{id}", s.withAuth(allowAdmin, s.handleDeleteLibrary))
+		// Indexing surface (admin).
+		mux.Handle("POST /api/v1/libraries/{id}/index", s.withAuth(allowAdmin, s.handleTriggerIndex))
+		mux.Handle("GET /api/v1/libraries/{id}/index/status", s.withAuth(allowAdmin, s.handleIndexStatus))
 	}
 
 	mux.Handle("/api/", s.handleAPIUnknown())

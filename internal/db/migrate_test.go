@@ -29,8 +29,8 @@ func TestMigrateAppliesEmbeddedMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LatestVersion: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("LatestVersion = %d, want 3", version)
+	if version != 4 {
+		t.Errorf("LatestVersion = %d, want 4", version)
 	}
 
 	// Baseline table must exist.
@@ -55,8 +55,8 @@ func TestMigrateAppliesEmbeddedMigrations(t *testing.T) {
 	if err := pool.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
-	if count != 3 {
-		t.Errorf("schema_migrations rows = %d, want 3", count)
+	if count != 4 {
+		t.Errorf("schema_migrations rows = %d, want 4", count)
 	}
 }
 
@@ -74,8 +74,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := pool.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 3 {
-		t.Errorf("schema_migrations rows = %d, want 3 after re-run", count)
+	if count != 4 {
+		t.Errorf("schema_migrations rows = %d, want 4 after re-run", count)
 	}
 }
 
