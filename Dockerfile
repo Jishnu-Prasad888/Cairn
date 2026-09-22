@@ -21,15 +21,16 @@ COPY . .
 COPY --from=web /src/web/dist ./internal/webui/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags \
   "-s -w \
-  -X github.com/Jishnu-Prasad888/Cairn/internal/version.Version=$(VERSION) \
-  -X github.com/Jishnu-Prasad888/Cairn/internal/version.Commit=$(COMMIT) \
-  -X github.com/Jishnu-Prasad888/Cairn/internal/version.BuildDate=$(BUILD_DATE)" \
+  -X 'github.com/Jishnu-Prasad888/Cairn/internal/version.Version=${VERSION}' \
+  -X 'github.com/Jishnu-Prasad888/Cairn/internal/version.Commit=${COMMIT}' \
+  -X 'github.com/Jishnu-Prasad888/Cairn/internal/version.BuildDate=${BUILD_DATE}'" \
   -o /out/cairn ./cmd/cairn
 
 # --- Stage 3: minimal runtime ---
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata
-RUN addgroup -S cairn && adduser -S cairn -G cairn
+RUN addgroup -S cairn && adduser -S cairn -G cairn \
+  && mkdir -p /data && chown cairn:cairn /data
 COPY --from=build /out/cairn /usr/local/bin/cairn
 USER cairn
 ENV CAIRN_DATA_DIR=/data
