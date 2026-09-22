@@ -21,6 +21,12 @@ servers:
 tags:
   - name: System
     description: Liveness, versions, and server-wide metadata
+  - name: Authentication
+    description: Session lifecycle for browser and native clients
+  - name: Users
+    description: Account management (admin only)
+security:
+  - cookieAuth: []
 paths:
   /health:
     get:
@@ -32,6 +38,8 @@ paths:
         health checks and orchestration probes. The endpoint returns 200 even
         when dependencies are down so probes can distinguish a live-but-degraded
         server from an unreachable one.
+      security:
+        - {}
       responses:
         '200':
           description: Server status
@@ -55,6 +63,8 @@ paths:
       tags: [System]
       operationId: getVersion
       summary: Report the running binary's build metadata
+      security:
+        - {}
       responses:
         '200':
           description: Build metadata
@@ -62,6 +72,195 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Version'
+
+  /auth/status:
+    get:
+      tags: [Authentication]
+      operationId: getAuthStatus
+      summary: Report bootstrap and authentication state
+      description: >
+        Public. The web UI calls this on load to decide whether to show setup,
+        login, or the application. `bootstrap_required` is true only when no
+        account exists yet; `authenticated` reflects the optional session
+        cookie. When authenticated, `user` is present.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Current state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthStatus'
+
+  /auth/bootstrap:
+    post:
+      tags: [Authentication]
+      operationId: bootstrap
+      summary: Create the initial administrator account
+      description: >
+        Public, but only valid on a virgin server. Creates the first account
+        (always admin) and starts a session. Once any account exists every
+        further call is rejected with CONFLICT, so a provisioned server can be
+        pointed at by attackers without yielding anything.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRequest'
+      responses:
+        '201':
+          description: Admin account created and session started
+          headers:
+            Set-Cookie:
+              description: The cairn_session cookie (HttpOnly, SameSite=Lax)
+              schema:
+                $ref: '#/components/schemas/SessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      operationId: login
+      summary: Authenticate with credentials and start a session
+      description: >
+        Public. Valid credentials start a session and set the cairn_session
+        cookie. All failures — unknown username, wrong password, disabled
+        account — return the same UNAUTHORIZED body so responses never reveal
+        which part was wrong.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRequest'
+      responses:
+        '200':
+          description: Session started
+          headers:
+            Set-Cookie:
+              description: The cairn_session cookie (HttpOnly, SameSite=Lax)
+              schema:
+                $ref: '#/components/schemas/SessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      summary: Revoke the current session
+      description: >
+        Requires a session cookie. Revokes the session server-side and clears
+        the cookie. Idempotent.
+      responses:
+        '204':
+          description: Session revoked and cookie cleared
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      operationId: currentUser
+      summary: Return the authenticated principal
+      description: Requires a session cookie.
+      responses:
+        '200':
+          description: The current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List user accounts
+      description: Requires an admin session.
+      responses:
+        '200':
+          description: All accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Users]
+      operationId: createUser
+      summary: Create a user account
+      description: >
+        Requires an admin session. `role` defaults to `user`; the only valid
+        values are `admin` and `user`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /users/{id}/sessions/revoke:
+    post:
+      tags: [Users]
+      operationId: revokeUserSessions
+      summary: Invalidate every session for a user
+      description: >
+        Requires an admin session. Rejects with NOT_FOUND when the account does
+        not exist.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User id (returned by user endpoints)
+          schema:
+            type: string
+      responses:
+        '204':
+          description: All sessions for the user revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   schemas:
@@ -93,6 +292,85 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorBody'
+    User:
+      type: object
+      required: [id, username, role, created_at]
+      properties:
+        id:
+          type: string
+          description: Stable opaque account id.
+          example: 279674acccc95b5c
+        username:
+          type: string
+          description: Unique (case-insensitive) login name.
+          example: admin
+        role:
+          type: string
+          enum: [admin, user]
+          description: >
+            Initial convenience role. Phase 9 replaces role checks with the
+            resource-based permission model.
+        created_at:
+          type: string
+          format: date-time
+          example: 2026-09-22T15:27:17.365651564Z
+    UserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+    UserListEnvelope:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+    UserRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Login name; leading/trailing whitespace is trimmed.
+        password:
+          type: string
+          minLength: 8
+          maxLength: 1024
+          description: >
+            Plaintext password. Immutable transport requirement; see the
+            security posture (TLS via reverse proxy).
+        role:
+          type: string
+          enum: [admin, user]
+          description: Only meaningful when creating users; ignored elsewhere.
+    AuthStatus:
+      type: object
+      required: [bootstrap_required, authenticated]
+      properties:
+        bootstrap_required:
+          type: boolean
+          description: True only while no account exists.
+          example: true
+        authenticated:
+          type: boolean
+          description: Whether the request carried a valid session cookie.
+          example: false
+        user:
+          allOf:
+            - $ref: '#/components/schemas/User'
+          description: Present only when authenticated.
+    SessionCookie:
+      description: >
+        Storage directive only; clients never read or send this value by hand —
+        HTTP libraries manage the cookie jar. `cairn_session` is HttpOnly and
+        SameSite=Lax, and carries the Secure flag when served over TLS.
+      type: string
+      example: cairn_session=…; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000
     Health:
       type: object
       required: [status, database]
@@ -137,6 +415,45 @@ components:
         error bodies. Must be 1-128 chars of letters, digits, '-', '_', ':'.
       schema:
         type: string
-  # Security schemes are intentionally empty in Phase 0. Authentication
-  # (sessions via HTTP-only cookies, and bearer support for server-to-server
-  # clients) arrives in Phase 1 and will be declared here.
+  responses:
+    BadRequest:
+      description: Validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing, expired, or invalid session; or failed login
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated but not permitted (e.g. non-admin)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: The requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: The request conflicts with the current state (e.g. duplicate username or double bootstrap)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: cairn_session
+      description: >
+        Opaque session token issued by /auth/login or /auth/bootstrap and stored
+        in an HttpOnly, SameSite=Lax cookie. Only the SHA-256 digest is kept
+        server-side; sessions expire after 30 days and are revoked on logout.
+        By default every path requires this scheme; public endpoints declare
+        `security: [{}]` explicitly.
