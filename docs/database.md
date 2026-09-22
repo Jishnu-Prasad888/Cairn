@@ -41,6 +41,19 @@ Migrations are idempotent. Never edit an applied migration; add a new file.
 
 The runner is `internal/db.Migrate` / `MigrateFS` and applies to both scopes.
 
+Applied migrations:
+
+| File                     | Tables added                                   |
+| ------------------------ | ---------------------------------------------- |
+| `0001_baseline.sql`      | `server_settings`                              |
+| `0002_auth.sql`          | `users`, `sessions`, `audit_log`               |
+
+`users` stores argon2id `password_hash`, `role`, and enabled state; `sessions`
+stores only the SHA-256 digest (`token_hash`) of each opaque session token;
+`audit_log` records security events with optional actor/target and non-sensitive
+JSON `metadata`. See [authentication.md](authentication.md) and
+[security.md](security.md).
+
 ## Futures
 
 - FTS5 for full-text search (search phase).

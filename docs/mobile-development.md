@@ -11,7 +11,8 @@ client, but the API contract enables additional clients.
 - Sessions use HTTP-only cookies (Phase 1); a native client stores its cookie
   securely and presents it with every request (a persistent
   `URLSessionCookieStorage` / platform-equivalent is sufficient — no custom
-  token plumbing).
+  token plumbing). The web UI will log in by posting to `/api/v1/auth/login` and
+  letting the cookie jar hold `cairn_session`.
 - Handle the error envelope on every request and surface `message` + `request_id`
   to users who file bug reports.
 - Batch uploads/downloads through the documented streaming endpoints
