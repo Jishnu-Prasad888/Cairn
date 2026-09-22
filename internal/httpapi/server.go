@@ -110,6 +110,8 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAdmin, s.handleDeleteFile))
 		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/restore", s.withAuth(allowAdmin, s.handleRestoreFile))
 		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/permanent", s.withAuth(allowAdmin, s.handlePermanentDeleteFile))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/metadata", s.withAuth(allowAdmin, s.handleGetFileMetadata))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAdmin, s.handleGetThumbnail))
 
 		// Folders and trash.
 		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAdmin, s.handleListFolders))
