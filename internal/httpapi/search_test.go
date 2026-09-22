@@ -280,7 +280,9 @@ func TestHandleCreateAlbum(t *testing.T) {
 			Description string `json:"description"`
 		} `json:"album"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if resp.Album.ID == "" {
 		t.Error("album ID is empty")
 	}
@@ -312,7 +314,9 @@ func TestHandleDeleteAlbum(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"album"`
 	}
-	json.Unmarshal(create.Body.Bytes(), &cr)
+	if err := json.Unmarshal(create.Body.Bytes(), &cr); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
 
 	rec := client.do(t, http.MethodDelete,
 		"/api/v1/libraries/"+libID+"/albums/"+cr.Album.ID, nil)
@@ -341,7 +345,9 @@ func TestHandleListAlbumFiles_Empty(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"album"`
 	}
-	json.Unmarshal(create.Body.Bytes(), &cr)
+	if err := json.Unmarshal(create.Body.Bytes(), &cr); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
 
 	rec := client.do(t, http.MethodGet,
 		"/api/v1/libraries/"+libID+"/albums/"+cr.Album.ID+"/files", nil)
@@ -362,7 +368,9 @@ func TestHandleListFavorites_Empty(t *testing.T) {
 	var resp struct {
 		Files []any `json:"files"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 }
 
 func TestHandleAddFavorite_NotFound(t *testing.T) {

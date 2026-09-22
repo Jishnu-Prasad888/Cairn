@@ -156,7 +156,9 @@ func TestGetByName(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	store.Create(ctx, "myTag", "")
+	if _, err := store.Create(ctx, "myTag", ""); err != nil {
+		t.Fatal(err)
+	}
 	got, err := store.GetByName(ctx, "mytag") // case-insensitive
 	if err != nil {
 		t.Fatalf("GetByName: %v", err)
@@ -172,9 +174,15 @@ func TestList(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	store.Create(ctx, "beta", "")
-	store.Create(ctx, "alpha", "")
-	store.Create(ctx, "gamma", "")
+	if _, err := store.Create(ctx, "beta", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, "alpha", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, "gamma", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	ts, err := store.List(ctx)
 	if err != nil {
@@ -369,7 +377,9 @@ func TestDeleteTagCascades(t *testing.T) {
 
 	fileID := seedFile(t, fs, "photo.jpg")
 	tag, _ := store.Create(ctx, "cascade-tag", "")
-	store.Attach(ctx, fileID, tag.ID)
+	if err := store.Attach(ctx, fileID, tag.ID); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
 
 	// Delete the tag; file_tags row should be gone too.
 	if err := store.Delete(ctx, tag.ID); err != nil {

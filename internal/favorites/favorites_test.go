@@ -84,7 +84,9 @@ func TestRemoveFavorite(t *testing.T) {
 	ctx := context.Background()
 
 	fileID := seedFile(t, fs, "photo.jpg")
-	store.Add(ctx, fileID)
+	if err := store.Add(ctx, fileID); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
 
 	if err := store.Remove(ctx, fileID); err != nil {
 		t.Fatalf("Remove: %v", err)
@@ -195,7 +197,9 @@ func TestFavoriteRemovedWhenFileDeleted(t *testing.T) {
 	ctx := context.Background()
 
 	fileID := seedFile(t, fs, "photo.jpg")
-	store.Add(ctx, fileID)
+	if err := store.Add(ctx, fileID); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
 
 	// Delete the indexed_files row (permanent delete).
 	if err := fs.DeleteRow(ctx, fileID); err != nil {
