@@ -45,10 +45,11 @@ Design: docs/media.md.
 Albums, tags, folders-as-categories, people, favorites, duplicates, time
 clusters, and cleanup workflows — driven by the in-place indexing contract.
 
-## Phase 6 — Permissions and sharing (planned)
+## Phase 6 — Permissions and sharing (implemented)
 
 Resource-based permissions and public share links implemented per ADR-0005 and
-docs/permissions.md, docs/sharing.md.
+docs/permissions.md, docs/sharing.md. Authorization is enforced by every content
+handler and shares flow through the same evaluation.
 
 ## Phase 7 — Memories and full-text search (implemented)
 
