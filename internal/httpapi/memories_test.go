@@ -8,7 +8,7 @@ import (
 )
 
 func TestHandleMemories_Lifecycle(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	// Create.
 	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/memories",
@@ -114,7 +114,7 @@ func TestHandleMemories_Lifecycle(t *testing.T) {
 }
 
 func TestHandleListMemories_Search(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/memories",
 		map[string]string{"title": "Beach day", "body": "Sandy cove in June."})
@@ -138,7 +138,7 @@ func TestHandleListMemories_Search(t *testing.T) {
 }
 
 func TestHandleCreateMemory_Validation(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/memories",
 		map[string]string{"title": "", "body": "no title"})
@@ -148,7 +148,7 @@ func TestHandleCreateMemory_Validation(t *testing.T) {
 }
 
 func TestHandleGetMemory_NotFound(t *testing.T) {
-	_, client, libID := newSearchTestServer(t)
+	_, client, libID, _ := newSearchTestServer(t)
 
 	rec := client.do(t, http.MethodGet, "/api/v1/libraries/"+libID+"/memories/ghost", nil)
 	if rec.Code != http.StatusNotFound {
@@ -157,7 +157,7 @@ func TestHandleGetMemory_NotFound(t *testing.T) {
 }
 
 func TestHandleMemories_Unauthenticated(t *testing.T) {
-	h, _, libID := newSearchTestServer(t)
+	h, _, libID, _ := newSearchTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/libraries/"+libID+"/memories", nil)
 	rec := httptest.NewRecorder()

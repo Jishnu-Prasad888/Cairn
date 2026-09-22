@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -38,13 +39,17 @@ func (s *Server) openSearchStore(
 //
 // Query parameters:
 //
-//	q      – FTS5 text expression
-//	type   – media type filter (photo, video, audio, document, other)
-//	folder – folder path prefix filter
-//	from   – RFC3339 date lower bound on mod_time
-//	to     – RFC3339 date upper bound on mod_time
-//	cursor – pagination cursor (last seen file_id)
-//	limit  – page size (default 50, max 200)
+//	q       – FTS5 text expression
+//	type    – media type filter (photo, video, audio, document, other)
+//	folder  – folder path prefix filter
+//	tag     – tag name filter (case-insensitive)
+//	album   – album id filter
+//	min_size – minimum file size in bytes
+//	max_size – maximum file size in bytes
+//	from    – RFC3339 date lower bound on mod_time
+//	to      – RFC3339 date upper bound on mod_time
+//	cursor  – pagination cursor (rank|file_id for text search, file_id otherwise)
+//	limit   – page size (default 50, max 200)
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
@@ -63,6 +68,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, u *auth.Us
 	}
 	page, err := store.Search(r.Context(), q)
 	if err != nil {
+		if errors.Is(err, search.ErrInvalidQuery) {
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+				CodeBadRequest, "Invalid search query.")
+			return
+		}
 		s.logger.Error("search files", "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to search files.")
@@ -87,7 +97,21 @@ func parseSearchQuery(r *http.Request) search.SearchQuery {
 		Text:       q.Get("q"),
 		Type:       media.MediaType(q.Get("type")),
 		FolderPath: q.Get("folder"),
+		Tag:        q.Get("tag"),
 		Cursor:     q.Get("cursor"),
+	}
+	if alb := q.Get("album"); alb != "" {
+		sq.AlbumID = alb
+	}
+	if v := q.Get("min_size"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			sq.MinSize = n
+		}
+	}
+	if v := q.Get("max_size"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			sq.MaxSize = n
+		}
 	}
 	if lim := q.Get("limit"); lim != "" {
 		if n, err := strconv.Atoi(lim); err == nil {

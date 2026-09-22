@@ -17,7 +17,7 @@ import (
 // Manager registers, probes, and reconciles storage libraries. It owns the
 // server-level registrar table and the on-disk .cairn metadata. Callers are
 // expected to already hold whatever authorization the app layer demands
-// (currently an admin role; Phase 9 supplies resource-based authorization).
+// (resource-based authorization; per-call capabilities gate access).
 type Manager struct {
 	db     *sql.DB
 	logger *slog.Logger

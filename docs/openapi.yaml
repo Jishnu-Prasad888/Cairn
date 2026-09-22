@@ -264,6 +264,111 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /libraries/{libraryID}/search:
+    get:
+      tags: [Search]
+      operationId: searchFiles
+      summary: Search files in a library
+      description: >
+        Full-text search over indexed file paths and names. Plain terms are
+        prefix-matched by default; quoted phrases, `AND`, `OR`, parentheses,
+        and `-term`/`NOT term` exclusions are supported. Results combine with
+        optional filters (media type, folder prefix, tag name, album, size
+        range, mod_time range) and paginate with an opaque keyset cursor.
+        Malformed expressions (unbalanced quotes or parens, dangling
+        operators, "everything except X" negations) return 400 BAD_REQUEST.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: q
+          in: query
+          required: false
+          description: Full-text search expression. Empty browses all files.
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          description: Media type filter.
+          schema:
+            type: string
+            enum: [photo, video, audio, document, other]
+        - name: folder
+          in: query
+          required: false
+          description: Folder path prefix filter.
+          schema:
+            type: string
+        - name: tag
+          in: query
+          required: false
+          description: Tag name filter (case-insensitive).
+          schema:
+            type: string
+        - name: album
+          in: query
+          required: false
+          description: Album id filter.
+          schema:
+            type: string
+        - name: min_size
+          in: query
+          required: false
+          description: Minimum file size in bytes.
+          schema:
+            type: integer
+            minimum: 0
+        - name: max_size
+          in: query
+          required: false
+          description: Maximum file size in bytes.
+          schema:
+            type: integer
+            minimum: 0
+        - name: from
+          in: query
+          required: false
+          description: mod_time lower bound (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: mod_time upper bound (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque keyset cursor from a previous response.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of items to return (1-200, default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Matching files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileListEnvelope'
+        '400':
+          description: Malformed query or impossible filter combination
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /libraries/{libraryID}/memories:
     get:
       tags: [Memories]
@@ -852,7 +957,7 @@ components:
           type: string
           enum: [admin, user]
           description: >
-            Initial convenience role. Phase 9 replaces role checks with the
+            Initial convenience role. Role checks are handled per-resource by the
             resource-based permission model.
         created_at:
           type: string
