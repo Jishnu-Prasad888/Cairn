@@ -37,5 +37,6 @@ Sessions are **opaque random tokens with server-side state**:
 - Bearer tokens for server-to-server clients are deferred; the digest-based
   model supports them later without schema change.
 
-Phase 9 introduces resource-based authorization but does not change how a
-principal is established ([0005-resource-based-authorization.md](0005-resource-based-authorization.md)).
+The resource-based authorization model introduces scoped permissions but does
+not change how a principal is established
+([0005-resource-based-authorization.md](0005-resource-based-authorization.md)).

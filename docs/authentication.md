@@ -52,8 +52,8 @@ Full contracts live in [openapi.yaml](openapi.yaml); conventions in [api.md](api
 
 Users carry one of two roles: `admin` or `user`. The only sanctioned role gate
 today is the single middleware decision in `internal/httpapi/auth.go`
-(`withAuth` + `allowAdmin`/`allowAny`). Phase 9 replaces this with the
-resource-based permission model; the role column remains as the initial
+(`withAuth` + `allowAdmin`/`allowAny`). Resource-based authorization replaces
+this at the handler level; the role column remains as the initial
 convenience layer ([permissions.md](permissions.md), ADR-0005).
 
 ## Bootstrap

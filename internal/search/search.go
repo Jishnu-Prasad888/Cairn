@@ -9,17 +9,26 @@ package search
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/fts"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 )
 
+// ErrInvalidQuery is returned when a search query cannot be expressed safely
+// (malformed FTS5 syntax, unbalanced delimiters, impossible size ranges). It
+// maps to HTTP 400.
+var ErrInvalidQuery = errors.New("invalid search query")
+
 // SearchQuery specifies the parameters for a full-text file search.
 type SearchQuery struct {
-	// Text is the search expression. Empty means match all present files.
+	// Text is the search expression. See fts.BuildExpression for the accepted
+	// syntax. Empty means match all present files.
 	Text string
 
 	// Type restricts results to a specific media type. Empty means all.
@@ -29,13 +38,25 @@ type SearchQuery struct {
 	// Empty means search the entire library.
 	FolderPath string
 
+	// Tag restricts results to files carrying a tag with this name (case-
+	// insensitive). Empty means all.
+	Tag string
+
+	// AlbumID restricts results to files in this album. Empty means all.
+	AlbumID string
+
+	// MinSize and MaxSize restrict results by file size in bytes. Zero values
+	// are ignored.
+	MinSize int64
+	MaxSize int64
+
 	// DateFrom and DateTo restrict results by indexed_files.mod_time.
 	// Zero values are ignored.
 	DateFrom time.Time
 	DateTo   time.Time
 
-	// Cursor is the last file_id seen (for cursor-based pagination).
-	// Used only in the non-FTS path (Text == "").
+	// Cursor is the last result seen, encoded by NextCursor. Used for keyset
+	// pagination in both the FTS and browse paths.
 	Cursor string
 
 	// Limit is the maximum number of results to return. Defaults to 50.
@@ -79,43 +100,65 @@ func NewSearchStore(db *sql.DB, libraryID string) *SearchStore {
 func (s *SearchStore) Search(ctx context.Context, q SearchQuery) (*SearchPage, error) {
 	q.Defaults()
 
-	var (
-		queryStr  string
-		queryArgs []any
-	)
+	if q.MinSize > 0 && q.MaxSize > 0 && q.MinSize > q.MaxSize {
+		return nil, fmt.Errorf("%w: min_size greater than max_size", ErrInvalidQuery)
+	}
 
 	// Extra filters applied after the primary WHERE clause.
 	extraConds, extraArgs := buildExtraFilters(q)
 
+	var (
+		queryStr  string
+		queryArgs []any
+		ranks     []float64
+	)
+
 	if q.Text != "" {
-		ftsExpr := sanitizeFTSQuery(q.Text)
-		whereClause := "WHERE fts_files MATCH ? AND f.status = 'present'"
+		ftsExpr, err := fts.BuildExpression(q.Text)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+		}
+		if ftsExpr == "" {
+			// The query produced nothing searchable (e.g. punctuation only).
+			return &SearchPage{}, nil
+		}
+
+		rankCond, rankArgs := rankCursorCond(q.Cursor)
+		whereClause := "WHERE f.status = 'present'"
 		if len(extraConds) > 0 {
 			whereClause += " AND " + strings.Join(extraConds, " AND ")
 		}
+		if rankCond != "" {
+			whereClause += " AND " + rankCond
+		}
 		queryStr = fmt.Sprintf(`
 			SELECT f.id, f.rel_path, f.size_bytes, f.mod_time, f.content_hash,
-			       f.status, f.first_seen_at, f.last_seen_at
-			FROM fts_files
-			JOIN indexed_files f ON fts_files.file_id = f.id
+			       f.status, f.first_seen_at, f.last_seen_at, m.rank
+			FROM (SELECT file_id, rank FROM fts_files WHERE fts_files MATCH ?) AS m
+			JOIN indexed_files f ON f.id = m.file_id
 			%s
-			ORDER BY rank, f.rel_path
+			ORDER BY m.rank, f.id
 			LIMIT ?`, whereClause)
 		queryArgs = append([]any{ftsExpr}, extraArgs...)
+		queryArgs = append(queryArgs, rankArgs...)
 		queryArgs = append(queryArgs, q.Limit+1)
 	} else {
 		whereClause := "WHERE f.status = 'present'"
 		if len(extraConds) > 0 {
 			whereClause += " AND " + strings.Join(extraConds, " AND ")
 		}
-		// Add cursor for non-FTS pagination.
+		// Add cursor for browse pagination (keyset by id).
 		if q.Cursor != "" {
+			pid := q.Cursor
+			if _, parsed, ok := decodeCursor(q.Cursor); ok {
+				pid = parsed
+			}
 			whereClause += " AND f.id > ?"
-			extraArgs = append(extraArgs, q.Cursor)
+			extraArgs = append(extraArgs, pid)
 		}
 		queryStr = fmt.Sprintf(`
 			SELECT f.id, f.rel_path, f.size_bytes, f.mod_time, f.content_hash,
-			       f.status, f.first_seen_at, f.last_seen_at
+			       f.status, f.first_seen_at, f.last_seen_at, NULL
 			FROM indexed_files f
 			%s
 			ORDER BY f.id
@@ -125,17 +168,18 @@ func (s *SearchStore) Search(ctx context.Context, q SearchQuery) (*SearchPage, e
 
 	rows, err := s.db.QueryContext(ctx, queryStr, queryArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("search query: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	var results []*SearchResult
 	for rows.Next() {
-		f, err := scanSearchFile(rows, s.libraryID)
+		f, rank, err := scanSearchFile(rows, s.libraryID)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, &SearchResult{File: f})
+		ranks = append(ranks, rank)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -143,7 +187,7 @@ func (s *SearchStore) Search(ctx context.Context, q SearchQuery) (*SearchPage, e
 
 	page := &SearchPage{}
 	if len(results) > q.Limit {
-		page.NextCursor = results[q.Limit-1].File.ID
+		page.NextCursor = encodeCursor(ranks[q.Limit-1], results[q.Limit-1].File.ID)
 		results = results[:q.Limit]
 	}
 	page.Results = results
@@ -157,7 +201,7 @@ func (s *SearchStore) Search(ctx context.Context, q SearchQuery) (*SearchPage, e
 }
 
 // buildExtraFilters returns WHERE fragment conditions and bind args for the
-// non-status, non-FTS filters (folder, type, date range).
+// non-status, non-FTS filters (folder, type, tag, album, size, date range).
 func buildExtraFilters(q SearchQuery) ([]string, []any) {
 	var conditions []string
 	var args []any
@@ -170,6 +214,25 @@ func buildExtraFilters(q SearchQuery) ([]string, []any) {
 	if q.Type != "" {
 		conditions = append(conditions, "f.id IN (SELECT file_id FROM media_metadata WHERE media_type = ?)")
 		args = append(args, string(q.Type))
+	}
+	if q.Tag != "" {
+		conditions = append(conditions, `f.id IN (
+			SELECT ft.file_id FROM file_tags ft
+			JOIN tags tg ON tg.id = ft.tag_id
+			WHERE tg.name = ? COLLATE NOCASE)`)
+		args = append(args, q.Tag)
+	}
+	if q.AlbumID != "" {
+		conditions = append(conditions, "f.id IN (SELECT file_id FROM album_files WHERE album_id = ?)")
+		args = append(args, q.AlbumID)
+	}
+	if q.MinSize > 0 {
+		conditions = append(conditions, "f.size_bytes >= ?")
+		args = append(args, q.MinSize)
+	}
+	if q.MaxSize > 0 {
+		conditions = append(conditions, "f.size_bytes <= ?")
+		args = append(args, q.MaxSize)
 	}
 	if !q.DateFrom.IsZero() {
 		conditions = append(conditions, "f.mod_time >= ?")
@@ -190,15 +253,21 @@ func (s *SearchStore) countSearch(ctx context.Context, q SearchQuery) (int, erro
 	var queryArgs []any
 
 	if q.Text != "" {
-		ftsExpr := sanitizeFTSQuery(q.Text)
-		whereClause := "WHERE fts_files MATCH ? AND f.status = 'present'"
+		ftsExpr, err := fts.BuildExpression(q.Text)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+		}
+		if ftsExpr == "" {
+			return 0, nil
+		}
+		whereClause := "WHERE f.status = 'present'"
 		if len(extraConds) > 0 {
 			whereClause += " AND " + strings.Join(extraConds, " AND ")
 		}
 		queryStr = fmt.Sprintf(`
 			SELECT COUNT(*)
-			FROM fts_files
-			JOIN indexed_files f ON fts_files.file_id = f.id
+			FROM (SELECT file_id FROM fts_files WHERE fts_files MATCH ?) AS m
+			JOIN indexed_files f ON f.id = m.file_id
 			%s`, whereClause)
 		queryArgs = append([]any{ftsExpr}, extraArgs...)
 	} else {
@@ -215,31 +284,33 @@ func (s *SearchStore) countSearch(ctx context.Context, q SearchQuery) (int, erro
 	return n, err
 }
 
-// sanitizeFTSQuery converts a raw user query into a safe FTS5 expression.
-// Each whitespace-separated word is quoted and suffixed with * for prefix
-// matching. Special FTS5 characters that could cause parse errors are stripped.
-func sanitizeFTSQuery(raw string) string {
-	replacer := strings.NewReplacer(
-		`*`, ``,
-		`(`, ``,
-		`)`, ``,
-		`^`, ``,
-		`-`, ` `,
-		`+`, ` `,
-		`:`, ` `,
-	)
-	clean := strings.TrimSpace(replacer.Replace(raw))
-	if clean == "" {
-		return `""`
+// rankCursorCond builds a keyset condition and bind args for FTS pagination.
+// Results are ordered by (rank, id), so a cursor encodes both halves to keep
+// pages stable when the overall ranking is unchanged.
+func rankCursorCond(cursor string) (string, []any) {
+	rank, id, ok := decodeCursor(cursor)
+	if !ok {
+		return "", nil
 	}
-	words := strings.Fields(clean)
-	quoted := make([]string, 0, len(words))
-	for _, w := range words {
-		// Escape internal double-quotes by doubling them.
-		w = strings.ReplaceAll(w, `"`, `""`)
-		quoted = append(quoted, `"`+w+`"*`)
+	return "(m.rank > ? OR (m.rank = ? AND f.id > ?))", []any{rank, rank, id}
+}
+
+// encodeCursor flattens a (rank, id) keyset value into an opaque string.
+func encodeCursor(rank float64, id string) string {
+	return strconv.FormatFloat(rank, 'g', -1, 64) + "|" + id
+}
+
+// decodeCursor reverses encodeCursor; it reports ok=false for anything malformed.
+func decodeCursor(cursor string) (rank float64, id string, ok bool) {
+	i := strings.LastIndexByte(cursor, '|')
+	if i < 0 {
+		return 0, "", false
 	}
-	return strings.Join(quoted, " ")
+	r, err := strconv.ParseFloat(cursor[:i], 64)
+	if err != nil {
+		return 0, "", false
+	}
+	return r, cursor[i+1:], true
 }
 
 // --- row scanner ---
@@ -248,7 +319,9 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanSearchFile(row rowScanner, libraryID string) (*media.File, error) {
+// scanSearchFile scans one search row (including the trailing rank column,
+// which the browse path pads with NULL) into a media.File.
+func scanSearchFile(row rowScanner, libraryID string) (*media.File, float64, error) {
 	var (
 		f        media.File
 		modStr   string
@@ -256,10 +329,11 @@ func scanSearchFile(row rowScanner, libraryID string) (*media.File, error) {
 		lastStr  string
 		hash     sql.NullString
 		status   string
+		rank     sql.NullFloat64
 	)
-	err := row.Scan(&f.ID, &f.RelPath, &f.SizeBytes, &modStr, &hash, &status, &firstStr, &lastStr)
+	err := row.Scan(&f.ID, &f.RelPath, &f.SizeBytes, &modStr, &hash, &status, &firstStr, &lastStr, &rank)
 	if err != nil {
-		return nil, fmt.Errorf("scan search file: %w", err)
+		return nil, 0, fmt.Errorf("scan search file: %w", err)
 	}
 	f.LibraryID = libraryID
 	f.ContentHash = hash.String
@@ -272,15 +346,19 @@ func scanSearchFile(row rowScanner, libraryID string) (*media.File, error) {
 	f.MediaType = media.DetectMediaType(f.RelPath)
 	f.MIMEType = media.DetectMIME(f.RelPath)
 	if err := parseTime(modStr, &f.ModTime); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := parseTime(firstStr, &f.FirstSeenAt); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := parseTime(lastStr, &f.LastSeenAt); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return &f, nil
+	r := float64(0)
+	if rank.Valid {
+		r = rank.Float64
+	}
+	return &f, r, nil
 }
 
 func parseTime(s string, out *time.Time) error {
