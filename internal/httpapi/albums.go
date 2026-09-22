@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/albums"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 )
@@ -67,6 +68,9 @@ func (s *Server) handleListAlbums(w http.ResponseWriter, r *http.Request, u *aut
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapRead) {
+		return
+	}
 	store, cleanup, ok := s.openAlbumStore(w, r, lib)
 	if !ok {
 		return
@@ -88,6 +92,9 @@ func (s *Server) handleCreateAlbum(w http.ResponseWriter, r *http.Request, u *au
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapCreate) {
 		return
 	}
 	store, cleanup, ok := s.openAlbumStore(w, r, lib)
@@ -124,6 +131,9 @@ func (s *Server) handleDeleteAlbum(w http.ResponseWriter, r *http.Request, u *au
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.EntityKey("a", lib.ID, r.PathValue("albumID")), authz.CapDelete) {
+		return
+	}
 	store, cleanup, ok := s.openAlbumStore(w, r, lib)
 	if !ok {
 		return
@@ -142,6 +152,9 @@ func (s *Server) handleAddAlbumFile(w http.ResponseWriter, r *http.Request, u *a
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.EntityKey("a", lib.ID, r.PathValue("albumID")), authz.CapEdit) {
 		return
 	}
 	store, cleanup, ok := s.openAlbumStore(w, r, lib)
@@ -164,6 +177,9 @@ func (s *Server) handleRemoveAlbumFile(w http.ResponseWriter, r *http.Request, u
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.requireCap(w, r, u, authz.EntityKey("a", lib.ID, r.PathValue("albumID")), authz.CapEdit) {
+		return
+	}
 	store, cleanup, ok := s.openAlbumStore(w, r, lib)
 	if !ok {
 		return
@@ -182,6 +198,9 @@ func (s *Server) handleListAlbumFiles(w http.ResponseWriter, r *http.Request, u 
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.EntityKey("a", lib.ID, r.PathValue("albumID")), authz.CapRead) {
 		return
 	}
 	store, cleanup, ok := s.openAlbumStore(w, r, lib)

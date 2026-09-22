@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 )
@@ -18,6 +19,7 @@ type Server struct {
 	db            *sql.DB
 	web           http.Handler
 	auth          *auth.Service
+	authz         *authz.Service
 	libraries     *library.Manager
 	indexer       *indexer.IndexManager
 	secureCookies bool
@@ -32,6 +34,10 @@ type Dependencies struct {
 	// protected authentication and user-management endpoints return
 	// UNAUTHORIZED.
 	Auth *auth.Service
+	// Authz evaluates resource-based permissions and public shares
+	// (ADR-0005). It may be nil, in which case every library content route
+	// remains admin-only (the pre-Phase-9 gate).
+	Authz *authz.Service
 	// Libraries registers and reconciles storage libraries. It may be nil, in
 	// which case the library-management endpoints return INTERNAL.
 	Libraries *library.Manager
@@ -54,6 +60,7 @@ func New(deps Dependencies) *Server {
 		db:            deps.DB,
 		web:           deps.WebUI,
 		auth:          deps.Auth,
+		authz:         deps.Authz,
 		libraries:     deps.Libraries,
 		indexer:       deps.Indexer,
 		secureCookies: deps.SecureCookies,
@@ -86,71 +93,90 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/users", s.withAuth(allowAdmin, s.handleCreateUser))
 	mux.Handle("POST /api/v1/users/{id}/sessions/revoke", s.withAuth(allowAdmin, s.handleRevokeUserSessions))
 
-	// Library surface (admin). Management is gated like user management until
-	// resource-based authorization (Phase 9) generalizes it.
+	// Library surface (admin). Server-level management is gated like user
+	// management; resource-based authorization governs access to content
+	// within a library.
 	if s.libraries != nil {
 		mux.Handle("GET /api/v1/libraries", s.withAuth(allowAdmin, s.handleListLibraries))
 		mux.Handle("POST /api/v1/libraries", s.withAuth(allowAdmin, s.handleCreateLibrary))
 		mux.Handle("POST /api/v1/libraries/probe", s.withAuth(allowAdmin, s.handleProbeLibrary))
-		mux.Handle("GET /api/v1/libraries/{id}", s.withAuth(allowAdmin, s.handleGetLibrary))
+		mux.Handle("GET /api/v1/libraries/{id}", s.withAuth(allowAny, s.handleGetLibrary))
 		mux.Handle("POST /api/v1/libraries/{id}/refresh", s.withAuth(allowAdmin, s.handleRefreshLibrary))
 		mux.Handle("DELETE /api/v1/libraries/{id}", s.withAuth(allowAdmin, s.handleDeleteLibrary))
-		// Indexing surface (admin).
+		// Indexing surface (admin): scanning and index status are server
+		// operations, not per-resource capabilities.
 		mux.Handle("POST /api/v1/libraries/{id}/index", s.withAuth(allowAdmin, s.handleTriggerIndex))
 		mux.Handle("GET /api/v1/libraries/{id}/index/status", s.withAuth(allowAdmin, s.handleIndexStatus))
 
-		// Media/files surface (admin until Phase 9 resource-based authz).
-		mux.Handle("GET /api/v1/libraries/{id}/files", s.withAuth(allowAdmin, s.handleListFiles))
-		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAdmin, s.handleGetFile))
-		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/download", s.withAuth(allowAdmin, s.handleDownloadFile))
-		mux.Handle("POST /api/v1/libraries/{id}/files/upload", s.withAuth(allowAdmin, s.handleUploadFile))
-		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/rename", s.withAuth(allowAdmin, s.handleRenameFile))
-		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/move", s.withAuth(allowAdmin, s.handleMoveFile))
-		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/copy", s.withAuth(allowAdmin, s.handleCopyFile))
-		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAdmin, s.handleDeleteFile))
-		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/restore", s.withAuth(allowAdmin, s.handleRestoreFile))
-		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/permanent", s.withAuth(allowAdmin, s.handlePermanentDeleteFile))
-		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/metadata", s.withAuth(allowAdmin, s.handleGetFileMetadata))
-		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAdmin, s.handleGetThumbnail))
+		// Permissions and shares administration (library scope).
+		mux.Handle("GET /api/v1/libraries/{id}/permissions", s.withAuth(allowAny, s.handleListGrants))
+		mux.Handle("POST /api/v1/libraries/{id}/permissions", s.withAuth(allowAny, s.handleCreateGrant))
+		mux.Handle("DELETE /api/v1/libraries/{id}/permissions/{grantID}", s.withAuth(allowAny, s.handleRevokeGrant))
+		mux.Handle("GET /api/v1/libraries/{id}/shares", s.withAuth(allowAny, s.handleListShares))
+		mux.Handle("POST /api/v1/libraries/{id}/shares", s.withAuth(allowAny, s.handleCreateShare))
+		mux.Handle("DELETE /api/v1/libraries/{id}/shares/{shareID}", s.withAuth(allowAny, s.handleRevokeShare))
+
+		// Media/files surface. Capabilities are enforced per resource inside
+		// each handler via requireCap.
+		mux.Handle("GET /api/v1/libraries/{id}/files", s.withAuth(allowAny, s.handleListFiles))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAny, s.handleGetFile))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/download", s.withAuth(allowAny, s.handleDownloadFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/upload", s.withAuth(allowAny, s.handleUploadFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/rename", s.withAuth(allowAny, s.handleRenameFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/move", s.withAuth(allowAny, s.handleMoveFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/copy", s.withAuth(allowAny, s.handleCopyFile))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAny, s.handleDeleteFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/restore", s.withAuth(allowAny, s.handleRestoreFile))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/permanent", s.withAuth(allowAny, s.handlePermanentDeleteFile))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/metadata", s.withAuth(allowAny, s.handleGetFileMetadata))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handleGetThumbnail))
 
 		// Folders and trash.
-		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAdmin, s.handleListFolders))
-		mux.Handle("GET /api/v1/libraries/{id}/trash", s.withAuth(allowAdmin, s.handleListTrash))
+		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAny, s.handleListFolders))
+		mux.Handle("GET /api/v1/libraries/{id}/trash", s.withAuth(allowAny, s.handleListTrash))
 
 		// Search.
-		mux.Handle("GET /api/v1/libraries/{id}/search", s.withAuth(allowAdmin, s.handleSearch))
+		mux.Handle("GET /api/v1/libraries/{id}/search", s.withAuth(allowAny, s.handleSearch))
 
 		// Tags.
-		mux.Handle("GET /api/v1/libraries/{id}/tags", s.withAuth(allowAdmin, s.handleListTags))
-		mux.Handle("POST /api/v1/libraries/{id}/tags", s.withAuth(allowAdmin, s.handleCreateTag))
-		mux.Handle("DELETE /api/v1/libraries/{id}/tags/{tagID}", s.withAuth(allowAdmin, s.handleDeleteTag))
-		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/tags", s.withAuth(allowAdmin, s.handleListFileTags))
-		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/tags", s.withAuth(allowAdmin, s.handleAddFileTag))
-		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/tags/{tagID}", s.withAuth(allowAdmin, s.handleRemoveFileTag))
+		mux.Handle("GET /api/v1/libraries/{id}/tags", s.withAuth(allowAny, s.handleListTags))
+		mux.Handle("POST /api/v1/libraries/{id}/tags", s.withAuth(allowAny, s.handleCreateTag))
+		mux.Handle("DELETE /api/v1/libraries/{id}/tags/{tagID}", s.withAuth(allowAny, s.handleDeleteTag))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/tags", s.withAuth(allowAny, s.handleListFileTags))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/tags", s.withAuth(allowAny, s.handleAddFileTag))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/tags/{tagID}", s.withAuth(allowAny, s.handleRemoveFileTag))
 
 		// Albums.
-		mux.Handle("GET /api/v1/libraries/{id}/albums", s.withAuth(allowAdmin, s.handleListAlbums))
-		mux.Handle("POST /api/v1/libraries/{id}/albums", s.withAuth(allowAdmin, s.handleCreateAlbum))
-		mux.Handle("DELETE /api/v1/libraries/{id}/albums/{albumID}", s.withAuth(allowAdmin, s.handleDeleteAlbum))
-		mux.Handle("GET /api/v1/libraries/{id}/albums/{albumID}/files", s.withAuth(allowAdmin, s.handleListAlbumFiles))
-		mux.Handle("POST /api/v1/libraries/{id}/albums/{albumID}/files/{fileID}", s.withAuth(allowAdmin, s.handleAddAlbumFile))
-		mux.Handle("DELETE /api/v1/libraries/{id}/albums/{albumID}/files/{fileID}", s.withAuth(allowAdmin, s.handleRemoveAlbumFile))
+		mux.Handle("GET /api/v1/libraries/{id}/albums", s.withAuth(allowAny, s.handleListAlbums))
+		mux.Handle("POST /api/v1/libraries/{id}/albums", s.withAuth(allowAny, s.handleCreateAlbum))
+		mux.Handle("DELETE /api/v1/libraries/{id}/albums/{albumID}", s.withAuth(allowAny, s.handleDeleteAlbum))
+		mux.Handle("GET /api/v1/libraries/{id}/albums/{albumID}/files", s.withAuth(allowAny, s.handleListAlbumFiles))
+		mux.Handle("POST /api/v1/libraries/{id}/albums/{albumID}/files/{fileID}", s.withAuth(allowAny, s.handleAddAlbumFile))
+		mux.Handle("DELETE /api/v1/libraries/{id}/albums/{albumID}/files/{fileID}", s.withAuth(allowAny, s.handleRemoveAlbumFile))
 
 		// Favorites.
-		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAdmin, s.handleAddFavorite))
-		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAdmin, s.handleRemoveFavorite))
-		mux.Handle("GET /api/v1/libraries/{id}/favorites", s.withAuth(allowAdmin, s.handleListFavorites))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAny, s.handleAddFavorite))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAny, s.handleRemoveFavorite))
+		mux.Handle("GET /api/v1/libraries/{id}/favorites", s.withAuth(allowAny, s.handleListFavorites))
 
 		// Memories (Markdown documents with version history and references).
-		mux.Handle("GET /api/v1/libraries/{id}/memories", s.withAuth(allowAdmin, s.handleListMemories))
-		mux.Handle("POST /api/v1/libraries/{id}/memories", s.withAuth(allowAdmin, s.handleCreateMemory))
-		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAdmin, s.handleGetMemory))
-		mux.Handle("PUT /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAdmin, s.handleUpdateMemory))
-		mux.Handle("DELETE /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAdmin, s.handleDeleteMemory))
-		mux.Handle("POST /api/v1/libraries/{id}/memories/{memoryID}/restore", s.withAuth(allowAdmin, s.handleRestoreMemory))
-		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions", s.withAuth(allowAdmin, s.handleListMemoryVersions))
-		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions/{version}", s.withAuth(allowAdmin, s.handleGetMemoryVersion))
-		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/refs", s.withAuth(allowAdmin, s.handleListMemoryRefs))
+		mux.Handle("GET /api/v1/libraries/{id}/memories", s.withAuth(allowAny, s.handleListMemories))
+		mux.Handle("POST /api/v1/libraries/{id}/memories", s.withAuth(allowAny, s.handleCreateMemory))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAny, s.handleGetMemory))
+		mux.Handle("PUT /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAny, s.handleUpdateMemory))
+		mux.Handle("DELETE /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAny, s.handleDeleteMemory))
+		mux.Handle("POST /api/v1/libraries/{id}/memories/{memoryID}/restore", s.withAuth(allowAny, s.handleRestoreMemory))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions", s.withAuth(allowAny, s.handleListMemoryVersions))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions/{version}", s.withAuth(allowAny, s.handleGetMemoryVersion))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/refs", s.withAuth(allowAny, s.handleListMemoryRefs))
+
+		// Public shares read content without a session. The token/password
+		// authenticate the share; capability evaluation still governs access.
+		mux.HandleFunc("GET /api/v1/shares/{token}", s.handlePublicShareInfo)
+		mux.HandleFunc("GET /api/v1/shares/{token}/files", s.handlePublicShareListFiles)
+		mux.HandleFunc("GET /api/v1/shares/{token}/files/{fileID}", s.handlePublicShareGetFile)
+		mux.HandleFunc("GET /api/v1/shares/{token}/files/{fileID}/download", s.handlePublicShareDownload)
+		mux.HandleFunc("POST /api/v1/shares/{token}/authenticate", s.handlePublicShareAuthenticate)
 	}
 
 	mux.Handle("/api/", s.handleAPIUnknown())

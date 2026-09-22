@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 )
 
@@ -111,11 +112,15 @@ func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request, _ *
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"libraries": resp})
 }
 
-// handleGetLibrary returns a single library. Admin only.
+// handleGetLibrary returns a single library. Requires read on the library
+// resource.
 func (s *Server) handleGetLibrary(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapRead) {
 		return
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"library": toLibraryResponse(lib)})
