@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
+	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/config"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/httpapi"
@@ -62,6 +64,16 @@ func run() error {
 		return fmt.Errorf("apply database migrations: %w", err)
 	}
 
+	// Audit and authentication from the server database.
+	auditSvc := audit.New(pool, logger)
+	authSvc := auth.NewService(pool, logger, auditSvc)
+	pruneCtx, cancelPrune := context.WithTimeout(ctx, 15*time.Second)
+	if err := authSvc.PruneExpired(pruneCtx, time.Now().UTC()); err != nil {
+		cancelPrune()
+		return err
+	}
+	cancelPrune()
+
 	// Frontend: the embedded build by default, an on-disk build in development.
 	webHandler, err := webui.Handler(cfg.WebDistDir)
 	if err != nil {
@@ -70,9 +82,11 @@ func run() error {
 	}
 
 	api := httpapi.New(httpapi.Dependencies{
-		Logger: logger,
-		DB:     pool,
-		WebUI:  webHandler,
+		Logger:        logger,
+		DB:            pool,
+		Auth:          authSvc,
+		SecureCookies: cfg.CookieSecure,
+		WebUI:         webHandler,
 	})
 
 	srv := &http.Server{
