@@ -23,7 +23,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 3
+	SchemaVersion = 4
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.
@@ -261,4 +261,71 @@ CREATE TABLE IF NOT EXISTS favorites (
 	file_id    TEXT PRIMARY KEY REFERENCES indexed_files(id) ON DELETE CASCADE,
 	created_at TEXT NOT NULL
 );
+
+-- memories are long-form Markdown documents. They are app-level data and live
+-- in the library database so they travel with a portable library. deleted is a
+-- soft-delete flag: deleting a memory is reversible and keeps its history.
+CREATE TABLE IF NOT EXISTS memories (
+	id          TEXT PRIMARY KEY,
+	title       TEXT NOT NULL,
+	body        TEXT NOT NULL DEFAULT '',
+	memory_date TEXT,
+	deleted     INTEGER NOT NULL DEFAULT 0,
+	created_at  TEXT NOT NULL,
+	updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS memories_updated_idx ON memories (updated_at)
+	WHERE deleted = 0;
+
+-- memory_versions keeps the full edit history of a memory. Every autosave and
+-- explicit save writes a new append-only row so any earlier state can be
+-- recovered.
+CREATE TABLE IF NOT EXISTS memory_versions (
+	id        TEXT PRIMARY KEY,
+	memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+	version   INTEGER NOT NULL,
+	title     TEXT NOT NULL,
+	body      TEXT NOT NULL,
+	saved_at  TEXT NOT NULL,
+	UNIQUE (memory_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS memory_versions_memory_idx ON memory_versions (memory_id, version DESC);
+
+-- memory_refs records every [[type:id]] reference extracted from a memory's
+-- Markdown body. It is rewritten on each save so it always mirrors the body.
+CREATE TABLE IF NOT EXISTS memory_refs (
+	memory_id   TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+	target_type TEXT NOT NULL
+		CHECK (target_type IN ('media','memory','album','person','tag')),
+	target_id   TEXT NOT NULL,
+	PRIMARY KEY (memory_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS memory_refs_target_idx ON memory_refs (target_type, target_id);
+
+-- fts_memories is an FTS5 virtual table for search over memory titles and
+-- bodies. It is a normal (non-contentless) FTS5 table, matching fts_files, so
+-- the UNINDEXED memory_id column is stored and can be joined back to the
+-- memories table. It is kept in sync by the triggers below.
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(
+	memory_id UNINDEXED,
+	title,
+	body,
+	prefix='2 3'
+);
+
+CREATE TRIGGER IF NOT EXISTS fts_memories_insert AFTER INSERT ON memories BEGIN
+	INSERT INTO fts_memories(memory_id, title, body) VALUES (new.id, new.title, new.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS fts_memories_update AFTER UPDATE OF title, body, deleted ON memories BEGIN
+	DELETE FROM fts_memories WHERE memory_id = old.id;
+	INSERT INTO fts_memories(memory_id, title, body) VALUES (new.id, new.title, new.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS fts_memories_delete AFTER DELETE ON memories BEGIN
+	DELETE FROM fts_memories WHERE memory_id = old.id;
+END;
 `

@@ -25,6 +25,8 @@ tags:
     description: Session lifecycle for browser and native clients
   - name: Users
     description: Account management (admin only)
+  - name: Memories
+    description: Long-form Markdown documents with version history and internal references
 security:
   - cookieAuth: []
 paths:
@@ -262,6 +264,253 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /libraries/{libraryID}/memories:
+    get:
+      tags: [Memories]
+      operationId: listMemories
+      summary: List memories in a library
+      description: >
+        Lists memories ordered by most recently updated, newest first. Soft
+        deleted memories are excluded. Set `q` to search titles and bodies via
+        the library full-text index. Keyset pagination is available with the
+        `cursor` parameter; the response includes `next_cursor` while more
+        results remain.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: q
+          in: query
+          required: false
+          description: Full-text search query over memory titles and bodies.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of items to return (1-200, default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque keyset cursor from a previous response.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Memories in the library
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Memories]
+      operationId: createMemory
+      summary: Create a memory
+      description: >
+        Creates a memory and its first version. Any [[type:ID]] references in
+        the body are parsed and persisted to the library reference index,
+        enabling bidirectional navigation.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryRequest'
+      responses:
+        '201':
+          description: Memory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/memories/{memoryID}:
+    get:
+      tags: [Memories]
+      operationId: getMemory
+      summary: Fetch one memory
+      description: Returns the latest saved revision of the memory.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      responses:
+        '200':
+          description: The memory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Memories]
+      operationId: updateMemory
+      summary: Save a new revision of a memory
+      description: >
+        Appends a new version rather than overwriting in place, so every save is
+        retained and recoverable. References are re-parsed and the reference
+        index is updated to match the new body.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryRequest'
+      responses:
+        '200':
+          description: The updated memory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Memories]
+      operationId: deleteMemory
+      summary: Soft-delete a memory
+      description: >
+        Marks the memory deleted without removing its rows; versions and
+        references are preserved so the memory can be restored.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      responses:
+        '204':
+          description: Memory soft-deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/memories/{memoryID}/restore:
+    post:
+      tags: [Memories]
+      operationId: restoreMemory
+      summary: Restore a soft-deleted memory
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      responses:
+        '204':
+          description: Memory restored
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/memories/{memoryID}/versions:
+    get:
+      tags: [Memories]
+      operationId: listMemoryVersions
+      summary: List the saved revisions of a memory
+      description: Revisions are returned oldest first; the last entry is the current content.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      responses:
+        '200':
+          description: Saved revisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryVersionListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/memories/{memoryID}/versions/{version}:
+    get:
+      tags: [Memories]
+      operationId: getMemoryVersion
+      summary: Fetch one saved revision by number
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - name: version
+          in: path
+          required: true
+          description: Revision number (>= 1)
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: The requested revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryVersionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/memories/{memoryID}/refs:
+    get:
+      tags: [Memories]
+      operationId: listMemoryRefs
+      summary: List the internal references parsed from a memory
+      description: >
+        Returns the [[type:ID]] references in the memory's body, enabling the UI
+        to render links and bidirectional relations without reparsing Markdown.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      responses:
+        '200':
+          description: Parsed references
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryRefListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   schemas:
     ErrorBody:
@@ -405,7 +654,133 @@ components:
           type: string
           description: os/arch the binary was built for.
           example: linux/amd64
+    Memory:
+      type: object
+      required: [id, title, body, deleted, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Stable opaque memory id.
+          example: 1f4a8e2c9b6d7e3f
+        title:
+          type: string
+          description: Display title shown in lists and link labels.
+          example: Summer in Rye
+        body:
+          type: string
+          description: Markdown body. See docs/markdown.md for the dialect.
+        memory_date:
+          type: string
+          format: date-time
+          description: Optional date the memory is about.
+        deleted:
+          type: boolean
+          description: True after a soft delete and before a restore.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MemoryEnvelope:
+      type: object
+      required: [memory]
+      properties:
+        memory:
+          $ref: '#/components/schemas/Memory'
+    MemoryListEnvelope:
+      type: object
+      required: [memories]
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        next_cursor:
+          type: string
+          description: >
+            Present when more memories follow the returned page. Pass it back as
+            `cursor` to fetch the next page.
+    MemoryRequest:
+      type: object
+      required: [title, body]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Leading/trailing whitespace is trimmed; must not be empty.
+        body:
+          type: string
+          description: Markdown body.
+        memory_date:
+          type: string
+          format: date-time
+          description: Optional date the memory is about.
+    MemoryVersion:
+      type: object
+      required: [memory_id, version, title, body, saved_at]
+      properties:
+        memory_id:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+          description: Monotonic revision number, starting at 1 on create.
+        title:
+          type: string
+        body:
+          type: string
+        saved_at:
+          type: string
+          format: date-time
+    MemoryVersionEnvelope:
+      type: object
+      required: [version]
+      properties:
+        version:
+          $ref: '#/components/schemas/MemoryVersion'
+    MemoryVersionListEnvelope:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryVersion'
+    MemoryRef:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [media, memory, album, person, tag]
+          description: Kind of referenced Cairn object.
+        id:
+          type: string
+          description: Opaque id of the referenced object.
+    MemoryRefListEnvelope:
+      type: object
+      required: [refs]
+      properties:
+        refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryRef'
   parameters:
+    LibraryID:
+      name: libraryID
+      in: path
+      required: true
+      description: Library id (returned by the library endpoints).
+      schema:
+        type: string
+    MemoryID:
+      name: memoryID
+      in: path
+      required: true
+      description: Memory id (returned by the memory endpoints).
+      schema:
+        type: string
     RequestIdHeader:
       name: X-Request-ID
       in: header

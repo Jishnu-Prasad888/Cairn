@@ -1,7 +1,16 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import HomePage from './HomePage';
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <HomePage />
+    </MemoryRouter>,
+  );
+}
 
 const health = { status: 'ok', database: 'ok' };
 const version = {
@@ -42,13 +51,13 @@ function mockHealthFetch() {
 describe('HomePage', () => {
   it('renders the Cairn brand', () => {
     mockHealthFetch();
-    render(<HomePage />);
+    renderPage();
     expect(screen.getByRole('heading', { name: 'Cairn' })).toBeInTheDocument();
   });
 
   it('shows server and version status after loading', async () => {
     mockHealthFetch();
-    render(<HomePage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Version', { selector: 'h2' })).toBeInTheDocument();
@@ -66,7 +75,7 @@ describe('HomePage', () => {
       throw new Error('network down');
     }) as unknown as typeof fetch;
 
-    render(<HomePage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Could not reach the Cairn server.')).toBeInTheDocument();
