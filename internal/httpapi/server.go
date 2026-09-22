@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 )
 
 // Server is the Cairn HTTP application. It is a small composition of the
@@ -16,6 +17,7 @@ type Server struct {
 	db            *sql.DB
 	web           http.Handler
 	auth          *auth.Service
+	libraries     *library.Manager
 	secureCookies bool
 }
 
@@ -28,6 +30,9 @@ type Dependencies struct {
 	// protected authentication and user-management endpoints return
 	// UNAUTHORIZED.
 	Auth *auth.Service
+	// Libraries registers and reconciles storage libraries. It may be nil, in
+	// which case the library-management endpoints return INTERNAL.
+	Libraries *library.Manager
 	// SecureCookies forces the Secure flag on session cookies even when the
 	// server did not observe TLS (e.g. behind a TLS-terminating proxy).
 	SecureCookies bool
@@ -44,6 +49,7 @@ func New(deps Dependencies) *Server {
 		db:            deps.DB,
 		web:           deps.WebUI,
 		auth:          deps.Auth,
+		libraries:     deps.Libraries,
 		secureCookies: deps.SecureCookies,
 	}
 }
@@ -73,6 +79,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/users", s.withAuth(allowAdmin, s.handleListUsers))
 	mux.Handle("POST /api/v1/users", s.withAuth(allowAdmin, s.handleCreateUser))
 	mux.Handle("POST /api/v1/users/{id}/sessions/revoke", s.withAuth(allowAdmin, s.handleRevokeUserSessions))
+
+	// Library surface (admin). Management is gated like user management until
+	// resource-based authorization (Phase 9) generalizes it.
+	if s.libraries != nil {
+		mux.Handle("GET /api/v1/libraries", s.withAuth(allowAdmin, s.handleListLibraries))
+		mux.Handle("POST /api/v1/libraries", s.withAuth(allowAdmin, s.handleCreateLibrary))
+		mux.Handle("POST /api/v1/libraries/probe", s.withAuth(allowAdmin, s.handleProbeLibrary))
+		mux.Handle("GET /api/v1/libraries/{id}", s.withAuth(allowAdmin, s.handleGetLibrary))
+		mux.Handle("POST /api/v1/libraries/{id}/refresh", s.withAuth(allowAdmin, s.handleRefreshLibrary))
+		mux.Handle("DELETE /api/v1/libraries/{id}", s.withAuth(allowAdmin, s.handleDeleteLibrary))
+	}
 
 	mux.Handle("/api/", s.handleAPIUnknown())
 

@@ -31,6 +31,10 @@ const (
 	ActionUserUpdated        = "users.updated"
 	ActionUserDisabled       = "users.disabled"
 	ActionUserEnabled        = "users.enabled"
+	ActionLibraryCreated     = "libraries.created"
+	ActionLibraryAdopted     = "libraries.adopted"
+	ActionLibraryRefreshed   = "libraries.refreshed"
+	ActionLibraryDeleted     = "libraries.deleted"
 )
 
 // Event is one audit record ready for persistence.
