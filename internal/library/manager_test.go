@@ -28,16 +28,6 @@ func newTestManager(t *testing.T) (*Manager, *sql.DB) {
 	return NewManager(pool, logger, audit.New(pool, logger)), pool
 }
 
-func discardLogger(t *testing.T) *slog.Logger {
-	t.Helper()
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-func newAuditSvc(t *testing.T, pool *sql.DB) *audit.Service {
-	t.Helper()
-	return audit.New(pool, discardLogger(t))
-}
-
 func TestCreateRegistersAndWritesMetadata(t *testing.T) {
 	m, pool := newTestManager(t)
 	root := filepath.Join(t.TempDir(), "photos")
