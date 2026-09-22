@@ -23,7 +23,7 @@ Cairn is personal software with a browser frontend. It must be:
 - Login failures all return the same generic `UNAUTHORIZED` so responses never
   reveal whether a username, password, or account state caused the failure.
 - `admin`-only endpoints are gated in one place (`withAuth`/`allowAdmin`);
-  Phase 9 supersedes role gates with resource-based authorization.
+  resource-based authorization supersedes role gates throughout.
 
 See [authentication.md](authentication.md) for the full design.
 

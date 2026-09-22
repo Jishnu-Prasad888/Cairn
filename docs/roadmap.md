@@ -62,9 +62,12 @@ Obsidian-style editor with live preview, autosave, version history, wiki-style
 object links, and MediaEmbed rendering (MediaEmbed still pending).
 Design: docs/markdown.md.
 
-## Phase 9 — Search depth (planned)
+## Phase 9 — Search depth (implemented)
 
-Search filters, advanced query syntax, and hardened full-text queries.
+Search filters (tag, album, size, date range), advanced query syntax (OR, AND,
+phrases, exclusions, parentheses), and a hardened full-text query builder.
+Design: docs/search.md. The query builder, `internal/fts`, is shared by file
+and memory search; malformed queries return 400.
 
 ## Phase 10 — Backups (planned)
 

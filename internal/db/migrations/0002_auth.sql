@@ -4,8 +4,8 @@
 -- opaque session tokens (stored only as hashes, never in plaintext), and an
 -- audit log for security-relevant events.
 --
--- Roles are recorded on the user. Phase 9 replaces ad-hoc role checks with the
--- scalable resource-based permission model; the column remains the initial
+-- Roles are recorded on the user. Handler-level resource authorization
+-- supersedes ad-hoc role checks; the column remains the initial
 -- Admin/User convenience layer described in docs/permissions.md.
 
 -- User accounts.
