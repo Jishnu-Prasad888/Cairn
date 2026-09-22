@@ -88,4 +88,6 @@ export const apiPost = <T>(path: string, body?: unknown) =>
   apiRequest<T>(path, withJsonBody('POST', body));
 export const apiPatch = <T>(path: string, body?: unknown) =>
   apiRequest<T>(path, withJsonBody('PATCH', body));
+export const apiPut = <T>(path: string, body?: unknown) =>
+  apiRequest<T>(path, withJsonBody('PUT', body));
 export const apiDelete = <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' });
