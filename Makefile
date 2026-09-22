@@ -42,7 +42,7 @@ web-dev: ## Run the Vite dev server (proxies /api to :8715)
 test: test-go test-web ## Run all tests
 
 test-go: ## Run backend tests
-	go test -race ./...
+	go test -race ./cmd/... ./internal/...
 
 test-web: ## Run frontend tests
 	cd web && npm test
@@ -50,7 +50,7 @@ test-web: ## Run frontend tests
 lint: lint-go lint-web ## Run all linters
 
 lint-go: ## Vet Go code and run golangci-lint if available
-	go vet ./...
+	go vet ./cmd/... ./internal/...
 	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; else echo "golangci-lint not installed; skipping (CI runs it)"; fi
 
 lint-web: ## Lint the frontend

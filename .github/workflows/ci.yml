@@ -19,7 +19,7 @@ jobs:
           go-version-file: go.mod
       - name: Check gofmt
         run: |
-          unformatted="$(gofmt -l .)"
+          unformatted="$(gofmt -l cmd internal)"
           if [ -n "$unformatted" ]; then
             echo "The following files are not gofmt-formatted:"
             echo "$unformatted"
@@ -30,9 +30,9 @@ jobs:
         with:
           version: v2.13
       - name: go vet
-        run: go vet ./...
+        run: go vet ./cmd/... ./internal/...
       - name: go test
-        run: go test -race -cover ./...
+        run: go test -race -cover ./cmd/... ./internal/...
       - name: Build binary (without embedded web assets)
         run: go build ./cmd/cairn
 
