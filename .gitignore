@@ -7,9 +7,10 @@ data/
 
 # Build output
 bin/
-dist/
+/dist/
 web/dist/
 node_modules/
+*.tsbuildinfo
 
 # Embedded frontend build artifact. The placeholder index.html is committed so
 # `go build`/`go test` work on a fresh clone; everything else is produced by
