@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/favorites"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
@@ -37,6 +38,9 @@ func (s *Server) handleAddFavorite(w http.ResponseWriter, r *http.Request, u *au
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.fileKeyFor(w, r, u, lib, r.PathValue("fileID"), authz.CapEdit) {
+		return
+	}
 	store, cleanup, ok := s.openFavoriteStore(w, r, lib)
 	if !ok {
 		return
@@ -57,6 +61,9 @@ func (s *Server) handleRemoveFavorite(w http.ResponseWriter, r *http.Request, u 
 		s.writeLibraryError(w, r, err)
 		return
 	}
+	if !s.fileKeyFor(w, r, u, lib, r.PathValue("fileID"), authz.CapEdit) {
+		return
+	}
 	store, cleanup, ok := s.openFavoriteStore(w, r, lib)
 	if !ok {
 		return
@@ -75,6 +82,9 @@ func (s *Server) handleListFavorites(w http.ResponseWriter, r *http.Request, u *
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeLibraryError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapRead) {
 		return
 	}
 	store, cleanup, ok := s.openFavoriteStore(w, r, lib)

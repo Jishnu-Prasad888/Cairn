@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
@@ -57,6 +58,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, u *auth.Us
 	defer cleanup()
 
 	q := parseSearchQuery(r)
+	if !s.requireCap(w, r, u, folderKeyFromParent(lib.ID, q.FolderPath), authz.CapRead) {
+		return
+	}
 	page, err := store.Search(r.Context(), q)
 	if err != nil {
 		s.logger.Error("search files", "error", err)
