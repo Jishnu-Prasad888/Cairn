@@ -140,6 +140,17 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAdmin, s.handleAddFavorite))
 		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAdmin, s.handleRemoveFavorite))
 		mux.Handle("GET /api/v1/libraries/{id}/favorites", s.withAuth(allowAdmin, s.handleListFavorites))
+
+		// Memories (Markdown documents with version history and references).
+		mux.Handle("GET /api/v1/libraries/{id}/memories", s.withAuth(allowAdmin, s.handleListMemories))
+		mux.Handle("POST /api/v1/libraries/{id}/memories", s.withAuth(allowAdmin, s.handleCreateMemory))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAdmin, s.handleGetMemory))
+		mux.Handle("PUT /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAdmin, s.handleUpdateMemory))
+		mux.Handle("DELETE /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAdmin, s.handleDeleteMemory))
+		mux.Handle("POST /api/v1/libraries/{id}/memories/{memoryID}/restore", s.withAuth(allowAdmin, s.handleRestoreMemory))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions", s.withAuth(allowAdmin, s.handleListMemoryVersions))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions/{version}", s.withAuth(allowAdmin, s.handleGetMemoryVersion))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/refs", s.withAuth(allowAdmin, s.handleListMemoryRefs))
 	}
 
 	mux.Handle("/api/", s.handleAPIUnknown())
