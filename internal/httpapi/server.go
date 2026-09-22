@@ -98,6 +98,22 @@ func (s *Server) Handler() http.Handler {
 		// Indexing surface (admin).
 		mux.Handle("POST /api/v1/libraries/{id}/index", s.withAuth(allowAdmin, s.handleTriggerIndex))
 		mux.Handle("GET /api/v1/libraries/{id}/index/status", s.withAuth(allowAdmin, s.handleIndexStatus))
+
+		// Media/files surface (admin until Phase 9 resource-based authz).
+		mux.Handle("GET /api/v1/libraries/{id}/files", s.withAuth(allowAdmin, s.handleListFiles))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAdmin, s.handleGetFile))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/download", s.withAuth(allowAdmin, s.handleDownloadFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/upload", s.withAuth(allowAdmin, s.handleUploadFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/rename", s.withAuth(allowAdmin, s.handleRenameFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/move", s.withAuth(allowAdmin, s.handleMoveFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/copy", s.withAuth(allowAdmin, s.handleCopyFile))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAdmin, s.handleDeleteFile))
+		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/restore", s.withAuth(allowAdmin, s.handleRestoreFile))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/permanent", s.withAuth(allowAdmin, s.handlePermanentDeleteFile))
+
+		// Folders and trash.
+		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAdmin, s.handleListFolders))
+		mux.Handle("GET /api/v1/libraries/{id}/trash", s.withAuth(allowAdmin, s.handleListTrash))
 	}
 
 	mux.Handle("/api/", s.handleAPIUnknown())
