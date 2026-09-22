@@ -7,20 +7,20 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **Phase 0 is the current deliverable and is tracked as an open PR.**
+- **Phase 1 is the current deliverable and is tracked as an open PR.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
-## Phase 0 — Repository and architecture (in progress)
+## Phase 0 — Repository and architecture (done)
 
 Repo scaffolding, Go backend skeleton, embedded React frontend skeleton, build
-system, tests, CI, OpenAPI foundation, docs, and ADRs. Merges as one PR
-(`feature/project-foundation`).
+system, tests, CI, OpenAPI foundation, docs, and ADRs. Merged to `main` via
+PR #1.
 
-## Phase 1 — Authentication (planned)
+## Phase 1 — Authentication (in progress)
 
 Users, sessions (HTTP-only cookies), roles (Admin/User), audit log, and the
-permission subsystem skeleton. Design: docs/auth.md, docs/permissions.md.
+permission subsystem skeleton. Design: docs/authentication.md, docs/permissions.md.
 
 ## Phase 2 — Storage libraries (planned)
 

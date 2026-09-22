@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -41,6 +42,12 @@ type Config struct {
 	// static assets. Empty means "use the embedded frontend". Useful for
 	// development and for embedding tools that cannot use go:embed.
 	WebDistDir string
+
+	// CookieSecure forces the Secure flag on the session cookie. When false,
+	// the flag is still set automatically for HTTPS requests observed by the
+	// server. Set to true when Cairn sits behind a TLS-terminating reverse
+	// proxy.
+	CookieSecure bool
 }
 
 // Load builds a Config from the process environment and platform defaults.
@@ -50,10 +57,11 @@ type Config struct {
 // honored for the default data directory.
 func Load() Config {
 	return Config{
-		HTTPAddr:   envOrDefault("HTTP_ADDR", DefaultHTTPAddr),
-		DataDir:    dataDir(),
-		LogLevel:   envOrDefaultTrim("LOG_LEVEL", DefaultLogLevel),
-		WebDistDir: envOrDefaultTrim("WEB_DIST", ""),
+		HTTPAddr:     envOrDefault("HTTP_ADDR", DefaultHTTPAddr),
+		DataDir:      dataDir(),
+		LogLevel:     envOrDefaultTrim("LOG_LEVEL", DefaultLogLevel),
+		WebDistDir:   envOrDefaultTrim("WEB_DIST", ""),
+		CookieSecure: envOrDefaultBool("COOKIE_SECURE", false),
 	}
 }
 
@@ -113,6 +121,19 @@ func envOrDefaultTrim(name, def string) string {
 	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
 		if trimmed := strings.TrimSpace(v); trimmed != "" {
 			return trimmed
+		}
+	}
+	return def
+}
+
+// envOrDefaultBool parses a CAIRN_<name> boolean setting. Only the literal
+// values accepted by strconv.ParseBool are honored; anything else is treated
+// as an explicit "false" so a malformed value never silently enables a
+// security flag.
+func envOrDefaultBool(name string, def bool) bool {
+	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
+		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			return b
 		}
 	}
 	return def

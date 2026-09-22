@@ -16,20 +16,25 @@ directory full of years of photos and videos and it indexes them where they are.
 
 ## Current status
 
-Phase 0 (repository and architecture) — in progress.
+Phase 0 (repository and architecture) — done.
+Phase 1 (authentication) — in progress.
 
 The foundation is in place:
 
 - Go API server with clean package boundaries
 - SQLite with WAL, migrations, and a pure-Go driver (cross-compiles without CGO)
 - Embedded React + TypeScript frontend (built into a single binary)
-- Health and version endpoints, consistent JSON error envelopes, request IDs
+- Health, version, and authentication endpoints with consistent JSON error
+  envelopes and request IDs
+- User accounts (argon2id password hashing), HTTP-only session cookies,
+  Admin/User roles, and audit logging
 - Configuration via environment variables
 - Build system (`Makefile`), container image, and CI
 - Documentation and architecture decision records
 
-Later phases add authentication, storage libraries, the incremental indexer, media
-processing, search, memories, authorization, sharing, backups, and optional local ML.
+Later phases add storage libraries, the incremental indexer, media processing,
+search, memories, resource-based authorization, sharing, backups, and optional
+local ML.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan.
 
@@ -70,18 +75,21 @@ See [docs/development.md](docs/development.md) for details.
 
 All settings use the `CAIRN_` prefix.
 
-| Variable         | Default                            | Description                             |
-| ---------------- | ---------------------------------- | --------------------------------------- |
-| `CAIRN_HTTP_ADDR`| `127.0.0.1:8715`                   | HTTP listen address                     |
-| `CAIRN_DATA_DIR` | `$XDG_DATA_HOME/cairn`             | Server-level data directory             |
-| `CAIRN_LOG_LEVEL`| `info`                             | `debug`, `info`, `warn`, or `error`     |
-| `CAIRN_WEB_DIST` | *(embedded frontend)*              | Serve an on-disk build instead (dev)    |
+| Variable             | Default                            | Description                             |
+| -------------------- | ---------------------------------- | --------------------------------------- |
+| `CAIRN_HTTP_ADDR`    | `127.0.0.1:8715`                   | HTTP listen address                     |
+| `CAIRN_DATA_DIR`     | `$XDG_DATA_HOME/cairn`             | Server-level data directory             |
+| `CAIRN_LOG_LEVEL`    | `info`                             | `debug`, `info`, `warn`, or `error`     |
+| `CAIRN_WEB_DIST`     | *(embedded frontend)*              | Serve an on-disk build instead (dev)    |
+| `CAIRN_COOKIE_SECURE`| `false`                            | Force `Secure` on session cookies (TLS-terminating proxy) |
 
 ## Repository layout
 
 ```text
 cmd/cairn/             entrypoint
 internal/
+  audit/               security event (audit) logging
+  auth/                users, passwords, sessions, roles
   config/              environment configuration
   db/                  SQLite, pragmas, schema migrations
   httpapi/             HTTP API v1 and request middleware
@@ -94,17 +102,20 @@ docs/                  architecture, API, operations documentation
 
 ## API
 
-The API is REST/JSON under `/api/v1`. Two endpoints exist today:
-`GET /api/v1/health` and `GET /api/v1/version`. The complete contract is
-maintained in [docs/openapi.yaml](docs/openapi.yaml), with prose in
-[docs/api.md](docs/api.md). A future client (React Native, desktop, CLI) can be
-built against the documented API without reading Go source.
+The API is REST/JSON under `/api/v1`. It covers health, version, and the
+authentication lifecycle (bootstrap, login, logout, current user, and admin
+user management). The complete contract is maintained in
+[docs/openapi.yaml](docs/openapi.yaml), with prose in [docs/api.md](docs/api.md).
+A future client (React Native, desktop, CLI) can be built against the documented
+API without reading Go source.
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
 - [Development](docs/development.md)
 - [API](docs/api.md)
+- [Authentication](docs/authentication.md)
+- [Security](docs/security.md)
 - [Storage model](docs/storage.md)
 - [Libraries](docs/libraries.md)
 - [Database](docs/database.md)
