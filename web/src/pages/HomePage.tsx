@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { ApiError, apiGet } from '../api/client';
 import type { HealthResponse, VersionResponse } from '../api/types';
@@ -71,6 +72,9 @@ export default function HomePage() {
           <Brand>Cairn</Brand>
         </h1>
         <p className="tagline">Your personal place for files, photos, videos, and memories.</p>
+        <nav className="home-nav" aria-label="Sections">
+          <Link to="/memories">Memories</Link>
+        </nav>
       </header>
 
       <div role="status" aria-live="polite" className="home-status">
