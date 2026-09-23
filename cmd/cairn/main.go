@@ -109,11 +109,28 @@ func run() error {
 		Workers:           cfg.MLWorkers,
 		DistanceThreshold: cfg.MLDistanceThreshold,
 	}, ml.AverageHashProvider{})
-	if cfg.MLEnabled && cfg.MLSimilarity {
-		idxManager.AfterScan = func(libraryID, root string) {
-			if _, err := mlManager.Pass(context.Background(), libraryID, root); err != nil {
-				logger.Warn("similarity pass after index", "library_id", libraryID, "error", err)
+	faces := ml.NewFaceManager(logger, ml.FaceConfig{
+		Enabled:           cfg.MLEnabled && cfg.MLFaces,
+		Workers:           cfg.MLFaceWorkers,
+		MinConfidence:     cfg.MLFaceMinConfidence,
+		MinSize:           cfg.MLFaceMinSize,
+		Threshold:         cfg.MLFaceThreshold,
+	}, nil)
+	{
+		after := func(libraryID, root string) {
+			if cfg.MLSimilarity {
+				if _, err := mlManager.Pass(context.Background(), libraryID, root); err != nil {
+					logger.Warn("similarity pass after index", "library_id", libraryID, "error", err)
+				}
 			}
+			if faces.Enabled() {
+				if _, err := faces.Pass(context.Background(), root); err != nil {
+					logger.Warn("face pass after index", "library_id", libraryID, "error", err)
+				}
+			}
+		}
+		if (cfg.MLEnabled && cfg.MLSimilarity) || faces.Enabled() {
+			idxManager.AfterScan = after
 		}
 	}
 
@@ -143,6 +160,7 @@ func run() error {
 		Libraries:     libraries,
 		Indexer:       idxManager,
 		ML:            mlManager,
+		Faces:         faces,
 		Backups:       backupMgr,
 		Keys:          keys,
 		SecureCookies: cfg.CookieSecure,
