@@ -35,7 +35,7 @@ func (s *Server) openMediaService(
 		return nil, nil, false
 	}
 	store := media.NewFileStore(db, lib.ID)
-	svc := media.NewService(store, lib.Root)
+	svc := media.NewService(store, lib.Root, media.WithMaxUploadBytes(s.maxUploadBytes))
 	cleanup := func() { _ = db.Close() }
 	return svc, cleanup, true
 }
@@ -150,8 +150,22 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request, u *aut
 		s.writeLibraryError(w, r, err)
 		return
 	}
-	// 32 MiB in memory, rest spooled to disk.
+	// 32 MiB in memory, rest spooled to disk. The request body is capped so
+	// the spool cannot grow without bound (media.WriteUpload enforces the same
+	// limit at the store layer). A small margin absorbs multipart part
+	// headers and form fields.
+	limit := s.maxUploadBytes
+	if limit <= 0 {
+		limit = media.DefaultMaxUploadBytes
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit+(1<<20))
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusRequestEntityTooLarge,
+				CodePayloadTooLarge, "Upload exceeds the maximum allowed size.")
+			return
+		}
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
 			CodeBadRequest, "Invalid multipart form.")
 		return
@@ -450,6 +464,9 @@ func (s *Server) writeMediaError(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, media.ErrPathTraversal):
 		writeError(w, s.logger, reqID, http.StatusBadRequest, CodeBadRequest,
 			"Invalid file path.")
+	case errors.Is(err, media.ErrUploadTooLarge):
+		writeError(w, s.logger, reqID, http.StatusRequestEntityTooLarge,
+			CodePayloadTooLarge, "Upload exceeds the maximum allowed size.")
 	default:
 		s.logger.Error("media operation", "error", err)
 		writeError(w, s.logger, reqID, http.StatusInternalServerError,
