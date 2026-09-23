@@ -77,10 +77,13 @@ codec (`internal/backups`) is shared by every backup; records live in the
 server database; the run/verify/restore surface is admin-only under
 `/api/v1/backups`.
 
-## Phase 11 — Local ML (planned)
+## Phase 11 — Local ML (implemented)
 
-Optional local-only face recognition, similarity, embeddings; asynchronous,
-resource-limited, individually configurable. Design: docs/ml.md.
+Optional local-only perceptual-hash similarity search; asynchronous, worker-bounded,
+individually configurable and disabled by default. Signatures are derived data in
+the library database. Design: docs/ml.md, ADR-0009. Scoped to similarity only;
+face recognition and embedding model versioning are deferred and can later
+implement the same provider contract.
 
 ## Phase 12 — Sanitizers (backlog)
 
