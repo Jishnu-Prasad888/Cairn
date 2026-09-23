@@ -23,7 +23,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 4
+	SchemaVersion = 5
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.
@@ -328,4 +328,19 @@ END;
 CREATE TRIGGER IF NOT EXISTS fts_memories_delete AFTER DELETE ON memories BEGIN
 	DELETE FROM fts_memories WHERE memory_id = old.id;
 END;
+
+-- ml_signatures stores per-file similarity signatures produced by the local
+-- ML subsystem (Phase 11). Derived, removable data: purging the table never
+-- touches originals and signatures can be regenerated. provider + version
+-- identify the algorithm so a future provider change cannot corrupt rows.
+CREATE TABLE IF NOT EXISTS ml_signatures (
+	file_id    TEXT PRIMARY KEY REFERENCES indexed_files(id) ON DELETE CASCADE,
+	provider   TEXT NOT NULL,
+	version    INTEGER NOT NULL,
+	signature  INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ml_signatures_provider_idx ON ml_signatures (provider);
 `
