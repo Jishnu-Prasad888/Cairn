@@ -40,9 +40,21 @@ Two files describe the backup:
 Every entry is written with the same streaming codec (`internal/backups`):
 
 - a fixed 57-byte header: magic `CAIRNBK\x01`, flags byte, SHA-256 of the
-  plaintext, plaintext size, stored size (plus a 16-byte AES-IV when encrypted),
-- optional gzip so it is already-compressed (media) data is stored raw,
-- optional AES-256-CTR encryption with a fresh random IV per entry.
+  plaintext, plaintext size, stored size,
+- optional gzip so already-compressed (media) data is stored raw,
+- optional encryption via the **shared AEAD kernel** (Phase 14): when a backup
+  is passphrase-encrypted the body is a sequence of independent AES-256-GCM
+  sealed blobs (`internal/crypto`, same format used for `.cairn` identities and
+  thumbnails). Each `64 KiB` chunk is authenticated, so a tampered, truncated,
+  or wrong-passphrase payload fails fast with the kernel's typed errors
+  (`crypto.ErrInvalidPassphrase` / `crypto.ErrCorrupt`) instead of silently
+  glitching or being partially restored.
+
+The header's flags byte also carries an `AEADSealed` bit for self-documentation;
+the AEAD magic at the start of the body disambiguates new sealed payloads from
+legacy encrypted payloads written by pre-Phase-14 releases (AES-256-CTR with a
+16-byte IV, unkeyed SHA-256). Legacy CTR backups remain readable, verifiable,
+and restorable byte-for-byte; new encrypted backups are always AEAD-sealed.
 
 Writes go to a temp file and are `Materialize`d into place, so sizes are known
 upfront and memory stays bounded.

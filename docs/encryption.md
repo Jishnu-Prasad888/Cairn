@@ -111,7 +111,10 @@ unreadable until the passphrase is re-enabled.
 
 ## Follow-ups (out of scope)
 
-- Harden the backup codec: migrate from CTR+SHA-256 to the shared AEAD kernel.
+- Harden the backup codec: migrate from CTR+SHA-256 to the shared AEAD
+  kernel. **Shipped as Phase 14** (docs/designs/014-backup-aead-codec.md,
+  ADR-0012): new encrypted backups are sealed with the shared AEAD kernel;
+  legacy CTR+SHA-256 payloads remain readable byte-for-byte.
 - Optional rewrite pass to seal legacy artifacts on demand.
 - Full SQLite-at-rest encryption (requires a non-pure-Go backend or a custom
   ciphertext layer).

@@ -102,3 +102,67 @@ func TestDeriveKeyStableAndDistinct(t *testing.T) {
 		t.Error("same passphrase must reproduce the key across instantiations")
 	}
 }
+
+func TestNewKeysFromKeyDisabled(t *testing.T) {
+	for _, key := range [][]byte{nil, {}, {0x01}, []byte("too-short-to-be-a-key")} {
+		if keys := NewKeysFromKey(key); keys.Enabled() {
+			t.Errorf("NewKeysFromKey(%v) must be disabled", key)
+		}
+	}
+	disabled := NewKeysFromKey(nil)
+	plain := []byte("opaque")
+	if got := disabled.Seal(plain); !bytes.Equal(got, plain) {
+		t.Error("disabled Seal must pass through")
+	}
+	if got, err := disabled.Open(plain); err != nil || !bytes.Equal(got, plain) {
+		t.Error("disabled Open must pass through")
+	}
+}
+
+func TestNewKeysFromKeyRoundTrip(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	keys := NewKeysFromKey(key)
+	if !keys.Enabled() {
+		t.Fatal("32-byte key must yield an enabled Keys")
+	}
+	plain := []byte("sealed backup chunk")
+	sealed := keys.Seal(plain)
+	if bytes.Equal(sealed, plain) {
+		t.Error("enabled Seal must not equal the input")
+	}
+	if !IsSealed(sealed) {
+		t.Error("sealed output must be detectable via IsSealed")
+	}
+	opened, err := keys.Open(sealed)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if !bytes.Equal(opened, plain) {
+		t.Error("Open did not recover exact plaintext")
+	}
+}
+
+func TestNewKeysFromKeyWrongKey(t *testing.T) {
+	sealKey := NewKeysFromKey([]byte("0123456789abcdef0123456789abcdef"))
+	openKey := NewKeysFromKey([]byte("fedcba9876543210fedcba9876543210"))
+	sealed := sealKey.Seal([]byte("sensitive payload"))
+	if _, err := openKey.Open(sealed); err != ErrInvalidPassphrase {
+		t.Fatalf("wrong key: got %v, want ErrInvalidPassphrase", err)
+	}
+}
+
+func TestSealedSizeHelpers(t *testing.T) {
+	if SealHeaderLen() != blobHeaderLen+nonceLen {
+		t.Errorf("SealHeaderLen() = %d, want %d", SealHeaderLen(), blobHeaderLen+nonceLen)
+	}
+	if SealTagLen() != gcmTagLen {
+		t.Errorf("SealTagLen() = %d, want %d", SealTagLen(), gcmTagLen)
+	}
+	keys := NewKeysFromKey([]byte("0123456789abcdef0123456789abcdef"))
+	for _, n := range []int{0, 1, 63, 64, 1024, 65536} {
+		plain := make([]byte, n)
+		if got, want := len(keys.Seal(plain)), SealedSize(n); got != want {
+			t.Errorf("SealedSize(%d) = %d, want %d (actual sealed length)", n, want, got)
+		}
+	}
+}

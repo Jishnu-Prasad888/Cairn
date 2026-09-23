@@ -32,8 +32,9 @@ type Config struct {
 	// Keep is how many completed backups to retain; older ones are pruned.
 	Keep int
 
-	// Passphrase optionally encrypts every backup payload with AES-256-CTR
-	// plus a SHA-256 integrity hash. Restore requires the same passphrase.
+	// Passphrase optionally encrypts every backup payload with the shared
+	// AEAD kernel (AES-256-GCM via crypto.NewKeysFromKey, Phase 13/14).
+	// Restore requires the same passphrase.
 	Passphrase string
 
 	// Interval is the scheduled backup cadence (0 disables scheduling).

@@ -61,8 +61,8 @@ type Config struct {
 	// negative disables the scheduler (manual backups still work).
 	BackupIntervalMinutes int
 
-	// BackupPassphrase optionally encrypts every backup stream with
-	// AES-256-CTR plus a SHA-256 integrity hash. The passphrase is never
+	// BackupPassphrase optionally encrypts every backup payload with the
+	// shared AEAD kernel (AES-256-GCM, Phase 14). The passphrase is never
 	// stored; a random per-backup salt is derived with argon2id. Backup
 	// restore requires the same passphrase.
 	BackupPassphrase string
