@@ -43,11 +43,18 @@ const (
 	keyLen        = 32 // AES-256
 	saltLen       = 16 // argon2id salt (2 x hashLen)
 	// keyTime, keyMem, keyThreads mirror the passphrase derivation parameters
-	// used by backups (docs/adr/001 athletes and backups doc); kept identical so
-	// the whole stack agrees on one OWASP-recommended config.
+	// used by backups (docs/adr/0012-backup-aead-codec.md and docs/backups.md);
+	// kept identical so the whole stack agrees on one OWASP-recommended config.
 	keyTime    = 1
 	keyMem     = 64 * 1024 // 64 MiB
 	keyThreads = 4
+
+	// gcmTagLen is the authentication tag size of the AES-256-GCM construct
+	// built by NewKeys/NewKeysFromKey (the cipher.NewGCM default for a 12-byte
+	// nonce). Kept in one place so the sealed-size bookkeeping performed by
+	// callers (the backup codec) stays exact for as long as this kernel defines
+	// the blob format.
+	gcmTagLen = 16
 )
 
 var (
@@ -79,6 +86,28 @@ func NewKeys(passphrase string) *Keys {
 	}
 	salt := []byte(protocolSalt)
 	key := argon2.IDKey([]byte(passphrase), salt, keyTime, keyMem, keyThreads, keyLen)
+	return newKeys(key)
+}
+
+// NewKeysFromKey returns an enabled Keys that seals and opens with the given
+// already-derived 32-byte AES-256 key, without running argon2id. It exists for
+// callers that derive their own key (the backup codec, which carries a random
+// per-backup salt and derives via argon2id before handing the key here) so they
+// reuse the exact same sealed blob format, sentinels, and transparent-disabled
+// behavior as passphrase-driven keys.
+//
+// A nil, empty, or non-32-byte key returns a disabled Keys (Seal/Open become
+// transparent passthrough), mirroring NewKeys(""); callers can guard on
+// Enabled() exactly once.
+func NewKeysFromKey(key []byte) *Keys {
+	if len(key) != keyLen {
+		return &Keys{}
+	}
+	return newKeys(key)
+}
+
+// newKeys builds an enabled AES-256-GCM Keys from a validated 32-byte key.
+func newKeys(key []byte) *Keys {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		// AES-256 always succeeds for a 32-byte key; this is unreachable.
@@ -91,6 +120,20 @@ func NewKeys(passphrase string) *Keys {
 	}
 	return &Keys{aead: aead, key: key}
 }
+
+// SealHeaderLen returns the fixed byte length of a sealed blob's leading header
+// (magic + version + nonce), before the GCM ciphertext+tag starts.
+func SealHeaderLen() int { return blobHeaderLen + nonceLen }
+
+// SealTagLen returns the byte length of the GCM authentication tag appended to
+// each sealed blob.
+func SealTagLen() int { return gcmTagLen }
+
+// SealedSize returns the exact byte length of Seal(plain) for a plaintext of
+// plainLen bytes, i.e. the storage a sealed artifact will occupy. It lets
+// callers that need on-disk size bookkeeping (the backup codec's stored-size
+// header) compute it without re-deriving the blob layout.
+func SealedSize(plainLen int) int { return plainLen + SealHeaderLen() + SealTagLen() }
 
 // Enabled reports whether this Keys encrypts at rest. A disabled Keys passes
 // data through untouched (legacy / unencrypted behavior).
