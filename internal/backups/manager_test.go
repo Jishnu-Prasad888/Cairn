@@ -415,7 +415,9 @@ func TestBackupLegacyCTRStillReads(t *testing.T) {
 		}
 		plain, err := io.ReadAll(pr)
 		ferr := pr.Err()
-		f.Close()
+		if cerr := f.Close(); cerr != nil && ferr == nil {
+			ferr = cerr
+		}
 		if err != nil || ferr != nil {
 			t.Fatalf("read %s: %v / %v", rel, err, ferr)
 		}
