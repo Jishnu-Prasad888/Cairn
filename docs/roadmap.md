@@ -7,7 +7,7 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **Phase 14 is the current deliverable and is tracked as an open PR.**
+- **Phase 15 is the current deliverable and is tracked as an open PR.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
@@ -112,6 +112,16 @@ disk remain read/verify/restore byte-identical (legacy reader retained and
 pinned by a fixture test). Passphrase handling, the REST surface, and the
 unencrypted path are unchanged; originals remain untouched (ADR-0004).
 Design: docs/designs/014-backup-aead-codec.md, ADR-0012.
+
+## Phase 15 — Face recognition (in progress)
+
+Optional, local face recognition on top of the Phase 11 ML seam: face
+detection (`internal/ml` Pigo provider, cascade embedded), per-face appearance
+descriptors, incremental clustering into nameable `people`, person-scoped
+search, a People UI, and a privacy purge for all derived face data. Everything
+is opt-in (`CAIRN_ML_ENABLED` + `CAIRN_ML_FACES`), local, and original-free;
+people are library-scoped and travel with the library database. Design:
+docs/designs/015-face-recognition.md, ADR-0013.
 
 ## Later phases (under design)
 
