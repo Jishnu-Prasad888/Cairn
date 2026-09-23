@@ -29,6 +29,8 @@ tags:
     description: Long-form Markdown documents with version history and internal references
   - name: Backups
     description: Server, library metadata, and media backups (admin only)
+  - name: ML
+    description: Local similarity search via perceptual hashing (admin for writes, per-file reads)
 security:
   - cookieAuth: []
 paths:
@@ -1068,6 +1070,142 @@ paths:
       security:
         - cookieAuth: []
 
+  /libraries/{libraryID}/ml:
+    get:
+      tags: [ML]
+      operationId: getMLStatus
+      summary: Report the local similarity capability for a library
+      description: >
+        Admin only. Returns whether ML similarity is enabled, the active
+        provider and version, the number of signatured files, and the distance
+        threshold used to flag near-duplicates.
+      parameters:
+        - name: libraryID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ML status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MLStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Library is offline
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/ml/similarity/pass:
+    post:
+      tags: [ML]
+      operationId: runSimilarityPass
+      summary: Run a similarity pass over all present media files
+      description: >
+        Admin only. Computes perceptual signatures for every indexed file that
+        lacks one and stores them as derived data. Runs in the background with
+        bounded concurrency; the response reports that the pass has started.
+      parameters:
+        - name: libraryID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Pass started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MLPassResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Library is offline
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/ml/purge:
+    post:
+      tags: [ML]
+      operationId: purgeMLSignatures
+      summary: Delete all derived similarity signatures for a library
+      description: >
+        Admin only. Removes the derived signature data; originals are
+        untouched and a later pass can regenerate it. Returns the number of
+        purged rows.
+      parameters:
+        - name: libraryID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Purged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MLPurgeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Library is offline
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/files/{fileID}/similar:
+    get:
+      tags: [ML]
+      operationId: findSimilarFiles
+      summary: Find perceptually similar files in a library
+      description: >
+        Returns the files whose stored signature is within the configured
+        distance of the given file's, ordered by proximity. Requires the same
+        per-file Read capability as other content routes. Returns an empty
+        list when ML is disabled or no pass has run yet.
+      parameters:
+        - name: libraryID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Similar files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarFilesResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
 components:
   schemas:
     BackupRecord:
@@ -1618,6 +1756,72 @@ components:
         request to a share endpoint that gates a password.
       schema:
         type: string
+    MLStatus:
+      type: object
+      required: [library_id, enabled, provider, provider_version, signatured, distance_limit]
+      properties:
+        library_id:
+          type: string
+        enabled:
+          type: boolean
+          description: Whether ML similarity is enabled for this library.
+        provider:
+          type: string
+          description: Active provider identifier (e.g. average_hash).
+        provider_version:
+          type: integer
+          description: Provider algorithm version; signatures are versioned against it.
+        signatured:
+          type: integer
+          description: Number of present files that already have a signature.
+        distance_limit:
+          type: integer
+          description: Hamming distance threshold for flagging near-duplicates.
+        last_pass_at:
+          type: string
+          format: date-time
+          description: When the most recent pass began.
+    MLPassResult:
+      type: object
+      required: [library_id, status]
+      properties:
+        library_id:
+          type: string
+        status:
+          type: string
+          description: Always "similarity pass started"; the pass runs in the background.
+    MLPurgeResult:
+      type: object
+      required: [library_id, purged]
+      properties:
+        library_id:
+          type: string
+        purged:
+          type: integer
+          description: Number of signature rows deleted.
+    SimilarFilesResult:
+      type: object
+      required: [similar]
+      properties:
+        similar:
+          type: array
+          description: Candidate files ordered by proximity (closest first).
+          items:
+            type: object
+            required: [file_id, similarity]
+            properties:
+              file_id:
+                type: string
+              file_path:
+                type: string
+                description: Relative path within the library; empty if missing.
+              distance:
+                type: integer
+                description: Hamming distance between signatures.
+              similarity:
+                type: number
+                format: double
+                description: Fraction of hash bits in common, 0..1.
   responses:
     BadRequest:
       description: Validation failure
