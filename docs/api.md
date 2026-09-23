@@ -92,6 +92,9 @@ every request — no custom token plumbing.
   server. Public, but only valid once (CONFLICT afterwards).
 - `POST /api/v1/auth/login` starts a session. Every failure — unknown username,
   wrong password, disabled account — returns the same `UNAUTHORIZED` body.
+  Public auth endpoints are rate limited: exceeding the sustained budget or the
+  failed-attempt lockout returns `429 RATE_LIMITED` with a `Retry-After`
+  header.
 - `POST /api/v1/auth/logout` revokes the session and clears the cookie.
 - `GET /api/v1/auth/status` reports bootstrap and authentication state so
   clients can route to setup/login/app on load.

@@ -7,7 +7,7 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **Phase 15 is the current deliverable and is tracked as an open PR.**
+- **Phase 16 is the current deliverable and is tracked as an open PR.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
@@ -113,7 +113,7 @@ pinned by a fixture test). Passphrase handling, the REST surface, and the
 unencrypted path are unchanged; originals remain untouched (ADR-0004).
 Design: docs/designs/014-backup-aead-codec.md, ADR-0012.
 
-## Phase 15 — Face recognition (in progress)
+## Phase 15 — Face recognition (implemented)
 
 Optional, local face recognition on top of the Phase 11 ML seam: face
 detection (`internal/ml` Pigo provider, cascade embedded), per-face appearance
@@ -122,6 +122,14 @@ search, a People UI, and a privacy purge for all derived face data. Everything
 is opt-in (`CAIRN_ML_ENABLED` + `CAIRN_ML_FACES`), local, and original-free;
 people are library-scoped and travel with the library database. Design:
 docs/designs/015-face-recognition.md, ADR-0013.
+
+## Phase 16 — Security hardening (in progress)
+
+A defensive review of the server surface: authentication, authorization,
+path traversal, uploads and MIME handling, sessions, shares, XSS, CSRF, SQL
+injection, rate limits, secrets, resource isolation, and logging. Findings are
+tracked in docs/designs/016-security-hardening.md and fixed behind tests.
+Design: docs/designs/016-security-hardening.md, ADR-0014.
 
 ## Later phases (under design)
 
