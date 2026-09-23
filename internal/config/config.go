@@ -48,6 +48,24 @@ type Config struct {
 	// server. Set to true when Cairn sits behind a TLS-terminating reverse
 	// proxy.
 	CookieSecure bool
+
+	// BackupDir is where library and server backups are written. Empty means
+	// backups are disabled until configured.
+	BackupDir string
+
+	// BackupKeep is how many completed backups are retained. Older backups are
+	// pruned automatically after each successful backup.
+	BackupKeep int
+
+	// BackupIntervalMinutes controls the scheduled backup cadence. Zero or
+	// negative disables the scheduler (manual backups still work).
+	BackupIntervalMinutes int
+
+	// BackupPassphrase optionally encrypts every backup stream with
+	// AES-256-CTR plus a SHA-256 integrity hash. The passphrase is never
+	// stored; a random per-backup salt is derived with argon2id. Backup
+	// restore requires the same passphrase.
+	BackupPassphrase string
 }
 
 // Load builds a Config from the process environment and platform defaults.
@@ -57,11 +75,15 @@ type Config struct {
 // honored for the default data directory.
 func Load() Config {
 	return Config{
-		HTTPAddr:     envOrDefault("HTTP_ADDR", DefaultHTTPAddr),
-		DataDir:      dataDir(),
-		LogLevel:     envOrDefaultTrim("LOG_LEVEL", DefaultLogLevel),
-		WebDistDir:   envOrDefaultTrim("WEB_DIST", ""),
-		CookieSecure: envOrDefaultBool("COOKIE_SECURE", false),
+		HTTPAddr:              envOrDefault("HTTP_ADDR", DefaultHTTPAddr),
+		DataDir:               dataDir(),
+		LogLevel:              envOrDefaultTrim("LOG_LEVEL", DefaultLogLevel),
+		WebDistDir:            envOrDefaultTrim("WEB_DIST", ""),
+		CookieSecure:          envOrDefaultBool("COOKIE_SECURE", false),
+		BackupDir:             envOrDefaultTrim("BACKUP_DIR", ""),
+		BackupKeep:            envOrDefaultInt("BACKUP_KEEP", 4),
+		BackupIntervalMinutes: envOrDefaultInt("BACKUP_INTERVAL_MIN", 0),
+		BackupPassphrase:      os.Getenv(EnvPrefix + "_BACKUP_PASSPHRASE"),
 	}
 }
 
@@ -134,6 +156,18 @@ func envOrDefaultBool(name string, def bool) bool {
 	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
 		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
 			return b
+		}
+	}
+	return def
+}
+
+// envOrDefaultInt parses a CAIRN_<name> integer setting. Only valid integers
+// are honored; anything else falls back to the default so a malformed value
+// never disables an outage-prone safety setting.
+func envOrDefaultInt(name string, def int) int {
+	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
 		}
 	}
 	return def
