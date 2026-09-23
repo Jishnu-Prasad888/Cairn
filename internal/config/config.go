@@ -89,6 +89,25 @@ type Config struct {
 	// MLDistanceThreshold is the maximum Hamming distance (0-64) at or below
 	// which files are reported as similar.
 	MLDistanceThreshold int
+
+	// MLFaces turns the local face capability on (detection, clustering, and
+	// people). It is only consulted when MLEnabled is true; default false.
+	MLFaces bool
+
+	// MLFaceWorkers caps concurrent files scanned per face pass.
+	MLFaceWorkers int
+
+	// MLFaceMinConfidence floors a detection's normalized score (0..1).
+	// pigo reports raw scores around 5..30 for real faces, so 0.05 maps to
+	// that same raw threshold.
+	MLFaceMinConfidence float64
+
+	// MLFaceMinSize is the smallest detection window in pixels.
+	MLFaceMinSize int
+
+	// MLFaceThreshold is the minimum cosine similarity (0..1) for an
+	// unassigned face to join an existing person during clustering.
+	MLFaceThreshold float64
 }
 
 // Load builds a Config from the process environment and platform defaults.
@@ -112,6 +131,11 @@ func Load() Config {
 		MLSimilarity:          envOrDefaultBool("ML_SIMILARITY", true),
 		MLWorkers:             envOrDefaultInt("ML_WORKERS", 2),
 		MLDistanceThreshold:   envOrDefaultInt("ML_DISTANCE_THRESHOLD", 10),
+		MLFaces:               envOrDefaultBool("ML_FACES", false),
+		MLFaceWorkers:         envOrDefaultInt("ML_FACE_WORKERS", 2),
+		MLFaceMinConfidence:   envOrDefaultFloat("ML_FACE_MIN_CONFIDENCE", 0.05),
+		MLFaceMinSize:         envOrDefaultInt("ML_FACE_MIN_SIZE", 60),
+		MLFaceThreshold:       envOrDefaultFloat("ML_FACE_THRESHOLD", 0.82),
 	}
 }
 
@@ -196,6 +220,17 @@ func envOrDefaultInt(name string, def int) int {
 	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+// envOrDefaultFloat parses a CAIRN_<name> floating-point setting, falling
+// back to the default when unset or malformed.
+func envOrDefaultFloat(name string, def float64) float64 {
+	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			return f
 		}
 	}
 	return def

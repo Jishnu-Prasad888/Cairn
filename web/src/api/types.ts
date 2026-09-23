@@ -60,3 +60,33 @@ export interface MemoryUpdateRequest {
   body: string;
   memory_date?: string;
 }
+
+export interface FaceStatus {
+  enabled: boolean;
+  provider: string;
+  provider_version: number;
+  faces: number;
+  people: number;
+  unassigned: number;
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  cover_face_id?: string;
+  cover_file_id?: string;
+  face_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FaceSummary {
+  id: string;
+  file_id: string;
+  file_path?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence: number;
+}

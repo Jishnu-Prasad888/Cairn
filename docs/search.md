@@ -17,6 +17,7 @@ Query parameters:
 | `folder`   | Folder path prefix filter (e.g. `holiday/Japan`).              |
 | `tag`      | Tag name filter (case-insensitive).                            |
 | `album`    | Album ID filter.                                               |
+| `person`   | Person ID filter (faces assigned to a person). Phase 15.       |
 | `min_size` | Minimum file size in bytes.                                    |
 | `max_size` | Maximum file size in bytes.                                    |
 | `from`     | `mod_time` lower bound (RFC3339).                              |
@@ -58,8 +59,8 @@ words per phrase before building the FTS5 expression.
 
 ## Filters
 
-`type`, `folder`, `tag`, `album`, `min_size`, `max_size`, `from`, and `to`
-combine with `q` (or stand alone in browse mode) and all result in
+`type`, `folder`, `tag`, `album`, `person`, `min_size`, `max_size`, `from`,
+and `to` combine with `q` (or stand alone in browse mode) and all result in
 single-row-filtered keyset pagination.
 
 ## Capabilities

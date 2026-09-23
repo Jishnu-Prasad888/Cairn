@@ -23,7 +23,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 5
+	SchemaVersion = 6
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.
@@ -343,4 +343,54 @@ CREATE TABLE IF NOT EXISTS ml_signatures (
 );
 
 CREATE INDEX IF NOT EXISTS ml_signatures_provider_idx ON ml_signatures (provider);
+
+-- faces stores per-image face observations produced by the local ML face
+-- capability (Phase 15). Derived, regenerable data with the same lifecycle as
+-- ml_signatures: purging never touches originals and a pass can rebuild it.
+-- provider + version identify the detection/embedding algorithm so a future
+-- provider change cannot confuse clusters. descriptor is the per-face
+-- appearance vector used for clustering (normalized float32 BLOB).
+CREATE TABLE IF NOT EXISTS faces (
+	id          TEXT PRIMARY KEY,
+	file_id     TEXT NOT NULL REFERENCES indexed_files(id) ON DELETE CASCADE,
+	provider    TEXT NOT NULL,
+	version     INTEGER NOT NULL,
+	x           INTEGER NOT NULL,
+	y           INTEGER NOT NULL,
+	width       INTEGER NOT NULL,
+	height      INTEGER NOT NULL,
+	confidence  REAL NOT NULL,
+	descriptor  BLOB NOT NULL,
+	created_at  TEXT NOT NULL,
+	updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS faces_file_idx     ON faces (file_id);
+CREATE INDEX IF NOT EXISTS faces_provider_idx ON faces (provider);
+
+-- people are user-curated groupings of faces. Names live here and survive a
+-- face purge; the cover references become NULL when their faces are removed.
+CREATE TABLE IF NOT EXISTS people (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL,
+	cover_face_id TEXT REFERENCES faces(id) ON DELETE SET NULL,
+	cover_file_id TEXT REFERENCES indexed_files(id) ON DELETE SET NULL,
+	created_at    TEXT NOT NULL,
+	updated_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS people_name_idx ON people (name COLLATE NOCASE);
+
+-- person_faces assigns faces to people. assigned_by distinguishes automatic
+-- clustering from manual assignment so cluster passes never clobber a user's
+-- explicit decisions.
+CREATE TABLE IF NOT EXISTS person_faces (
+	person_id   TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+	face_id     TEXT NOT NULL REFERENCES faces(id) ON DELETE CASCADE,
+	assigned_by TEXT NOT NULL CHECK (assigned_by IN ('auto', 'manual')),
+	created_at  TEXT NOT NULL,
+	PRIMARY KEY (person_id, face_id)
+);
+
+CREATE INDEX IF NOT EXISTS person_faces_face_idx ON person_faces (face_id);
 `

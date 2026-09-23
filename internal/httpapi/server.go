@@ -26,6 +26,7 @@ type Server struct {
 	libraries     *library.Manager
 	indexer       *indexer.IndexManager
 	ml            *ml.Manager
+	faces         *ml.FaceManager
 	backups       *backups.Manager
 	keys          *crypto.Keys
 	secureCookies bool
@@ -53,6 +54,10 @@ type Dependencies struct {
 	// ML runs optional local similarity passes. It may be nil, in which case
 	// the ML endpoints return SERVICE_UNAVAILABLE.
 	ML *ml.Manager
+	// Faces runs optional local face recognition passes and people curation.
+	// It may be nil, in which case the face endpoints return
+	// SERVICE_UNAVAILABLE.
+	Faces *ml.FaceManager
 	// Backups runs server and library backups. It may be nil, in which case
 	// the backup-management endpoints return SERVICE_UNAVAILABLE.
 	Backups *backups.Manager
@@ -80,6 +85,7 @@ func New(deps Dependencies) *Server {
 		libraries:     deps.Libraries,
 		indexer:       deps.Indexer,
 		ml:            deps.ML,
+		faces:         deps.Faces,
 		backups:       deps.Backups,
 		keys:          deps.Keys,
 		secureCookies: deps.SecureCookies,
@@ -135,6 +141,27 @@ func (s *Server) Handler() http.Handler {
 			mux.Handle("POST /api/v1/libraries/{id}/ml/similarity/pass", s.withAuth(allowAdmin, s.handleMLPass))
 			mux.Handle("POST /api/v1/libraries/{id}/ml/purge", s.withAuth(allowAdmin, s.handleMLPurge))
 			mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/similar", s.withAuth(allowAny, s.handleSimilarFiles))
+		}
+		if s.faces != nil {
+			mux.Handle("GET /api/v1/libraries/{id}/ml/faces", s.withAuth(allowAdmin, s.handleFaceStatus))
+			mux.Handle("POST /api/v1/libraries/{id}/ml/faces/pass", s.withAuth(allowAdmin, s.handleFacePass))
+			mux.Handle("POST /api/v1/libraries/{id}/ml/faces/cluster", s.withAuth(allowAdmin, s.handleFaceCluster))
+			mux.Handle("POST /api/v1/libraries/{id}/ml/faces/purge", s.withAuth(allowAdmin, s.handleFacePurge))
+
+			// People curation reads follow resource capabilities like other
+			// content routes; curation writes use the library edit/create/
+			// delete capabilities.
+			mux.Handle("GET /api/v1/libraries/{id}/people", s.withAuth(allowAny, s.handleListPeople))
+			mux.Handle("POST /api/v1/libraries/{id}/people", s.withAuth(allowAny, s.handleCreatePerson))
+			mux.Handle("GET /api/v1/libraries/{id}/people/{personID}", s.withAuth(allowAny, s.handleGetPerson))
+			mux.Handle("POST /api/v1/libraries/{id}/people/{personID}/rename", s.withAuth(allowAny, s.handleRenamePerson))
+			mux.Handle("POST /api/v1/libraries/{id}/people/{personID}/cover", s.withAuth(allowAny, s.handleSetPersonCover))
+			mux.Handle("POST /api/v1/libraries/{id}/people/{personID}/merge", s.withAuth(allowAny, s.handleMergePeople))
+			mux.Handle("DELETE /api/v1/libraries/{id}/people/{personID}", s.withAuth(allowAny, s.handleDeletePerson))
+			mux.Handle("POST /api/v1/libraries/{id}/people/{personID}/faces/{faceID}", s.withAuth(allowAny, s.handleAssignFace))
+			mux.Handle("DELETE /api/v1/libraries/{id}/people/{personID}/faces/{faceID}", s.withAuth(allowAny, s.handleUnassignFace))
+			mux.Handle("GET /api/v1/libraries/{id}/faces", s.withAuth(allowAny, s.handleListFaces))
+			mux.Handle("GET /api/v1/libraries/{id}/faces/{faceID}/image", s.withAuth(allowAny, s.handleFaceImage))
 		}
 
 		// Permissions and shares administration (library scope).
