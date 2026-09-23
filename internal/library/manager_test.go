@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 )
 
@@ -25,7 +26,7 @@ func newTestManager(t *testing.T) (*Manager, *sql.DB) {
 		t.Fatalf("migrate: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewManager(pool, logger, audit.New(pool, logger)), pool
+	return NewManager(pool, logger, audit.New(pool, logger), crypto.NewKeys("")), pool
 }
 
 func TestCreateRegistersAndWritesMetadata(t *testing.T) {
@@ -163,7 +164,7 @@ func TestReconnectAtNewPathRebindsIdentity(t *testing.T) {
 		SchemaVersion: metadataSchemaVersion,
 		Name:          origIdent.Name,
 		CreatedAt:     origIdent.CreatedAt,
-	}); err != nil {
+	}, crypto.NewKeys("")); err != nil {
 		t.Fatalf("write identity to root2: %v", err)
 	}
 

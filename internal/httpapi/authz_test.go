@@ -16,6 +16,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 )
@@ -40,7 +41,7 @@ func newAuthzTestServer(t *testing.T) (http.Handler, *testClient, *testClient, s
 	auditSvc := audit.New(pool, logger)
 	authSvc := auth.NewService(pool, logger, auditSvc)
 	authzSvc := authz.NewService(pool, logger, nil)
-	libManager := library.NewManager(pool, logger, auditSvc)
+	libManager := library.NewManager(pool, logger, auditSvc, crypto.NewKeys(""))
 
 	libRoot := filepath.Join(tmpDir, "library")
 	if err := os.MkdirAll(libRoot, 0o755); err != nil {

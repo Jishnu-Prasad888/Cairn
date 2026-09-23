@@ -8,6 +8,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/backups"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
@@ -26,6 +27,7 @@ type Server struct {
 	indexer       *indexer.IndexManager
 	ml            *ml.Manager
 	backups       *backups.Manager
+	keys          *crypto.Keys
 	secureCookies bool
 }
 
@@ -54,6 +56,10 @@ type Dependencies struct {
 	// Backups runs server and library backups. It may be nil, in which case
 	// the backup-management endpoints return SERVICE_UNAVAILABLE.
 	Backups *backups.Manager
+	// Keys is the optional at-rest encryption key (Phase 13) used to seal the
+	// .cairn identity and thumbnails. It may be nil or disabled, in which
+	// case metadata is written in the clear.
+	Keys *crypto.Keys
 	// SecureCookies forces the Secure flag on session cookies even when the
 	// server did not observe TLS (e.g. behind a TLS-terminating proxy).
 	SecureCookies bool
@@ -75,6 +81,7 @@ func New(deps Dependencies) *Server {
 		indexer:       deps.Indexer,
 		ml:            deps.ML,
 		backups:       deps.Backups,
+		keys:          deps.Keys,
 		secureCookies: deps.SecureCookies,
 	}
 }

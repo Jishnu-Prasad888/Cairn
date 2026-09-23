@@ -1,10 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"net/http"
-	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
@@ -133,7 +132,6 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 
 	cairnDir := filepath.Join(lib.Root, ".cairn")
 	fileID := r.PathValue("fileID")
-	thumbPath := metadata.ThumbPath(cairnDir, fileID)
 
 	// Resolve the file so the capability check runs on its resource key even
 	// when the thumbnail already exists on disk.
@@ -155,23 +153,17 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 		return
 	}
 
-	// If thumbnail exists, serve it directly.
-	if info, err := os.Stat(thumbPath); err == nil {
-		tf, err := os.Open(thumbPath)
-		if err != nil {
-			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
-				CodeInternal, "Failed to open thumbnail.")
-			return
-		}
-		defer func() { _ = tf.Close() }()
+	// Serve an existing thumbnail (decrypted when at-rest encryption is on).
+	data, modTime, err := metadata.ReadThumb(cairnDir, fileID, s.keys)
+	if err == nil {
 		w.Header().Set("Content-Type", "image/jpeg")
-		http.ServeContent(w, r, fileID+".jpg", info.ModTime(), tf)
+		http.ServeContent(w, r, fileID+".jpg", modTime, bytes.NewReader(data))
 		return
 	}
 
 	// Thumbnail not found — try on-demand generation.
 	absPath := filepath.Join(lib.Root, filepath.FromSlash(f.RelPath))
-	generated, err := metadata.GenerateThumbnail(absPath, cairnDir, fileID)
+	generated, err := metadata.GenerateThumbnail(absPath, cairnDir, fileID, s.keys)
 	if err != nil || !generated {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
 			CodeNotFound, "Thumbnail not available for this file.")
@@ -179,15 +171,14 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 	}
 
 	// Serve the freshly generated thumbnail.
-	tf, err := os.Open(thumbPath)
+	data, modTime, err = metadata.ReadThumb(cairnDir, fileID, s.keys)
 	if err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open generated thumbnail.")
 		return
 	}
-	defer func() { _ = tf.Close() }()
 	w.Header().Set("Content-Type", "image/jpeg")
-	http.ServeContent(w, r, fileID+".jpg", time.Now(), tf)
+	http.ServeContent(w, r, fileID+".jpg", modTime, bytes.NewReader(data))
 }
 
 // --- nullable scan helpers ---

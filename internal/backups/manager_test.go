@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
@@ -66,7 +67,7 @@ func registerLibrary(t *testing.T, lm *library.Manager, root string) library.Lib
 func newManager(t *testing.T, pool *sql.DB, serverPath, backupDir, passphrase string, keep int) *Manager {
 	t.Helper()
 	logger := testLogger()
-	lm := library.NewManager(pool, logger, audit.New(pool, logger))
+	lm := library.NewManager(pool, logger, audit.New(pool, logger), crypto.NewKeys(""))
 	return NewManager(pool, logger, lm, Config{
 		Dir:        backupDir,
 		Keep:       keep,
@@ -100,7 +101,7 @@ func TestRunBackupLifecycle(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
 
 	m := newManager(t, pool, serverPath, backupDir, "", 4)
-	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "alpha"))
+	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "alpha"))
 
 	rec, err := m.Run(context.Background())
 	if err != nil {
@@ -179,7 +180,7 @@ func TestBackupIncremental(t *testing.T) {
 	pool, serverPath := tempServerDB(t)
 	backupDir := filepath.Join(t.TempDir(), "backups")
 
-	lm := library.NewManager(pool, testLogger(), audit.New(pool, testLogger()))
+	lm := library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys(""))
 	m := newManager(t, pool, serverPath, backupDir, "", 4)
 	lib := registerLibrary(t, lm, filepath.Join(t.TempDir(), "bravo"))
 
@@ -225,7 +226,7 @@ func TestBackupEncrypted(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
 
 	m := newManager(t, pool, serverPath, backupDir, "hunter2", 4)
-	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "charlie"))
+	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "charlie"))
 
 	rec, err := m.Run(context.Background())
 	if err != nil {
@@ -284,7 +285,7 @@ func TestBackupPlainRestore(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
 
 	m := newManager(t, pool, serverPath, backupDir, "", 4)
-	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "delta"))
+	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "delta"))
 
 	rec, err := m.Run(context.Background())
 	if err != nil {
@@ -313,7 +314,7 @@ func TestRestoreRejectsUnsafeManifestPaths(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
 
 	m := newManager(t, pool, serverPath, backupDir, "", 4)
-	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "gamma"))
+	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "gamma"))
 
 	rec, err := m.Run(context.Background())
 	if err != nil {
@@ -347,7 +348,7 @@ func TestBackupVerifyDetectsCorruption(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
 
 	m := newManager(t, pool, serverPath, backupDir, "", 4)
-	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "echo"))
+	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "echo"))
 
 	rec, err := m.Run(context.Background())
 	if err != nil {
@@ -385,7 +386,7 @@ func TestBackupRetentionPrunes(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "nested", "backups")
 
 	m := newManager(t, pool, serverPath, backupDir, "", 1)
-	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "foxtrot"))
+	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "foxtrot"))
 
 	first, err := m.Run(context.Background())
 	if err != nil {
@@ -421,7 +422,7 @@ func TestBackupJobFailure(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
 
 	m := newManager(t, pool, serverPath, backupDir, "", 4)
-	_ = registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "golf"))
+	_ = registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "golf"))
 
 	// Break the server snapshot by pointing at a non-existent cairn.db.
 	broken := newManager(t, pool, filepath.Join(t.TempDir(), "missing.db"), backupDir, "", 4)

@@ -86,6 +86,7 @@ All settings use the `CAIRN_` prefix.
 | `CAIRN_BACKUP_KEEP`    | `4`                                | Completed backups retained; older are pruned |
 | `CAIRN_BACKUP_INTERVAL_MIN` | `0`                            | Scheduled backup cadence in minutes (`0` = manual only) |
 | `CAIRN_BACKUP_PASSPHRASE`| *(disabled)*                     | Encrypts backups (needed for restore/verify) |
+| `CAIRN_ENCRYPTION_PASSPHRASE` | *(disabled)*            | Encrypts Cairn's on-disk metadata (.cairn identity + thumbnails) at rest |
 | `CAIRN_ML_ENABLED`      | `false`                           | Enable local ML similarity search           |
 | `CAIRN_ML_SIMILARITY`   | `true`                            | Run a similarity pass when ML is enabled    |
 | `CAIRN_ML_WORKERS`      | `2`                               | Bounded concurrency for the similarity pass |
