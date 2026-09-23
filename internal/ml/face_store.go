@@ -75,7 +75,7 @@ func (s *FaceStore) FilesToScan(ctx context.Context, provider string, version in
 	if err != nil {
 		return nil, fmt.Errorf("list files to face-scan: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var files []UnsignedFaceFile
 	for rows.Next() {
@@ -155,7 +155,7 @@ func (s *FaceStore) FacesUnassigned(ctx context.Context) ([]FaceRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list unassigned faces: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []FaceRecord
 	for rows.Next() {
@@ -178,7 +178,7 @@ func (s *FaceStore) PersonMeans(ctx context.Context) (map[string][]float32, erro
 	if err != nil {
 		return nil, fmt.Errorf("list person faces: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	sums := map[string][]float64{}
 	counts := map[string]int{}
@@ -258,7 +258,7 @@ func (s *FaceStore) ListPeople(ctx context.Context) ([]Person, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list people: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Person
 	for rows.Next() {
@@ -296,7 +296,7 @@ func (s *FaceStore) PersonFaces(ctx context.Context, personID string) ([]FaceRec
 	if err != nil {
 		return nil, fmt.Errorf("list person faces: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []FaceRecord
 	for rows.Next() {
@@ -384,12 +384,12 @@ func (s *FaceStore) Merge(ctx context.Context, keepID, sourceID string) error {
 	for rows.Next() {
 		var m mv
 		if err := rows.Scan(&m.faceID, &m.by); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("merge scan: %w", err)
 		}
 		moves = append(moves, m)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("merge rows: %w", err)
 	}

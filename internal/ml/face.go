@@ -316,16 +316,6 @@ func imageToGrayPixels(img image.Image, b image.Rectangle) []uint8 {
 	return out
 }
 
-// descriptorMagnitude returns the L2 norm of a descriptor (used to normalize
-// cluster means).
-func descriptorMagnitude(d []float32) float64 {
-	var s float64
-	for _, v := range d {
-		s += float64(v) * float64(v)
-	}
-	return math.Sqrt(s)
-}
-
 // DescriptorCosine returns the cosine similarity of two equal-length
 // descriptors, in [0, 1] once both are normalized (the appearance descriptor
 // is unit- or zero-scale).
