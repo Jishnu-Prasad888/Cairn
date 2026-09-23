@@ -85,9 +85,12 @@ the library database. Design: docs/ml.md, ADR-0009. Scoped to similarity only;
 face recognition and embedding model versioning are deferred and can later
 implement the same provider contract.
 
-## Phase 12 — Sanitizers (backlog)
+## Phase 12 — Sanitizers (implemented)
 
-Filename/path sanitizers and safe-path utilities across every entry point.
+A shared `internal/sanitize` path validator enforced by every path-accepting
+entry point: media-safe paths, renames, folder filters on file/folder listing
+and search, and backup restore (tampered-manifest containment). Symlink
+containment walks are deferred. Design: docs/sanitizers.md, ADR-0010.
 
 ## Phase 13 — Encrypted metadata (backlog)
 
