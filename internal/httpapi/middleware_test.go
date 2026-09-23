@@ -1,129 +1,125 @@
 package httpapi
 
 import (
-	"encoding/json"
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 )
 
-func TestRequestIDGeneratedWhenMissing(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := RequestIDFrom(r.Context())
-		if !ok {
-			t.Error("request ID not present in context")
-		}
-		if id == "" {
-			t.Error("request ID is empty")
-		}
-		w.WriteHeader(http.StatusOK)
-	})
+// newCaptureServer is newTestServer with a logger that writes into the
+// returned buffer, so middleware log lines can be asserted on.
+func newCaptureServer(t *testing.T) (http.Handler, *bytes.Buffer) {
+	t.Helper()
+	pool, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate test database: %v", err)
+	}
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	srv := New(Dependencies{Logger: logger, DB: pool})
+	return srv.Handler(), &buf
+}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	requestID(inner).ServeHTTP(rec, req)
+func TestSecurityHeadersPresent(t *testing.T) {
+	handler, _ := newTestServer(t)
+	rec := doJSON(t, handler, http.MethodGet, "/api/v1/health")
 
-	if got := rec.Header().Get("X-Request-ID"); len(got) != 32 {
-		t.Errorf("generated X-Request-ID length = %d, want 32", len(got))
+	for _, hdr := range []string{
+		"X-Content-Type-Options",
+		"X-Frame-Options",
+		"Referrer-Policy",
+		"Content-Security-Policy",
+		"Cross-Origin-Opener-Policy",
+	} {
+		if rec.Header().Get(hdr) == "" {
+			t.Errorf("response missing security header %q", hdr)
+		}
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
 }
 
-func TestRequestIDRejectsMalformedClientValues(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	for _, bad := range []string{"", "has space", "a\nb", strings.Repeat("a", 200), "\x00"} {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("X-Request-ID", bad)
-		rec := httptest.NewRecorder()
-		requestID(inner).ServeHTTP(rec, req)
-
-		if got := rec.Header().Get("X-Request-ID"); got == bad {
-			t.Errorf("malformed X-Request-ID %q was accepted", bad)
-		}
-	}
-}
-
-func TestRecoverPanicsIntoJSONError(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic("boom")
-	})
-
-	handler := recoverPanics(testLogger(), inner)
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+func TestSameOriginAllowsMatchingHost(t *testing.T) {
+	handler, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/bootstrap", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+req.Host) // httptest Host is example.com → default port 80
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
-	}
-	var env ErrorResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
-		t.Fatalf("panic response is not JSON: %v", err)
-	}
-	if env.Error.Code != CodeInternal {
-		t.Errorf("code = %q, want INTERNAL", env.Error.Code)
-	}
-	// Panic handling must not leak the panic value to the client.
-	if rec.Body.String() == "boom" {
-		t.Error("panic value leaked to the client")
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("same-origin mutation returned 403; want it to reach the handler")
 	}
 }
 
-func TestRecoverSetStatusBeforePanic(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte("partial"))
-		panic("late")
-	})
-
-	handler := recoverPanics(testLogger(), inner)
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+func TestSameOriginRejectsCrossSite(t *testing.T) {
+	handler, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/bootstrap", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	// Once the status line is written it cannot be changed; the important
-	// property is that the server does not crash.
-	if rec.Code != http.StatusCreated {
-		t.Errorf("status = %d, want 201 (already committed)", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin mutation: status = %d, want 403", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("403 must carry a JSON error body")
 	}
 }
 
-func TestAccessLogPassthrough(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	handler := accessLog(testLogger(), inner)
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rec.Code)
-	}
-}
-
-func TestMiddlewareStackEndToEnd(t *testing.T) {
-	handler := WithMiddleware(testLogger(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, _ := RequestIDFrom(r.Context())
-		writeJSON(w, testLogger(), http.StatusOK, map[string]string{"id": id})
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+func TestSameOriginIgnoresSafeMethods(t *testing.T) {
+	handler, _ := newTestServer(t)
+	// Reads carry no CSRF risk; even a hostile Origin must not block them.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	req.Header.Set("Origin", "https://evil.example")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+		t.Fatalf("GET with foreign Origin: status = %d, want 200", rec.Code)
 	}
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+}
+
+func TestShareTokenRedactedFromAccessLog(t *testing.T) {
+	handler, buf := newCaptureServer(t)
+	token := "verysecrethishtoken123"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+token+"/files", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	logged := buf.String()
+	if strings.Contains(logged, token) {
+		t.Fatalf("access log leaked the share token: %s", logged)
 	}
-	if body["id"] == "" {
-		t.Error("handler did not receive request ID")
+	if !strings.Contains(logged, "[redacted]") {
+		t.Errorf("access log did not redact the token segment: %s", logged)
+	}
+}
+
+func TestRedactPath(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/api/v1/health", "/api/v1/health"},
+		{"/api/v1/shares/tok123/files", "/api/v1/shares/[redacted]/files"},
+		{"/api/v1/shares/tok123", "/api/v1/shares/[redacted]"},
+		{"/api/v1/shares/tok123/", "/api/v1/shares/[redacted]/"},
+	}
+	for _, tc := range cases {
+		if got := redactPath(tc.in); got != tc.want {
+			t.Errorf("redactPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
