@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
+	"github.com/Jishnu-Prasad888/Cairn/internal/likeutil"
 )
 
 // GrantInput describes an intended grant for creation.
@@ -141,8 +142,8 @@ func (s *Service) ListGrants(ctx context.Context, keyPrefix string) ([]Grant, er
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, resource_key, capabilities, effect, created_by, created_at
 		FROM permission_grants
-		WHERE resource_key = ? OR resource_key LIKE ?
-		ORDER BY created_at`, keyPrefix, prefix+"%")
+		WHERE resource_key = ? OR resource_key LIKE ? `+likeutil.EscapeClause+`
+		ORDER BY created_at`, keyPrefix, likeutil.Escape(prefix)+"%")
 	if err != nil {
 		return nil, fmt.Errorf("list grants: %w", err)
 	}
