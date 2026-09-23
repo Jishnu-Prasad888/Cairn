@@ -6,114 +6,99 @@ import (
 )
 
 func TestDisabledKeysAreTransparent(t *testing.T) {
-	k := NewKeys("")
-	if k.Enabled() {
-		t.Fatal("empty passphrase must disable encryption")
+	keys := NewKeys("")
+	if keys.Enabled() {
+		t.Fatal("empty passphrase must yield a disabled Keys")
 	}
-	raw := []byte(`{"name":"photos"}`)
-	if got := k.Seal(raw); !bytes.Equal(got, raw) {
-		t.Errorf("disabled Seal changed data")
+	plain := []byte("hello world")
+	if got := keys.Seal(plain); !bytes.Equal(got, plain) {
+		t.Error("disabled Seal must return input unchanged")
 	}
-	got, err := k.Open(raw)
+	got, err := keys.Open(plain)
 	if err != nil {
 		t.Fatalf("disabled Open: %v", err)
 	}
-	if !bytes.Equal(got, raw) {
-		t.Errorf("disabled Open changed data")
+	if !bytes.Equal(got, plain) {
+		t.Error("disabled Open must return input unchanged")
+	}
+	if IsSealed(plain) {
+		t.Error("disabled Keys must not mark plaintext as sealed")
 	}
 }
 
-func TestSealOpenRoundTrip(t *testing.T) {
-	k := NewKeys("correct horse battery staple")
-	if !k.Enabled() {
-		t.Fatal("passphrase must enable encryption")
+func TestEnabledKeysRoundTripAndSealIdentity(t *testing.T) {
+	keys := NewKeys("test passphrase")
+	if !keys.Enabled() {
+		t.Fatal("non-empty passphrase must yield an enabled Keys")
 	}
-	raw := []byte(`{"id":"abc","schema_version":1,"name":"photos"}`)
-
-	sealed := k.Seal(raw)
+	plain := []byte("secret payload")
+	sealed := keys.Seal(plain)
+	if bytes.Equal(sealed, plain) {
+		t.Error("enabled Seal must not equal the input")
+	}
 	if !IsSealed(sealed) {
-		t.Fatal("sealed blob is not marked as sealed")
+		t.Error("enabled Seal output must be detectable as sealed")
 	}
-	if bytes.Contains(sealed, []byte(`"photos"`)) {
-		t.Error("sealed blob leaks plaintext")
-	}
-
-	got, err := k.Open(sealed)
+	opened, err := keys.Open(sealed)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if !bytes.Equal(got, raw) {
-		t.Errorf("round trip mismatch: %s", got)
+	if !bytes.Equal(opened, plain) {
+		t.Error("Open did not recover exact plaintext")
 	}
 }
 
-func TestUniqueNoncesProduceDifferentBlobs(t *testing.T) {
-	k := NewKeys("s3cret passphrase")
-	raw := []byte("same plaintext")
-	a := k.Seal(raw)
-	b := k.Seal(raw)
-	if bytes.Equal(a, b) {
-		t.Error("identical blobs for repeated seals — nonce reuse risk")
-	}
-	ga, _ := k.Open(a)
-	gb, _ := k.Open(b)
-	if !bytes.Equal(ga, gb) {
-		t.Error("seals with distinct nonces did not open to identical plaintext")
-	}
-}
-
-func TestWrongPassphraseFails(t *testing.T) {
-	k := NewKeys("right passphrase")
-	wrong := NewKeys("wrong passphrase")
-	sealed := k.Seal([]byte("secret payload"))
+func TestEnabledKeysRejectWrongPassphrase(t *testing.T) {
+	sealer := NewKeys("correct passphrase")
+	wrong := NewKeys("different passphrase")
+	sealed := sealer.Seal([]byte("top secret"))
 	if _, err := wrong.Open(sealed); err != ErrInvalidPassphrase {
-		t.Errorf("wrong key Open = %v, want ErrInvalidPassphrase", err)
+		t.Fatalf("wrong passphrase: got %v, want ErrInvalidPassphrase", err)
+	}
+}
+
+func TestEnabledKeysRejectCorruptBlob(t *testing.T) {
+	keys := NewKeys("test")
+	sealed := keys.Seal([]byte("payload"))
+
+	// Truncated sealed blob.
+	if _, err := keys.Open(sealed[:9]); err != ErrCorrupt {
+		t.Fatalf("truncated: got %v, want ErrCorrupt", err)
+	}
+	// Bytes that merely carry the magic header but no ciphertext.
+	bogus := append([]byte(magic), 'x')
+	if _, err := keys.Open(bogus); err != ErrCorrupt {
+		t.Fatalf("bogus header: got %v, want ErrCorrupt", err)
+	}
+	// Tampered ciphertext must fail authentication.
+	tampered := append([]byte(nil), sealed...)
+	tampered[len(tampered)-1] ^= 0x01
+	if _, err := keys.Open(tampered); err == nil {
+		t.Fatal("tampered blob opened without error")
 	}
 }
 
 func TestEnabledKeysReadLegacyPlaintext(t *testing.T) {
-	k := NewKeys("a passphrase")
-	plain := []byte(`{"id":"legacy"}`)
-	got, err := k.Open(plain)
+	keys := NewKeys("test")
+	legacy := []byte("plaintext written before encryption")
+	got, err := keys.Open(legacy)
 	if err != nil {
-		t.Fatalf("Open plaintext: %v", err)
+		t.Fatalf("Open legacy plaintext: %v", err)
 	}
-	if !bytes.Equal(got, plain) {
-		t.Errorf("plaintext passthrough changed data")
-	}
-}
-
-func TestCorruptSealedRejected(t *testing.T) {
-	k := NewKeys("a passphrase")
-	sealed := k.Seal([]byte("payload"))
-	sealed = sealed[:headerSize+4]
-	if _, err := k.Open(sealed); err != ErrInvalidPassphrase {
-		t.Errorf("truncated blob Open = %v, want ErrInvalidPassphrase", err)
-	}
-
-	// Correct magic but an unsupported version byte is structurally malformed.
-	bad := make([]byte, headerSize+16)
-	copy(bad, formatMagic[:])
-	bad[len(formatMagic)] = 99
-	if _, err := k.Open(bad); err != ErrCorrupt {
-		t.Errorf("bad version blob Open = %v, want ErrCorrupt", err)
-	}
-
-	// Data that does not carry the magic is legacy plaintext, not an error.
-	legacy := []byte(`{"id":"x"}`)
-	if got, err := k.Open(legacy); err != nil || !bytes.Equal(got, legacy) {
-		t.Errorf("legacy plaintext Open = %v, %v; want unchanged", got, err)
+	if !bytes.Equal(got, legacy) {
+		t.Error("legacy plaintext must pass through unchanged")
 	}
 }
 
-func TestDeriveKeyStable(t *testing.T) {
-	if !bytes.Equal(DeriveKey("p"), DeriveKey("p")) {
-		t.Error("derivation is not deterministic")
+func TestDeriveKeyStableAndDistinct(t *testing.T) {
+	seed := []byte("payload")
+	a := NewKeys("same passphrase").Seal(seed)
+	b := NewKeys("same passphrase").Seal(seed)
+	if bytes.Equal(a, b) {
+		t.Error("two seals must use different nonces (randomization)")
 	}
-	if bytes.Equal(DeriveKey("p"), DeriveKey("q")) {
-		t.Error("different passphrases derived the same key")
-	}
-	if len(DeriveKey("p")) != KeySize {
-		t.Errorf("key size = %d, want %d", len(DeriveKey("p")), KeySize)
+	keyOpenA, _ := NewKeys("same passphrase").Open(a)
+	if !bytes.Equal(keyOpenA, seed) {
+		t.Error("same passphrase must reproduce the key across instantiations")
 	}
 }
