@@ -10,6 +10,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/backups"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
+	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
 )
 
 // Server is the Cairn HTTP application. It is a small composition of the
@@ -23,6 +24,7 @@ type Server struct {
 	authz         *authz.Service
 	libraries     *library.Manager
 	indexer       *indexer.IndexManager
+	ml            *ml.Manager
 	backups       *backups.Manager
 	secureCookies bool
 }
@@ -46,6 +48,9 @@ type Dependencies struct {
 	// Indexer manages per-library scan jobs and index status. It may be nil,
 	// in which case the indexing endpoints return SERVICE_UNAVAILABLE.
 	Indexer *indexer.IndexManager
+	// ML runs optional local similarity passes. It may be nil, in which case
+	// the ML endpoints return SERVICE_UNAVAILABLE.
+	ML *ml.Manager
 	// Backups runs server and library backups. It may be nil, in which case
 	// the backup-management endpoints return SERVICE_UNAVAILABLE.
 	Backups *backups.Manager
@@ -68,6 +73,7 @@ func New(deps Dependencies) *Server {
 		authz:         deps.Authz,
 		libraries:     deps.Libraries,
 		indexer:       deps.Indexer,
+		ml:            deps.ML,
 		backups:       deps.Backups,
 		secureCookies: deps.SecureCookies,
 	}
@@ -113,6 +119,16 @@ func (s *Server) Handler() http.Handler {
 		// operations, not per-resource capabilities.
 		mux.Handle("POST /api/v1/libraries/{id}/index", s.withAuth(allowAdmin, s.handleTriggerIndex))
 		mux.Handle("GET /api/v1/libraries/{id}/index/status", s.withAuth(allowAdmin, s.handleIndexStatus))
+
+		// Local ML surface (admin): similarity passing, status, and purge are
+		// server operations like indexing. Reading "similar files" follows
+		// per-resource capabilities like any other content route.
+		if s.ml != nil {
+			mux.Handle("GET /api/v1/libraries/{id}/ml", s.withAuth(allowAdmin, s.handleMLStatus))
+			mux.Handle("POST /api/v1/libraries/{id}/ml/similarity/pass", s.withAuth(allowAdmin, s.handleMLPass))
+			mux.Handle("POST /api/v1/libraries/{id}/ml/purge", s.withAuth(allowAdmin, s.handleMLPurge))
+			mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/similar", s.withAuth(allowAny, s.handleSimilarFiles))
+		}
 
 		// Permissions and shares administration (library scope).
 		mux.Handle("GET /api/v1/libraries/{id}/permissions", s.withAuth(allowAny, s.handleListGrants))
