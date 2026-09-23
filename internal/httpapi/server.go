@@ -18,18 +18,20 @@ import (
 // routes and shared dependencies; individual handlers stay in their own
 // files.
 type Server struct {
-	logger        *slog.Logger
-	db            *sql.DB
-	web           http.Handler
-	auth          *auth.Service
-	authz         *authz.Service
-	libraries     *library.Manager
-	indexer       *indexer.IndexManager
-	ml            *ml.Manager
-	faces         *ml.FaceManager
-	backups       *backups.Manager
-	keys          *crypto.Keys
-	secureCookies bool
+	logger         *slog.Logger
+	db             *sql.DB
+	web            http.Handler
+	auth           *auth.Service
+	authz          *authz.Service
+	libraries      *library.Manager
+	indexer        *indexer.IndexManager
+	ml             *ml.Manager
+	faces          *ml.FaceManager
+	backups        *backups.Manager
+	keys           *crypto.Keys
+	secureCookies  bool
+	ratelimit      *rateLimiter
+	maxUploadBytes int64
 }
 
 // Dependencies are the services the HTTP layer needs. Keeping them explicit
@@ -71,24 +73,29 @@ type Dependencies struct {
 	// WebUI serves the embedded (or overridden) frontend at "/". It may be
 	// nil, in which case API routes still work but the web UI is unavailable.
 	WebUI http.Handler
+	// MaxUploadBytes caps the total size of single upload bodies; values <= 0
+	// fall back to media.DefaultMaxUploadBytes.
+	MaxUploadBytes int64
 }
 
 // New returns a Server built from the given dependencies. The caller must
 // call Handler() to obtain the http.Handler.
 func New(deps Dependencies) *Server {
 	return &Server{
-		logger:        deps.Logger,
-		db:            deps.DB,
-		web:           deps.WebUI,
-		auth:          deps.Auth,
-		authz:         deps.Authz,
-		libraries:     deps.Libraries,
-		indexer:       deps.Indexer,
-		ml:            deps.ML,
-		faces:         deps.Faces,
-		backups:       deps.Backups,
-		keys:          deps.Keys,
-		secureCookies: deps.SecureCookies,
+		logger:         deps.Logger,
+		db:             deps.DB,
+		web:            deps.WebUI,
+		auth:           deps.Auth,
+		authz:          deps.Authz,
+		libraries:      deps.Libraries,
+		indexer:        deps.Indexer,
+		ml:             deps.ML,
+		faces:          deps.Faces,
+		backups:        deps.Backups,
+		keys:           deps.Keys,
+		secureCookies:  deps.SecureCookies,
+		ratelimit:      newRateLimiter(),
+		maxUploadBytes: deps.MaxUploadBytes,
 	}
 }
 
