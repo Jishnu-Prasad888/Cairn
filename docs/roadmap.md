@@ -7,7 +7,7 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **Phase 1 is the current deliverable and is tracked as an open PR.**
+- **Phase 14 is the current deliverable and is tracked as an open PR.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
@@ -99,6 +99,19 @@ each library's `.cairn/library.json` identity and generated thumbnails are
 sealed with AES-256-GCM (`CAIRN_ENCRYPTION_PASSPHRASE`, argon2id-derived, never
 stored). User media originals are never touched (ADR-0004). Implemented after
 explicit consensus. Design: docs/encryption.md, ADR-0011.
+
+## Phase 14 — Backup codec hardening to AEAD (implemented)
+
+The backup payload codec now uses one authenticated primitive everywhere:
+encrypted backup bodies are sealed with the shared Phase 13 AEAD kernel
+(`internal/crypto`, AES-256-GCM via `NewKeysFromKey`) instead of the Phase 10
+CTR+SHA-256 scheme. New encrypted backups write `64 KiB` sealed chunks with
+authenticated tamper/truncation/wrong-passphrase detection
+(`crypto.ErrInvalidPassphrase`/`ErrCorrupt`); legacy CTR payloads already on
+disk remain read/verify/restore byte-identical (legacy reader retained and
+pinned by a fixture test). Passphrase handling, the REST surface, and the
+unencrypted path are unchanged; originals remain untouched (ADR-0004).
+Design: docs/designs/014-backup-aead-codec.md, ADR-0012.
 
 ## Later phases (under design)
 
