@@ -27,6 +27,8 @@ tags:
     description: Account management (admin only)
   - name: Memories
     description: Long-form Markdown documents with version history and internal references
+  - name: Backups
+    description: Server, library metadata, and media backups (admin only)
 security:
   - cookieAuth: []
 paths:
@@ -910,9 +912,213 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  
+
+  /backups:
+    post:
+      tags: [Backups]
+      operationId: runBackup
+      summary: Run a backup now
+      description: >
+        Admin only. Runs a full backup synchronously and returns the resulting
+        record. Arguments are server-side (CAIRN_BACKUP_DIR, passphrase,
+        retention); no per-call override is accepted. A run that is already in
+        progress is refused with 409 Conflict.
+      responses:
+        '200':
+          description: The backup record (usually completed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A backup is already running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - cookieAuth: []
+    get:
+      tags: [Backups]
+      operationId: listBackups
+      summary: List recent backup records
+      description: Admin only. Returns the most recent backup records, newest first.
+      responses:
+        '200':
+          description: Recent backup records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BackupRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security:
+        - cookieAuth: []
+
+  /backups/{id}:
+    get:
+      tags: [Backups]
+      operationId: getBackup
+      summary: Get one backup record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The backup record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /backups/{id}/verify:
+    post:
+      tags: [Backups]
+      operationId: verifyBackup
+      summary: Re-verify a completed backup
+      description: >
+        Admin only. Re-runs the sample verification over a completed backup,
+        streaming back a bounded sample of entries and comparing plaintext
+        hashes and sizes. Encrypted backups require the configured passphrase.
+        Failures flip verify_status to `failed`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The record with updated verification fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupRecord'
+        '400':
+          description: Backup not verifiable, or passphrase needed/mismatched
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /backups/{id}/restore:
+    post:
+      tags: [Backups]
+      operationId: restoreBackup
+      summary: Restore a completed backup into a directory
+      description: >
+        Admin only. Streams every entry of a completed backup back to plaintext
+        under the given destination, mirroring the stored layout and restoring
+        original mtimes. The destination must be provided in the body.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination]
+              properties:
+                destination:
+                  type: string
+                  description: Absolute path where the backup is restored.
+      responses:
+        '200':
+          description: Restored; the record is returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupRecord'
+        '400':
+          description: Missing or invalid destination, or wrong/missing passphrase
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
 components:
   schemas:
+    BackupRecord:
+      type: object
+      required: [id, status, destination, started_at, libraries, files, bytes, stored_bytes, created_at]
+      properties:
+        id:
+          type: string
+          description: Unique backup id.
+        status:
+          type: string
+          enum: [running, completed, failed, pruned, restoring]
+        destination:
+          type: string
+          description: Absolute path of the backup directory on the server.
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        libraries:
+          type: integer
+        files:
+          type: integer
+        files_skipped:
+          type: integer
+          description: Media files reused from a previous backup (incremental).
+        bytes:
+          type: integer
+          description: Total plaintext bytes backed up.
+        stored_bytes:
+          type: integer
+          description: Total bytes on disk after codec (compression/encryption).
+        encrypted:
+          type: boolean
+        same_device:
+          type: boolean
+          description: Destination is on the same filesystem as a source.
+        verify_status:
+          type: string
+          enum: [ok, failed]
+        verify_checked:
+          type: integer
+        verify_errors:
+          type: integer
+        error_msg:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     ErrorBody:
       type: object
       required: [code, message, request_id]

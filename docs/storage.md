@@ -58,6 +58,10 @@ cairn-data/
 └── cairn.db            server-level SQLite database
 ```
 
+Backups are written wherever `CAIRN_BACKUP_DIR` points (see docs/backups.md).
+Backup archives are meant to restore a Cairn installation, not to be pulled into
+the indexer as media; never place `CAIRN_BACKUP_DIR` inside a library root.
+
 ## What is never done
 
 - Original media blobs are never stored inside SQLite.
