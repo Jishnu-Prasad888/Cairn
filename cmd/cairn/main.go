@@ -22,6 +22,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/logging"
+	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
 	"github.com/Jishnu-Prasad888/Cairn/internal/version"
 	"github.com/Jishnu-Prasad888/Cairn/internal/webui"
 )
@@ -95,6 +96,22 @@ func run() error {
 	// Incremental indexer: manages per-library scan jobs.
 	idxManager := indexer.NewIndexManager(logger)
 
+	// Local ML: optional similarity signatures. The manager is inert unless
+	// CAIRN_ML_ENABLED is set; similarity passes run after index scans and on
+	// explicit API calls.
+	mlManager := ml.NewManager(logger, ml.Config{
+		Enabled:           cfg.MLEnabled,
+		Workers:           cfg.MLWorkers,
+		DistanceThreshold: cfg.MLDistanceThreshold,
+	}, ml.AverageHashProvider{})
+	if cfg.MLEnabled && cfg.MLSimilarity {
+		idxManager.AfterScan = func(libraryID, root string) {
+			if _, err := mlManager.Pass(context.Background(), libraryID, root); err != nil {
+				logger.Warn("similarity pass after index", "library_id", libraryID, "error", err)
+			}
+		}
+	}
+
 	// Backups: one-shot, scheduled, and restore operations over the server
 	// database and every registered library. The scheduler is a no-op when no
 	// backup directory is configured.
@@ -120,6 +137,7 @@ func run() error {
 		Authz:         authzSvc,
 		Libraries:     libraries,
 		Indexer:       idxManager,
+		ML:            mlManager,
 		Backups:       backupMgr,
 		SecureCookies: cfg.CookieSecure,
 		WebUI:         webHandler,
