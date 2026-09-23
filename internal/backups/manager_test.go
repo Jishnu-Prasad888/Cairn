@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -276,6 +278,199 @@ func TestBackupEncrypted(t *testing.T) {
 	}
 	if !bytes.Equal(got, orig) {
 		t.Fatal("restored encrypted media differs from source")
+	}
+}
+
+// TestBackupAEADCodecRoundTrip is the Phase-14 acceptance test: encrypted
+// backups are sealed with the shared AEAD kernel (bodies identifiable via
+// crypto.IsSealed) and verify/restore round-trip byte-identically.
+func TestBackupAEADCodecRoundTrip(t *testing.T) {
+	pool, serverPath := tempServerDB(t)
+	backupDir := filepath.Join(t.TempDir(), "backups")
+
+	m := newManager(t, pool, serverPath, backupDir, "aead-pass", 4)
+	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "hotel"))
+
+	rec, err := m.Run(context.Background())
+	if err != nil {
+		t.Fatalf("backup run: %v", err)
+	}
+	if !rec.Encrypted {
+		t.Fatal("backup not marked encrypted")
+	}
+	if rec.VerifyErrors != 0 {
+		t.Fatalf("fresh backup already has verify errors: %d", rec.VerifyErrors)
+	}
+
+	rel := filepath.Join("libraries", lib.ID, "files", "holiday", "beach.jpg")
+	orig, _ := os.ReadFile(filepath.Join(lib.Root, "holiday", "beach.jpg"))
+
+	// Every stored payload body is an AEAD-sealed blob, and no plaintext leaks.
+	raw, err := os.ReadFile(filepath.Join(rec.Destination, rel))
+	if err != nil {
+		t.Fatalf("read stored media payload: %v", err)
+	}
+	if bytes.Equal(raw, orig) {
+		t.Fatal("encrypted backup stored plaintext bytes")
+	}
+	if !crypto.IsSealed(raw[headerSize:]) {
+		t.Fatal("stored media payload body is not an AEAD-sealed blob")
+	}
+	man, err := os.ReadFile(filepath.Join(rec.Destination, manifestFilename))
+	if err != nil {
+		t.Fatalf("read stored manifest: %v", err)
+	}
+	if !crypto.IsSealed(man[headerSize:]) {
+		t.Fatal("stored manifest body is not an AEAD-sealed blob")
+	}
+
+	if _, err := m.Verify(context.Background(), rec.ID); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	dst := t.TempDir()
+	if _, err := m.Restore(context.Background(), rec.ID, dst); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dst, rel))
+	if err != nil {
+		t.Fatalf("restored media: %v", err)
+	}
+	if !bytes.Equal(got, orig) {
+		t.Fatal("restored AEAD-sealed media differs from source")
+	}
+}
+
+// TestBackupAEADWrongPassphrase asserts that a wrong passphrase fails the
+// authenticated manifest read (crypto.ErrInvalidPassphrase) instead of
+// producing garbage, and that restore writes nothing.
+func TestBackupAEADWrongPassphrase(t *testing.T) {
+	pool, serverPath := tempServerDB(t)
+	backupDir := filepath.Join(t.TempDir(), "backups")
+
+	m := newManager(t, pool, serverPath, backupDir, "aead-pass-a", 4)
+	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "india"))
+
+	rec, err := m.Run(context.Background())
+	if err != nil {
+		t.Fatalf("backup run: %v", err)
+	}
+
+	wrong := newManager(t, pool, serverPath, backupDir, "aead-pass-b", 4)
+	if _, err := wrong.Verify(context.Background(), rec.ID); !errors.Is(err, crypto.ErrInvalidPassphrase) {
+		t.Fatalf("verify with wrong passphrase: %v, want ErrInvalidPassphrase", err)
+	}
+	dst := t.TempDir()
+	if _, err := wrong.Restore(context.Background(), rec.ID, dst); !errors.Is(err, crypto.ErrInvalidPassphrase) {
+		t.Fatalf("restore with wrong passphrase: %v, want ErrInvalidPassphrase", err)
+	}
+	if entries, err := os.ReadDir(dst); err != nil || len(entries) != 0 {
+		t.Fatalf("restore with wrong passphrase wrote files: %v", entries)
+	}
+}
+
+// TestBackupLegacyCTRStillReads pins the backward-compatibility guarantee: a
+// backup whose every payload is written in the pre-Phase-14 CTR format (the
+// Phase-10 codec) must still verify and restore byte-identically. The fixture
+// is produced by re-encoding a fresh AEAD backup through the retained legacy
+// writer so it is a faithful, pre-seeded legacy backup directory.
+func TestBackupLegacyCTRStillReads(t *testing.T) {
+	pool, serverPath := tempServerDB(t)
+	backupDir := filepath.Join(t.TempDir(), "backups")
+
+	const pass = "legacy-pass"
+	m := newManager(t, pool, serverPath, backupDir, pass, 4)
+	lib := registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), filepath.Join(t.TempDir(), "juliet"))
+
+	rec, err := m.Run(context.Background())
+	if err != nil {
+		t.Fatalf("backup run: %v", err)
+	}
+
+	meta, err := readHeader(rec.Destination)
+	if err != nil {
+		t.Fatalf("read header: %v", err)
+	}
+	salt, err := hex.DecodeString(meta.Salt)
+	if err != nil {
+		t.Fatalf("decode salt: %v", err)
+	}
+	key := deriveKey(pass, salt)
+	mf, err := readManifest(rec.Destination, key)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+
+	// Re-encode every stored payload in place with the Phase-10 legacy codec.
+	convert := func(rel string, compress bool) {
+		t.Helper()
+		src := filepath.Join(rec.Destination, filepath.FromSlash(rel))
+		f, err := os.Open(src)
+		if err != nil {
+			t.Fatalf("open %s: %v", rel, err)
+		}
+		pr, err := openPayload(f, key)
+		if err != nil {
+			f.Close()
+			t.Fatalf("open %s: %v", rel, err)
+		}
+		plain, err := io.ReadAll(pr)
+		ferr := pr.Err()
+		f.Close()
+		if err != nil || ferr != nil {
+			t.Fatalf("read %s: %v / %v", rel, err, ferr)
+		}
+		out, err := os.OpenFile(src, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			t.Fatalf("reopen %s: %v", rel, err)
+		}
+		if err := writeLegacyCTRPayload(out, key, compress, plain); err != nil {
+			out.Close()
+			t.Fatalf("write legacy %s: %v", rel, err)
+		}
+		if err := out.Close(); err != nil {
+			t.Fatalf("close %s: %v", rel, err)
+		}
+	}
+	entries := []Entry{*mf.ServerDB}
+	for _, lb := range mf.Libraries {
+		if lb.DB != nil {
+			entries = append(entries, *lb.DB)
+		}
+		if lb.Identity != nil {
+			entries = append(entries, *lb.Identity)
+		}
+		entries = append(entries, lb.Files...)
+	}
+	for _, e := range entries {
+		convert(e.Logical, e.Compressed)
+	}
+	convert(manifestFilename, true)
+
+	raw, err := os.ReadFile(filepath.Join(rec.Destination, filepath.FromSlash(mf.Libraries[0].Identity.Logical)))
+	if err != nil {
+		t.Fatalf("read converted identity payload: %v", err)
+	}
+	if crypto.IsSealed(raw[headerSize:]) {
+		t.Fatal("converted fixture must not look AEAD-sealed")
+	}
+
+	// The pre-Phase-14 backup must still verify and restore with the passphrase.
+	m2 := newManager(t, pool, serverPath, backupDir, pass, 4)
+	if _, err := m2.Verify(context.Background(), rec.ID); err != nil {
+		t.Fatalf("verify legacy backup: %v", err)
+	}
+	dst := t.TempDir()
+	if _, err := m2.Restore(context.Background(), rec.ID, dst); err != nil {
+		t.Fatalf("restore legacy backup: %v", err)
+	}
+	orig, _ := os.ReadFile(filepath.Join(lib.Root, "holiday", "beach.jpg"))
+	rel := filepath.Join("libraries", lib.ID, "files", "holiday", "beach.jpg")
+	got, err := os.ReadFile(filepath.Join(dst, rel))
+	if err != nil {
+		t.Fatalf("restored media: %v", err)
+	}
+	if !bytes.Equal(got, orig) {
+		t.Fatal("restored legacy-format media differs from source")
 	}
 }
 
