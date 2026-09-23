@@ -1,0 +1,231 @@
+.people-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.page-muted {
+  padding: var(--space-6);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 28px;
+  font-family: var(--font-brand);
+  font-weight: 400;
+  color: var(--primary);
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.people-page select,
+.people-page button {
+  font: inherit;
+  border-radius: var(--radius-sm);
+}
+
+.people-page select {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.people-page button:not(.link-button):not(.danger-button) {
+  padding: var(--space-2) var(--space-4);
+  background: var(--primary);
+  border: 1px solid transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.people-page button:hover {
+  background: var(--primary-hover);
+}
+
+.people-page button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.people-page .danger-button {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--danger, #b00020);
+  color: var(--danger, #b00020);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.error-text {
+  color: var(--danger, #b00020);
+}
+
+.people-page .muted {
+  color: var(--text-muted);
+}
+
+.people-empty {
+  padding: var(--space-6);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text-muted);
+}
+
+.people-empty code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+.people-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.people-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.people-stats {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-4);
+}
+
+.person-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--space-3);
+}
+
+.person-cover {
+  height: 150px;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.person-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.person-cover-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 40px;
+  color: var(--text-muted);
+  background: var(--primary-faint, #f0f0f0);
+}
+
+.person-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.person-count {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.person-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.person-actions button {
+  font-size: 13px;
+  padding: var(--space-1) var(--space-3);
+}
+
+.person-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.person-detail h2 {
+  margin: 0;
+  font-size: 20px;
+  font-family: var(--font-brand);
+  font-weight: 400;
+  color: var(--primary);
+}
+
+.face-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--space-3);
+}
+
+.face-tile {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.face-tile img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.face-tile figcaption {
+  display: flex;
+  justify-content: center;
+}
+
+.face-tile figcaption button,
+.face-tile figcaption select {
+  font-size: 12px;
+}
+
+.face-tile figcaption select {
+  padding: var(--space-1) var(--space-2);
+  width: 100%;
+}

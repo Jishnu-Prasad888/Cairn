@@ -139,6 +139,10 @@ preferred over breaking changes.
 | POST   | `/api/v1/users`                       | Create an account                | admin |
 | POST   | `/api/v1/users/{id}/sessions/revoke`  | Invalidate a user's sessions     | admin |
 
+Local ML endpoints (`/libraries/{id}/ml/...`, similarity + face recognition,
+and the `/people` + face/assignment routes) are documented in
+[`ml.md`](ml.md); `/search` is documented in [`search.md`](search.md).
+
 ## Request/response examples
 
 ### Health

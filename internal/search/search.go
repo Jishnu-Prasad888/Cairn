@@ -45,6 +45,10 @@ type SearchQuery struct {
 	// AlbumID restricts results to files in this album. Empty means all.
 	AlbumID string
 
+	// PersonID restricts results to files containing a face assigned to this
+	// person. Empty means all.
+	PersonID string
+
 	// MinSize and MaxSize restrict results by file size in bytes. Zero values
 	// are ignored.
 	MinSize int64
@@ -225,6 +229,13 @@ func buildExtraFilters(q SearchQuery) ([]string, []any) {
 	if q.AlbumID != "" {
 		conditions = append(conditions, "f.id IN (SELECT file_id FROM album_files WHERE album_id = ?)")
 		args = append(args, q.AlbumID)
+	}
+	if q.PersonID != "" {
+		conditions = append(conditions, `f.id IN (
+			SELECT fa.file_id FROM person_faces pf
+			JOIN faces fa ON fa.id = pf.face_id
+			WHERE pf.person_id = ?)`)
+		args = append(args, q.PersonID)
 	}
 	if q.MinSize > 0 {
 		conditions = append(conditions, "f.size_bytes >= ?")

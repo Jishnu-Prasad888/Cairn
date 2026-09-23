@@ -44,6 +44,7 @@ func (s *Server) openSearchStore(
 //	folder  – folder path prefix filter
 //	tag     – tag name filter (case-insensitive)
 //	album   – album id filter
+//	person  – person id filter (files containing a face assigned to person)
 //	min_size – minimum file size in bytes
 //	max_size – maximum file size in bytes
 //	from    – RFC3339 date lower bound on mod_time
@@ -109,6 +110,9 @@ func parseSearchQuery(r *http.Request) search.SearchQuery {
 	}
 	if alb := q.Get("album"); alb != "" {
 		sq.AlbumID = alb
+	}
+	if per := q.Get("person"); per != "" {
+		sq.PersonID = per
 	}
 	if v := q.Get("min_size"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {

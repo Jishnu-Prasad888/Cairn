@@ -314,6 +314,14 @@ paths:
           description: Album id filter.
           schema:
             type: string
+        - name: person
+          in: query
+          required: false
+          description: >-
+            Person id filter. Restricts results to files with a face assigned
+            to the given person (Phase 15 face recognition).
+          schema:
+            type: string
         - name: min_size
           in: query
           required: false
@@ -1169,6 +1177,448 @@ paths:
       security:
         - cookieAuth: []
 
+  /libraries/{libraryID}/ml/faces:
+    get:
+      tags: [ML]
+      operationId: getFaceStatus
+      summary: Face recognition status for a library
+      description: >
+        Reports whether the face capability is enabled, the active provider
+        and version, and the current face, person, and unassigned-face counts.
+        Requires the Read capability like other read routes.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Face status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MLFaceStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Face recognition disabled or unavailable
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/ml/faces/pass:
+    post:
+      tags: [ML]
+      operationId: runFacePass
+      summary: Run a face detection pass
+      description: >
+        Admin only. Detects faces in photo files that lack a face row for the
+        current provider/version and stores boxes plus appearance descriptors.
+        Runs in the background; the response reports that the pass started.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '202':
+          description: Pass started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MLFacePassResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Face recognition disabled or unavailable
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/ml/faces/cluster:
+    post:
+      tags: [ML]
+      operationId: runFaceCluster
+      summary: Run a face clustering pass
+      description: >
+        Admin only. Groups unassigned faces into people by descriptor cosine
+        similarity against per-person means. Runs in the background; the
+        response reports that the pass started.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '202':
+          description: Pass started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MLFacePassResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Face recognition disabled or unavailable
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/ml/faces/purge:
+    post:
+      tags: [ML]
+      operationId: purgeFaces
+      summary: Delete all derived face data for a library
+      description: >
+        Admin only. Deletes every face and assignment. Originals and person
+        names survive; a later pass can regenerate detection data.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Purged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MLFacePurgeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Face recognition disabled or unavailable
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/faces:
+    get:
+      tags: [ML]
+      operationId: listUnassignedFaces
+      summary: List unassigned faces (cluster pool)
+      description: >
+        Faces that no person is assigned to yet, without their descriptors.
+        Requires the Read capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Unassigned faces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacePool'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/faces/{faceID}/image:
+    get:
+      tags: [ML]
+      operationId: getFaceImage
+      summary: Serve a derived JPEG crop of a face
+      description: >
+        A downscaled JPEG crop of the face box from the source photo. Gated on
+        read access to the owning file, like thumbnails.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: faceID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JPEG crop
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/people:
+    get:
+      tags: [ML]
+      operationId: listPeople
+      summary: List people and their face counts
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: People list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeopleList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+    post:
+      tags: [ML]
+      operationId: createPerson
+      summary: Create a named person
+      description: Requires the Create capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonNameChange'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/people/{personID}:
+    get:
+      tags: [ML]
+      operationId: getPerson
+      summary: Person detail with their assigned faces
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: personID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Person detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+    delete:
+      tags: [ML]
+      operationId: deletePerson
+      summary: Delete a person (their faces become unassigned)
+      description: Requires the Delete capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: personID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/people/{personID}/rename:
+    post:
+      tags: [ML]
+      operationId: renamePerson
+      summary: Rename a person
+      description: Requires the Edit capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: personID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonNameChange'
+      responses:
+        '200':
+          description: Renamed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/people/{personID}/cover:
+    post:
+      tags: [ML]
+      operationId: setPersonCover
+      summary: Set which assigned face backs a person's cover thumbnail
+      description: Requires the Edit capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: personID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [face_id]
+              properties:
+                face_id:
+                  type: string
+      responses:
+        '200':
+          description: Cover set
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/people/{personID}/merge:
+    post:
+      tags: [ML]
+      operationId: mergePeople
+      summary: Merge another person's faces into this person
+      description: Requires the Edit capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: personID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_person_id]
+              properties:
+                source_person_id:
+                  type: string
+      responses:
+        '200':
+          description: Merged
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
+  /libraries/{libraryID}/people/{personID}/faces/{faceID}:
+    post:
+      tags: [ML]
+      operationId: assignFace
+      summary: Assign a face to a person
+      description: Requires the Edit capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: personID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: faceID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Assigned
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+    delete:
+      tags: [ML]
+      operationId: unassignFace
+      summary: Unassign a face (it returns to the cluster pool)
+      description: Requires the Edit capability.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: personID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: faceID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Unassigned
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - cookieAuth: []
+
   /libraries/{libraryID}/files/{fileID}/similar:
     get:
       tags: [ML]
@@ -1822,6 +2272,131 @@ components:
                 type: number
                 format: double
                 description: Fraction of hash bits in common, 0..1.
+    MLFaceStatus:
+      type: object
+      required: [enabled, provider, provider_version, faces, people, unassigned]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the face capability is on for this library.
+        provider:
+          type: string
+          description: Active face provider identifier (e.g. pigo_appearance).
+        provider_version:
+          type: integer
+          description: Provider algorithm version; faces are versioned against it.
+        faces:
+          type: integer
+          description: Number of stored faces.
+        people:
+          type: integer
+          description: Number of people.
+        unassigned:
+          type: integer
+          description: Number of faces with no person assignment.
+    MLFacePassResult:
+      type: object
+      required: [library_id, status]
+      properties:
+        library_id:
+          type: string
+        status:
+          type: string
+          description: Pass type that started (face detection / face clustering).
+    MLFacePurgeResult:
+      type: object
+      required: [library_id, faces_removed]
+      properties:
+        library_id:
+          type: string
+        faces_removed:
+          type: integer
+          description: Number of face rows deleted.
+    FaceSummary:
+      type: object
+      required: [id, file_id, x, y, width, height, confidence]
+      properties:
+        id:
+          type: string
+        file_id:
+          type: string
+        file_path:
+          type: string
+          description: Relative path within the library.
+        x:
+          type: number
+          description: Box left, in source image pixels.
+        y:
+          type: number
+          description: Box top, in source image pixels.
+        width:
+          type: number
+        height:
+          type: number
+        confidence:
+          type: number
+          format: double
+          description: Detector confidence, 0..1.
+    FacePool:
+      type: object
+      required: [faces]
+      properties:
+        faces:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaceSummary'
+    Person:
+      type: object
+      required: [id, name, face_count, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        cover_face_id:
+          type: string
+          description: Face powering the cover thumbnail, if any.
+        cover_file_id:
+          type: string
+        face_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PeopleList:
+      type: object
+      required: [people]
+      properties:
+        people:
+          type: array
+          items:
+            $ref: '#/components/schemas/Person'
+    PersonResponse:
+      type: object
+      required: [person]
+      properties:
+        person:
+          $ref: '#/components/schemas/Person'
+    PersonDetail:
+      type: object
+      required: [person, faces]
+      properties:
+        person:
+          $ref: '#/components/schemas/Person'
+        faces:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaceSummary'
+    PersonNameChange:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Non-empty person name.
   responses:
     BadRequest:
       description: Validation failure
