@@ -7,7 +7,7 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **Phase 16 is the current deliverable and is tracked as an open PR.**
+- **Phase 17 is the current deliverable and is tracked as an open PR.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
@@ -123,13 +123,21 @@ is opt-in (`CAIRN_ML_ENABLED` + `CAIRN_ML_FACES`), local, and original-free;
 people are library-scoped and travel with the library database. Design:
 docs/designs/015-face-recognition.md, ADR-0013.
 
-## Phase 16 — Security hardening (in progress)
+## Phase 16 — Security hardening (implemented)
 
 A defensive review of the server surface: authentication, authorization,
 path traversal, uploads and MIME handling, sessions, shares, XSS, CSRF, SQL
 injection, rate limits, secrets, resource isolation, and logging. Findings are
 tracked in docs/designs/016-security-hardening.md and fixed behind tests.
 Design: docs/designs/016-security-hardening.md, ADR-0014.
+Merged to `main` via PR #17.
+
+## Phase 17 — Mobile and API documentation (in progress)
+
+Documentation hardening: finalize the OpenAPI contract, the API reference
+(auth, media, upload/download, permissions, sharing), and the mobile development
+guide with offline/sync guidance. Every documented endpoint must match the
+implemented server; new docs are added where the inventory has gaps.
 
 ## Later phases (under design)
 
