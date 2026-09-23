@@ -410,7 +410,7 @@ func TestBackupLegacyCTRStillReads(t *testing.T) {
 		}
 		pr, err := openPayload(f, key)
 		if err != nil {
-			f.Close()
+			_ = f.Close()
 			t.Fatalf("open %s: %v", rel, err)
 		}
 		plain, err := io.ReadAll(pr)
@@ -426,7 +426,7 @@ func TestBackupLegacyCTRStillReads(t *testing.T) {
 			t.Fatalf("reopen %s: %v", rel, err)
 		}
 		if err := writeLegacyCTRPayload(out, key, compress, plain); err != nil {
-			out.Close()
+			_ = out.Close()
 			t.Fatalf("write legacy %s: %v", rel, err)
 		}
 		if err := out.Close(); err != nil {
