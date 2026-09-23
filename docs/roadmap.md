@@ -100,6 +100,19 @@ sealed with AES-256-GCM (`CAIRN_ENCRYPTION_PASSPHRASE`, argon2id-derived, never
 stored). User media originals are never touched (ADR-0004). Implemented after
 explicit consensus. Design: docs/encryption.md, ADR-0011.
 
+## Phase 14 — Backup codec hardening to AEAD (in progress)
+
+Migrate the backup payload codec from the Phase 10 CTR+SHA-256 scheme to the
+shared Phase 13 AEAD kernel (internal/crypto): new payloads are sealed and
+opened with AES-256-GCM via the same `Keys.Seal/Open` kernel the `.cairn`
+identity and thumbnails use — one authenticated codec for every encrypted
+artifact (identity, thumbnails, backups). Wrong-passphrase and tampered/truncated
+payloads fail fast and authenticated instead of silently glitching; legacy CTR
+payloads remain readable, verifiable, and restore-identical (no migration, no
+re-backup). Passphrase handling and the web/CLI surface are unchanged;
+originals remain untouched (ADR-0004). Base: Phase 13. Explicit consensus
+required. Design: docs/designs/014-backup-aead-codec.md, ADR-0012.
+
 ## Later phases (under design)
 
 Share tokens as server features, webhooks/Plugins, docker compose manifest,
