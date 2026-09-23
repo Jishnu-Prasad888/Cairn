@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -63,7 +64,7 @@ func (s *Server) runFacePass(w http.ResponseWriter, r *http.Request, lib *librar
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		if phase == "cluster" {
+		if strings.Contains(phase, "cluster") {
 			if _, err := s.faces.ClusterPass(ctx, lib.Root); err != nil {
 				s.logger.Error("face clustering pass", "library_id", lib.ID, "error", err)
 			}
@@ -112,7 +113,7 @@ func (s *Server) handleFacePurge(w http.ResponseWriter, r *http.Request, u *auth
 		return
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{
-		"library_id":   lib.ID,
+		"library_id":    lib.ID,
 		"faces_removed": n,
 	})
 }
@@ -415,6 +416,11 @@ func (s *Server) writeFaceError(w http.ResponseWriter, r *http.Request, err erro
 	if err == ml.ErrFacesDisabled {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusServiceUnavailable,
 			CodeServiceUnavailable, "Face recognition is disabled.")
+		return
+	}
+	if errors.Is(err, ml.ErrPersonNotFound) {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
+			CodeNotFound, "Person not found.")
 		return
 	}
 	s.logger.Error("faces", "error", err)

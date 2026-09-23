@@ -150,9 +150,9 @@ func (m *FaceManager) Pass(ctx context.Context, root string) (int, error) {
 	jobs := make(chan UnsignedFaceFile)
 	var wg sync.WaitGroup
 	var (
-		mu        sync.Mutex
-		scanned   int
-		firstErr  error
+		mu       sync.Mutex
+		scanned  int
+		firstErr error
 	)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -210,11 +210,11 @@ func (m *FaceManager) scanFile(ctx context.Context, store *FaceStore, root strin
 			return err
 		}
 		if err := store.InsertFace(ctx, FaceRecord{
-			ID:       id,
-			FileID:   uf.FileID,
-			Provider: m.provider.Name(),
-			Version:  m.provider.Version(),
-			Box:      box,
+			ID:         id,
+			FileID:     uf.FileID,
+			Provider:   m.provider.Name(),
+			Version:    m.provider.Version(),
+			Box:        box,
 			Descriptor: desc,
 		}); err != nil {
 			return err
@@ -376,6 +376,35 @@ func (m *FaceManager) RenamePerson(ctx context.Context, root, personID, name str
 	}
 	defer func() { _ = db.Close() }()
 	return NewFaceStore(db.DB()).RenamePerson(ctx, personID, name)
+}
+
+// SetCover selects which assigned face backs a person's cover thumbnail.
+func (m *FaceManager) SetCover(ctx context.Context, root, personID, faceID string) error {
+	if !m.Enabled() {
+		return ErrFacesDisabled
+	}
+	db, err := openLibraryDB(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	store := NewFaceStore(db.DB())
+
+	faces, err := store.PersonFaces(ctx, personID)
+	if err != nil {
+		return err
+	}
+	owned := false
+	for _, f := range faces {
+		if f.ID == faceID {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		return fmt.Errorf("face %q is not assigned to person %q", faceID, personID)
+	}
+	return store.SetCover(ctx, personID, faceID)
 }
 
 // DeletePerson removes a person (and their assignments, not their faces).

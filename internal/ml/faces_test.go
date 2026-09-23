@@ -19,8 +19,8 @@ import (
 // so cluster together; a bright point elsewhere becomes a different person.
 type fakeFaceProvider struct{}
 
-func (fakeFaceProvider) Name() string    { return "fake_faces" }
-func (fakeFaceProvider) Version() int    { return 1 }
+func (fakeFaceProvider) Name() string     { return "fake_faces" }
+func (fakeFaceProvider) Version() int     { return 1 }
 func (fakeFaceProvider) Describe() string { return "test provider" }
 
 // brightPoint scans for the brightest pixel location in an image.
