@@ -66,6 +66,21 @@ type Config struct {
 	// stored; a random per-backup salt is derived with argon2id. Backup
 	// restore requires the same passphrase.
 	BackupPassphrase string
+
+	// MLEnabled is the master switch for local ML capabilities. All ML work
+	// is off and nothing is stored until this is true (default false).
+	MLEnabled bool
+
+	// MLSimilarity turns the perceptual similarity capability on. It is only
+	// consulted when MLEnabled is true.
+	MLSimilarity bool
+
+	// MLWorkers caps concurrent files processed per similarity pass.
+	MLWorkers int
+
+	// MLDistanceThreshold is the maximum Hamming distance (0-64) at or below
+	// which files are reported as similar.
+	MLDistanceThreshold int
 }
 
 // Load builds a Config from the process environment and platform defaults.
@@ -84,6 +99,10 @@ func Load() Config {
 		BackupKeep:            envOrDefaultInt("BACKUP_KEEP", 4),
 		BackupIntervalMinutes: envOrDefaultInt("BACKUP_INTERVAL_MIN", 0),
 		BackupPassphrase:      os.Getenv(EnvPrefix + "_BACKUP_PASSPHRASE"),
+		MLEnabled:             envOrDefaultBool("ML_ENABLED", false),
+		MLSimilarity:          envOrDefaultBool("ML_SIMILARITY", true),
+		MLWorkers:             envOrDefaultInt("ML_WORKERS", 2),
+		MLDistanceThreshold:   envOrDefaultInt("ML_DISTANCE_THRESHOLD", 10),
 	}
 }
 
