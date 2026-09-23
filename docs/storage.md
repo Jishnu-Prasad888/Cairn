@@ -35,8 +35,8 @@ single dot-directory:
     ├── library.db              library-level SQLite database
     ├── thumbnails/             derived previews
     ├── index/                  indexer state and change journals
-    ├── embeddings/             optional ML embeddings
-    ├── faces/                  optional face data
+    ├── embeddings/             optional ML embeddings (future)
+    ├── faces/                  optional face data (future)
     ├── jobs/                   persisted background job state
     └── metadata/               extracted metadata cache
 ```
@@ -47,6 +47,11 @@ documented here and used consistently across the codebase and documentation.
 Portability rule: a library is self-describing. A fresh Cairn installation can
 detect an existing library, adopt it, and reuse its metadata instead of
 reprocessing everything. This is expanded in [libraries.md](libraries.md).
+
+ML similarity signatures are derived data and live as a table inside
+`library.db` (not as files), so they follow the library and are captured by any
+backup that includes `.cairn/`. They can be discarded and regenerated with a
+similarity pass. See [ml.md](ml.md).
 
 ### Server data
 
