@@ -21,6 +21,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
+	"github.com/Jishnu-Prasad888/Cairn/internal/sanitize"
 )
 
 // Config drives the backup subsystem.
@@ -737,14 +738,20 @@ func copyFileEntry(srcPath, dstPath, logical string, compress, encrypted bool, k
 }
 
 // restoreEntry writes one stored payload back to plaintext under destBase,
-// mirroring its logical path and restoring the original mtime.
+// mirroring its logical path and restoring the original mtime. The logical path
+// is validated so a crafted or tampered manifest cannot write outside the
+// destination directory.
 func restoreEntry(backupRoot, destBase string, e Entry, key []byte) error {
-	rel := filepath.FromSlash(e.Logical)
-	dst := filepath.Join(destBase, rel)
+	rel, err := sanitize.RelPath(e.Logical)
+	if err != nil {
+		return fmt.Errorf("unsafe manifest logical path %q: %w", e.Logical, err)
+	}
+	fsRel := filepath.FromSlash(rel)
+	dst := filepath.Join(destBase, fsRel)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
-	src, err := os.Open(filepath.Join(backupRoot, rel))
+	src, err := os.Open(filepath.Join(backupRoot, fsRel))
 	if err != nil {
 		return err
 	}

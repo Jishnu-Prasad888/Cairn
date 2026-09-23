@@ -308,6 +308,40 @@ func TestBackupPlainRestore(t *testing.T) {
 	}
 }
 
+func TestRestoreRejectsUnsafeManifestPaths(t *testing.T) {
+	pool, serverPath := tempServerDB(t)
+	backupDir := filepath.Join(t.TempDir(), "backups")
+
+	m := newManager(t, pool, serverPath, backupDir, "", 4)
+	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger())), filepath.Join(t.TempDir(), "gamma"))
+
+	rec, err := m.Run(context.Background())
+	if err != nil {
+		t.Fatalf("backup run: %v", err)
+	}
+
+	// Tamper with the manifest so a media entry claims a path that would
+	// escape the restore destination.
+	mf, err := readManifest(rec.Destination, nil)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	for i := range mf.Libraries[0].Files {
+		mf.Libraries[0].Files[i].Logical = "../evil-escaped.jpg"
+	}
+	if err := writeManifest(rec.Destination, mf, false, nil); err != nil {
+		t.Fatalf("tamper manifest: %v", err)
+	}
+
+	dst := t.TempDir()
+	if _, err := m.Restore(context.Background(), rec.ID, dst); err == nil {
+		t.Fatal("restore with traversal manifest entry succeeded, want error")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "evil-escaped.jpg")); !os.IsNotExist(err) {
+		t.Fatal("restore wrote outside the destination directory")
+	}
+}
+
 func TestBackupVerifyDetectsCorruption(t *testing.T) {
 	pool, serverPath := tempServerDB(t)
 	backupDir := filepath.Join(t.TempDir(), "backups")
