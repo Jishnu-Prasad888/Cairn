@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -28,13 +29,13 @@ type FaceRecord struct {
 
 // Person is one nameable grouping of faces. Names survive face purges.
 type Person struct {
-	ID          string
-	Name        string
-	CoverFaceID string
-	CoverFileID string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	FaceCount   int
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	CoverFaceID string    `json:"cover_face_id,omitempty"`
+	CoverFileID string    `json:"cover_file_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	FaceCount   int       `json:"face_count"`
 }
 
 // UnsignedFaceFile is a photo that has no faces recorded for a
@@ -110,7 +111,7 @@ func (s *FaceStore) InsertFace(ctx context.Context, f FaceRecord) error {
 // FaceByID returns a face, or nil when not present.
 func (s *FaceStore) FaceByID(ctx context.Context, id string) (*FaceRecord, error) {
 	var (
-		f                 FaceRecord
+		f                            FaceRecord
 		descriptor, created, updated string
 	)
 	err := s.db.QueryRowContext(ctx, `
@@ -262,7 +263,7 @@ func (s *FaceStore) ListPeople(ctx context.Context) ([]Person, error) {
 	var out []Person
 	for rows.Next() {
 		var (
-			p                  Person
+			p                Person
 			created, updated string
 		)
 		if err := rows.Scan(&p.ID, &p.Name, &p.CoverFaceID, &p.CoverFileID,
@@ -531,7 +532,7 @@ func float32FromBytes(b []byte) ([]float32, error) {
 // width, height, confidence, descriptor, created_at, updated_at, rel_path.
 func scanFaceFull(rows *sql.Rows) (FaceRecord, error) {
 	var (
-		f                          FaceRecord
+		f                            FaceRecord
 		descriptor, created, updated string
 	)
 	err := rows.Scan(&f.ID, &f.FileID, &f.Provider, &f.Version,
@@ -564,13 +565,16 @@ func newID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// ErrPersonNotFound is returned when a person does not exist.
+var ErrPersonNotFound = errors.New("person not found")
+
 func ensureAffected(res sql.Result, what string) error {
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("%s: %w", what, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("%s: no row matched", what)
+		return ErrPersonNotFound
 	}
 	return nil
 }

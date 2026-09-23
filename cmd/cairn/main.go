@@ -110,11 +110,11 @@ func run() error {
 		DistanceThreshold: cfg.MLDistanceThreshold,
 	}, ml.AverageHashProvider{})
 	faces := ml.NewFaceManager(logger, ml.FaceConfig{
-		Enabled:           cfg.MLEnabled && cfg.MLFaces,
-		Workers:           cfg.MLFaceWorkers,
-		MinConfidence:     cfg.MLFaceMinConfidence,
-		MinSize:           cfg.MLFaceMinSize,
-		Threshold:         cfg.MLFaceThreshold,
+		Enabled:       cfg.MLEnabled && cfg.MLFaces,
+		Workers:       cfg.MLFaceWorkers,
+		MinConfidence: cfg.MLFaceMinConfidence,
+		MinSize:       cfg.MLFaceMinSize,
+		Threshold:     cfg.MLFaceThreshold,
 	}, nil)
 	{
 		after := func(libraryID, root string) {
