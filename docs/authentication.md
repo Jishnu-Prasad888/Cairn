@@ -85,12 +85,28 @@ metadata (never credentials or tokens). See `internal/audit`.
 
 ## Privacy
 
-Credentials, session tokens, and share tokens are never logged. Audit metadata
-is deliberately non-sensitive structured JSON.
+Credentials, session tokens, and share tokens are never logged. Share tokens
+carried in public-share URLs are redacted from access and panic logs before
+they can be written. Audit metadata is deliberately non-sensitive structured
+JSON.
+
+## Brute-force and CSRF hardening
+
+Public authentication endpoints (`/auth/login`, `/auth/bootstrap`, and share
+authentication) are rate limited per client: an in-process token bucket with a
+per-account failed-attempt lockout, returning `429 RATE_LIMITED` (and
+`Retry-After`) once limits are exceeded. This is the single-instance default;
+behind a reverse proxy, use that layer for cluster-wide policy.
+
+State-changing requests are additionally checked: a present `Origin` header
+must match the request host or the request is rejected with `403 FORBIDDEN`.
+`SameSite=Lax` on the session cookie remains the primary CSRF defense; the
+origin check is defense-in-depth.
 
 ## Deferred to later phases
 
-- Rate limiting on login (Phase 16 hardening).
-- CSRF hardening beyond SameSite=Lax (Phase 16 hardening).
+- Per-file authorization filtering in aggregate listings (recursive listings,
+  search, trash, favorites) — see ADR-0014.
+- Session binding/rotation and `__Host-` cookie prefix — see ADR-0014.
 - Two-factor authentication and password reset flows.
 - Resource-based authorization ([permissions.md](permissions.md)).

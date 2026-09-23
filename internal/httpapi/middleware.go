@@ -4,7 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -13,10 +16,11 @@ import (
 const maxRequestIDLen = 128
 
 // WithMiddleware wraps the given handler in the standard middleware stack:
-// request IDs, panic recovery, and access logging. The stack runs in the
-// order listed here, so recovery wraps the application handler most closely.
+// request IDs, panic recovery, security headers, access logging, and the
+// same-origin guard. The stack runs in the order listed here, so recovery
+// wraps the application handler most closely.
 func WithMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
-	return requestID(recoverPanics(logger, accessLog(logger, next)))
+	return requestID(recoverPanics(logger, securityHeaders(accessLog(logger, sameOrigin(logger, next)))))
 }
 
 // requestID ensures every request has a request ID, preferring a
@@ -68,7 +72,7 @@ func recoverPanics(logger *slog.Logger, next http.Handler) http.Handler {
 					"panic", v,
 					"request_id", requestID,
 					"method", r.Method,
-					"path", r.URL.Path,
+					"path", redactPath(r.URL.Path),
 				)
 				// If the handler already started writing, the status code
 				// cannot be changed; the panic is reported to the client only
@@ -90,7 +94,7 @@ func accessLog(logger *slog.Logger, next http.Handler) http.Handler {
 		logger.Info("http request",
 			"request_id", requestIDOrEmpty(r),
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", redactPath(r.URL.Path),
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
 			"remote", r.RemoteAddr,
@@ -112,4 +116,121 @@ func (r *statusRecorder) WriteHeader(status int) {
 func requestIDOrEmpty(r *http.Request) string {
 	id, _ := RequestIDFrom(r.Context())
 	return id
+}
+
+// redactPath masks share bearer tokens carried in the URL path so access and
+// error logs never leak them. Public share routes are mounted under
+// /api/v1/shares/{token}/..; the token segment is replaced wholesale.
+func redactPath(p string) string {
+	const prefix = "/api/v1/shares/"
+	if !strings.HasPrefix(p, prefix) {
+		return p
+	}
+	rest := strings.TrimPrefix(p, prefix)
+	slash := strings.IndexByte(rest, '/')
+	if slash < 0 {
+		slash = len(rest)
+	}
+	return prefix + "[redacted]" + rest[slash:]
+}
+
+// securityHeaders sets baseline browser hardening headers on every response.
+// The embedded SPA is self-contained (no inline scripts, no external origins),
+// so a 'self' content security policy does not require nonces.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; img-src 'self' data:; media-src 'self' blob: data:; "+
+				"style-src 'self' 'unsafe-inline'; script-src 'self'; "+
+				"frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sameOrigin rejects cross-origin state-changing requests. SameSite=Lax on
+// the session cookie is the primary CSRF defense; this origin check is
+// defense-in-depth for non-cookie-carrying clients and for methods the cookie
+// policy does not cover. Browsers send Origin on cross-site POST/PUT/PATCH/
+// DELETE; curl and other non-browser clients omit it and are unaffected.
+func sameOrigin(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isMutation(r.Method) && !originAllowed(r) {
+			writeError(w, logger, requestIDOrEmpty(r), http.StatusForbidden,
+				CodeForbidden, "Cross-origin requests are not allowed.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isMutation(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// originAllowed decides whether an Origin header may trigger state changes;
+// a missing Origin (curl, servers) is always allowed.
+func originAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	return sameHostPort(u, r)
+}
+
+// sameHostPort matches an Origin against the request host, tolerating the
+// default-port-for-scheme cases a TLS-terminating proxy produces (host header
+// "localhost:8080" with Origin "https://localhost").
+func sameHostPort(o *url.URL, r *http.Request) bool {
+	ohost := o.Hostname()
+	rhost, rport := splitHost(r.Host)
+	if ohost == "" || !strings.EqualFold(ohost, rhost) {
+		return false
+	}
+	oport := o.Port()
+	if oport == "" {
+		oport = defaultPort(o.Scheme)
+	}
+	if rport == "" {
+		proto := r.Header.Get("X-Forwarded-Proto")
+		if proto == "" {
+			proto = "http"
+		}
+		rport = defaultPort(proto)
+	}
+	return oport == rport
+}
+
+// splitHost splits a Host header value into hostname and port, returning an
+// empty port when none is present.
+func splitHost(host string) (string, string) {
+	if host == "" {
+		return "", ""
+	}
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		return h, p
+	}
+	return host, ""
+}
+
+func defaultPort(scheme string) string {
+	switch strings.ToLower(scheme) {
+	case "https", "wss":
+		return "443"
+	case "http", "ws":
+		return "80"
+	}
+	return ""
 }

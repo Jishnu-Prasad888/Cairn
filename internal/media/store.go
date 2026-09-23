@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/likeutil"
 )
 
 // FileStore is the read/write repository for files and folders in a per-library
@@ -38,15 +40,15 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 	// Folder filter.
 	if opts.FolderPath != "" && opts.FolderPath != "." {
 		folderPath := filepath.ToSlash(opts.FolderPath)
+		esc := likeutil.Escape(folderPath) + "/%"
 		if opts.Recursive {
-			conditions = append(conditions, "(rel_path LIKE ? OR rel_path LIKE ?)")
-			prefix := folderPath + "/%"
-			exact := folderPath + "/%"
-			args = append(args, prefix, exact)
+			conditions = append(conditions, "rel_path LIKE ? "+likeutil.EscapeClause)
+			args = append(args, esc)
 		} else {
 			// Direct children only: folder/name (no further slash after folder/).
-			conditions = append(conditions, "rel_path LIKE ? AND rel_path NOT LIKE ?")
-			args = append(args, folderPath+"/%", folderPath+"/%/%")
+			conditions = append(conditions,
+				"rel_path LIKE ? "+likeutil.EscapeClause+" AND rel_path NOT LIKE ? "+likeutil.EscapeClause)
+			args = append(args, esc, likeutil.Escape(folderPath)+"/%/%")
 		}
 	} else if !opts.Recursive && (opts.FolderPath == "" || opts.FolderPath == ".") {
 		// Root-level files only (no slash in rel_path).
@@ -137,11 +139,12 @@ func (s *FileStore) countFiles(ctx context.Context, opts ListOptions) (int, erro
 	if opts.FolderPath != "" && opts.FolderPath != "." {
 		folderPath := filepath.ToSlash(opts.FolderPath)
 		if opts.Recursive {
-			conditions = append(conditions, "rel_path LIKE ?")
-			args = append(args, folderPath+"/%")
+			conditions = append(conditions, "rel_path LIKE ? "+likeutil.EscapeClause)
+			args = append(args, likeutil.Escape(folderPath)+"/%")
 		} else {
-			conditions = append(conditions, "rel_path LIKE ? AND rel_path NOT LIKE ?")
-			args = append(args, folderPath+"/%", folderPath+"/%/%")
+			conditions = append(conditions,
+				"rel_path LIKE ? "+likeutil.EscapeClause+" AND rel_path NOT LIKE ? "+likeutil.EscapeClause)
+			args = append(args, likeutil.Escape(folderPath)+"/%", likeutil.Escape(folderPath)+"/%/%")
 		}
 	} else if !opts.Recursive {
 		conditions = append(conditions, "rel_path NOT LIKE '%/%'")

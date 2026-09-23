@@ -8,6 +8,7 @@ import (
 	_ "image/png"  // register PNG decoder
 	"os"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/safeimage"
 	"golang.org/x/image/draw"
 )
 
@@ -59,7 +60,7 @@ func openImage(path string) (image.Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open image: %w", err)
 	}
-	img, _, err := image.Decode(f)
+	img, _, err := safeimage.Decode(f)
 	if err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("decode image: %w", err)
