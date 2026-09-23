@@ -15,6 +15,28 @@ import (
 
 // newTestService opens a fresh migrated server database and returns an auth
 // Service wired to it.
+func TestLoginUnknownUsernameRunsVerifier(t *testing.T) {
+	svc, _ := newTestService(t)
+	_ = svc
+
+	// The dummy-verify path should invoke VerifyPassword even though the
+	// username does not exist, so timing does not leak account existence.
+	original := verifyPassword
+	calls := 0
+	verifyPassword = func(password, encoded string) (bool, error) {
+		calls++
+		return false, nil
+	}
+	defer func() { verifyPassword = original }()
+
+	if _, _, err := svc.Login(context.Background(), "ghost", "any", Meta{}); err != ErrUnauthorized {
+		t.Fatalf("Login(unknown) err = %v, want ErrUnauthorized", err)
+	}
+	if calls != 1 {
+		t.Errorf("VerifyPassword invoked %d times for unknown user, want 1", calls)
+	}
+}
+
 func newTestService(t *testing.T) (*Service, *sql.DB) {
 	t.Helper()
 	pool, err := db.Open(filepath.Join(t.TempDir(), "cairn.db"))

@@ -9,10 +9,26 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 )
+
+// timingEqualizerHash is a valid argon2id hash used only to burn the same CPU
+// budget on the login path for an unknown username as for a wrong password.
+// Computed once on first use.
+var timingEqualizerHash = sync.OnceValue(func() string {
+	h, err := HashPassword("cairn-timing-equalizer-000")
+	if err != nil {
+		return ""
+	}
+	return h
+})
+
+// verifyPassword is indirection over VerifyPassword so tests can observe and
+// stub the login-path hashing cost.
+var verifyPassword = VerifyPassword
 
 // Sentinel errors returned by the AuthService. Handlers map them to HTTP
 // responses; none leak authentication details.
@@ -127,11 +143,17 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string, meta
 func (s *Service) Login(ctx context.Context, username, password string, meta Meta) (*User, string, error) {
 	user, err := s.userByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {
+		// Equalize timing with the known-user path: evaluating a dummy argon2id
+		// means "unknown username" costs the same as "wrong password", so
+		// response time cannot be used to enumerate accounts.
+		if h := timingEqualizerHash(); h != "" {
+			_, _ = verifyPassword(password, h)
+		}
 		s.recordLoginFailure(ctx, strings.TrimSpace(username), meta)
 		return nil, "", ErrUnauthorized
 	}
 
-	ok, err := VerifyPassword(password, user.PasswordHash)
+	ok, err := verifyPassword(password, user.PasswordHash)
 	if err != nil {
 		s.logger.Warn("login: unparsable stored hash", "user_id", user.ID, "error", err)
 		s.recordLoginFailure(ctx, user.Username, meta)
