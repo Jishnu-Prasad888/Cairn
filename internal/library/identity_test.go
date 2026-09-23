@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 )
 
 func TestMetadataDirNaming(t *testing.T) {
@@ -15,7 +17,7 @@ func TestMetadataDirNaming(t *testing.T) {
 
 func TestCreateAndLoadIdentityRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	ident, err := createIdentity(root, "My Photos", "abc123")
+	ident, err := createIdentity(root, "My Photos", "abc123", crypto.NewKeys(""))
 	if err != nil {
 		t.Fatalf("createIdentity: %v", err)
 	}
@@ -26,7 +28,7 @@ func TestCreateAndLoadIdentityRoundTrip(t *testing.T) {
 		t.Errorf("identity = %+v", ident)
 	}
 
-	loaded, err := loadIdentity(root)
+	loaded, err := loadIdentity(root, crypto.NewKeys(""))
 	if err != nil {
 		t.Fatalf("loadIdentity: %v", err)
 	}
@@ -45,7 +47,7 @@ func TestCreateAndLoadIdentityRoundTrip(t *testing.T) {
 func TestLoadIdentityErrors(t *testing.T) {
 	root := t.TempDir()
 
-	if _, err := loadIdentity(root); err != errNoMetadata {
+	if _, err := loadIdentity(root, crypto.NewKeys("")); err != errNoMetadata {
 		t.Errorf("empty dir err = %v, want errNoMetadata", err)
 	}
 
@@ -57,7 +59,7 @@ func TestLoadIdentityErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, metadataFileName), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadIdentity(root); err == nil {
+	if _, err := loadIdentity(root, crypto.NewKeys("")); err == nil {
 		t.Error("malformed identity accepted")
 	}
 
@@ -66,7 +68,7 @@ func TestLoadIdentityErrors(t *testing.T) {
 		[]byte(`{"schema_version": 1}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadIdentity(root); err == nil || !strings.Contains(err.Error(), "missing a library id") {
+	if _, err := loadIdentity(root, crypto.NewKeys("")); err == nil || !strings.Contains(err.Error(), "missing a library id") {
 		t.Errorf("identity without id: err = %v", err)
 	}
 
@@ -75,8 +77,48 @@ func TestLoadIdentityErrors(t *testing.T) {
 		[]byte(`{"id": "x", "schema_version": 99}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadIdentity(root); err == nil {
+	if _, err := loadIdentity(root, crypto.NewKeys("")); err == nil {
 		t.Error("future schema version accepted")
+	}
+}
+
+func TestIdentityEncryptedRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	keys := crypto.NewKeys("at-rest passphrase")
+	if !keys.Enabled() {
+		t.Fatal("passphrase must enable keys")
+	}
+
+	ident, err := createIdentity(root, "Private", "", keys)
+	if err != nil {
+		t.Fatalf("createIdentity: %v", err)
+	}
+
+	// The on-disk identity must be sealed, not readable JSON.
+	data, err := os.ReadFile(filepath.Join(metadataDir(root), metadataFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !crypto.IsSealed(data) {
+		t.Error("on-disk identity is not sealed")
+	}
+	if b := string(data); strings.Contains(b, "Private") || strings.Contains(b, ident.ID) {
+		t.Error("sealed identity leaks plaintext")
+	}
+
+	// The same keys read it back intact.
+	loaded, err := loadIdentity(root, keys)
+	if err != nil {
+		t.Fatalf("loadIdentity: %v", err)
+	}
+	if loaded.ID != ident.ID || loaded.Name != "Private" || loaded.VolumeID != "" {
+		t.Errorf("loaded = %+v, want %+v", loaded, ident)
+	}
+
+	// A different passphrase cannot decode the identity as JSON.
+	wrong := crypto.NewKeys("wrong passphrase")
+	if _, err := loadIdentity(root, wrong); err == nil {
+		t.Fatal("wrong passphrase loaded the identity")
 	}
 }
 
@@ -85,7 +127,7 @@ func TestHasMetadata(t *testing.T) {
 	if hasMetadata(root) {
 		t.Error("fresh dir reports metadata")
 	}
-	if _, err := createIdentity(root, "x", ""); err != nil {
+	if _, err := createIdentity(root, "x", "", crypto.NewKeys("")); err != nil {
 		t.Fatal(err)
 	}
 	if !hasMetadata(root) {
@@ -159,7 +201,7 @@ func TestOverlapDetection(t *testing.T) {
 
 func createIdentityMust(t *testing.T, root string) *identity {
 	t.Helper()
-	ident, err := createIdentity(root, "x", "")
+	ident, err := createIdentity(root, "x", "", crypto.NewKeys(""))
 	if err != nil {
 		t.Fatalf("createIdentity: %v", err)
 	}

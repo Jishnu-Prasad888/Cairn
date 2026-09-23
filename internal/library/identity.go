@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 )
 
 // cairnDirName is the single metadata directory Cairn keeps inside each
@@ -48,7 +50,8 @@ func metadataDir(root string) string {
 
 // createIdentity writes a fresh identity file into root/.cairn/. The metadata
 // directory is created as needed. Callers must already have validated the root.
-func createIdentity(root, name, volumeID string) (*identity, error) {
+// The on-disk identity is sealed with keys when encryption is enabled.
+func createIdentity(root, name, volumeID string, keys *crypto.Keys) (*identity, error) {
 	id := newID()
 	now := time.Now().UTC()
 	ident := &identity{
@@ -62,14 +65,16 @@ func createIdentity(root, name, volumeID string) (*identity, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create metadata directory %s: %w", dir, err)
 	}
-	if err := writeIdentityFile(dir, ident); err != nil {
+	if err := writeIdentityFile(dir, ident, keys); err != nil {
 		return nil, err
 	}
 	return ident, nil
 }
 
 // loadIdentity reads and validates the identity file at root/.cairn/library.json.
-func loadIdentity(root string) (*identity, error) {
+// Sealed identities are decrypted with keys; the passphrase must therefore
+// match the one used when the library was created or adopted.
+func loadIdentity(root string, keys *crypto.Keys) (*identity, error) {
 	path := filepath.Join(metadataDir(root), metadataFileName)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -79,8 +84,13 @@ func loadIdentity(root string) (*identity, error) {
 		return nil, fmt.Errorf("read identity %s: %w", path, err)
 	}
 
+	plain, err := keys.Open(data)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt identity %s: %w", path, err)
+	}
+
 	var ident identity
-	if err := json.Unmarshal(data, &ident); err != nil {
+	if err := json.Unmarshal(plain, &ident); err != nil {
 		return nil, fmt.Errorf("parse identity %s: %w", path, err)
 	}
 	if ident.ID == "" {
@@ -93,14 +103,16 @@ func loadIdentity(root string) (*identity, error) {
 	return &ident, nil
 }
 
-// writeIdentityFile persists the identity as pretty JSON. The write is made
-// atomic (temp file + rename) so a crash can never leave a truncated identity.
-func writeIdentityFile(dir string, ident *identity) error {
+// writeIdentityFile persists the identity as pretty JSON, sealed when keys are
+// enabled. The write is made atomic (temp file + rename) so a crash can never
+// leave a truncated identity.
+func writeIdentityFile(dir string, ident *identity, keys *crypto.Keys) error {
 	data, err := json.MarshalIndent(ident, "", "  ")
 	if err != nil {
 		return fmt.Errorf("serialize identity: %w", err)
 	}
 	data = append(data, '\n')
+	data = keys.Seal(data)
 
 	path := filepath.Join(dir, metadataFileName)
 	tmp := path + ".tmp"
