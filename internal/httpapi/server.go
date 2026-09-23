@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
+	"github.com/Jishnu-Prasad888/Cairn/internal/backups"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 )
@@ -22,6 +23,7 @@ type Server struct {
 	authz         *authz.Service
 	libraries     *library.Manager
 	indexer       *indexer.IndexManager
+	backups       *backups.Manager
 	secureCookies bool
 }
 
@@ -44,6 +46,9 @@ type Dependencies struct {
 	// Indexer manages per-library scan jobs and index status. It may be nil,
 	// in which case the indexing endpoints return SERVICE_UNAVAILABLE.
 	Indexer *indexer.IndexManager
+	// Backups runs server and library backups. It may be nil, in which case
+	// the backup-management endpoints return SERVICE_UNAVAILABLE.
+	Backups *backups.Manager
 	// SecureCookies forces the Secure flag on session cookies even when the
 	// server did not observe TLS (e.g. behind a TLS-terminating proxy).
 	SecureCookies bool
@@ -63,6 +68,7 @@ func New(deps Dependencies) *Server {
 		authz:         deps.Authz,
 		libraries:     deps.Libraries,
 		indexer:       deps.Indexer,
+		backups:       deps.Backups,
 		secureCookies: deps.SecureCookies,
 	}
 }
@@ -158,6 +164,16 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("POST /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAny, s.handleAddFavorite))
 		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/favorite", s.withAuth(allowAny, s.handleRemoveFavorite))
 		mux.Handle("GET /api/v1/libraries/{id}/favorites", s.withAuth(allowAny, s.handleListFavorites))
+
+		// Backups surface (admin). Backup policy is server-wide: where they
+		// are written, when they run, and restore destinations. All serverside.
+		if s.backups != nil {
+			mux.Handle("POST /api/v1/backups", s.withAuth(allowAdmin, s.handleRunBackup))
+			mux.Handle("GET /api/v1/backups", s.withAuth(allowAdmin, s.handleListBackups))
+			mux.Handle("GET /api/v1/backups/{id}", s.withAuth(allowAdmin, s.handleGetBackup))
+			mux.Handle("POST /api/v1/backups/{id}/verify", s.withAuth(allowAdmin, s.handleVerifyBackup))
+			mux.Handle("POST /api/v1/backups/{id}/restore", s.withAuth(allowAdmin, s.handleRestoreBackup))
+		}
 
 		// Memories (Markdown documents with version history and references).
 		mux.Handle("GET /api/v1/libraries/{id}/memories", s.withAuth(allowAny, s.handleListMemories))

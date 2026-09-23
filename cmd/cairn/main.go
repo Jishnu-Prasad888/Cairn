@@ -15,6 +15,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
+	"github.com/Jishnu-Prasad888/Cairn/internal/backups"
 	"github.com/Jishnu-Prasad888/Cairn/internal/config"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/httpapi"
@@ -94,6 +95,17 @@ func run() error {
 	// Incremental indexer: manages per-library scan jobs.
 	idxManager := indexer.NewIndexManager(logger)
 
+	// Backups: one-shot, scheduled, and restore operations over the server
+	// database and every registered library. The scheduler is a no-op when no
+	// backup directory is configured.
+	backupMgr := backups.NewManager(pool, logger, libraries, backups.Config{
+		Dir:        cfg.BackupDir,
+		Keep:       cfg.BackupKeep,
+		Passphrase: cfg.BackupPassphrase,
+		Interval:   time.Duration(cfg.BackupIntervalMinutes) * time.Minute,
+	}, cfg.DatabasePath())
+	backupMgr.Start(ctx)
+
 	// Frontend: the embedded build by default, an on-disk build in development.
 	webHandler, err := webui.Handler(cfg.WebDistDir)
 	if err != nil {
@@ -108,6 +120,7 @@ func run() error {
 		Authz:         authzSvc,
 		Libraries:     libraries,
 		Indexer:       idxManager,
+		Backups:       backupMgr,
 		SecureCookies: cfg.CookieSecure,
 		WebUI:         webHandler,
 	})
