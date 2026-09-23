@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
 )
 
@@ -138,7 +139,7 @@ func TestGenerateThumbnailJPEG(t *testing.T) {
 	srcPath := filepath.Join(dir, "photo.jpg")
 	makeJPEG(t, srcPath, 1200, 900)
 
-	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-1")
+	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-1", crypto.NewKeys(""))
 	if err != nil {
 		t.Fatalf("GenerateThumbnail: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestGenerateThumbnailPNG(t *testing.T) {
 	srcPath := filepath.Join(dir, "photo.png")
 	makePNG(t, srcPath, 800, 600)
 
-	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-2")
+	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-2", crypto.NewKeys(""))
 	if err != nil {
 		t.Fatalf("GenerateThumbnail: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestGenerateThumbnailNonImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-3")
+	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-3", crypto.NewKeys(""))
 	if err != nil {
 		t.Fatalf("unexpected error for non-image: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestGenerateThumbnailDoesNotModifyOriginal(t *testing.T) {
 
 	statBefore, _ := os.Stat(srcPath)
 
-	if _, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-4"); err != nil {
+	if _, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-4", crypto.NewKeys("")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,7 +225,7 @@ func TestThumbnailSmallImageUnchanged(t *testing.T) {
 	// Image smaller than ThumbnailSize — should still be written as thumbnail.
 	makeJPEG(t, srcPath, 100, 100)
 
-	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-5")
+	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "file-id-5", crypto.NewKeys(""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +240,55 @@ func TestThumbnailSmallImageUnchanged(t *testing.T) {
 	// Small image should not be upscaled.
 	if cfg.Width > metadata.ThumbnailSize || cfg.Height > metadata.ThumbnailSize {
 		t.Errorf("small image was upscaled to %dx%d", cfg.Width, cfg.Height)
+	}
+}
+
+func TestThumbnailEncryptedRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	cairnDir := filepath.Join(dir, ".cairn")
+	srcPath := filepath.Join(dir, "photo.jpg")
+	makeJPEG(t, srcPath, 800, 600)
+
+	keys := crypto.NewKeys("a phrasey passphrase")
+
+	ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "enc-1", keys)
+	if err != nil {
+		t.Fatalf("GenerateThumbnail: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected encrypted thumbnail to be generated")
+	}
+
+	// On disk the artifact is sealed; it must not be a decodable JPEG.
+	thumbPath := metadata.ThumbPath(cairnDir, "enc-1")
+	raw, err := os.ReadFile(thumbPath)
+	if err != nil {
+		t.Fatalf("read sealed thumbnail: %v", err)
+	}
+	if !crypto.IsSealed(raw) {
+		t.Fatal("on-disk thumbnail is not sealed")
+	}
+	if _, _, err := image.DecodeConfig(bytes.NewReader(raw)); err == nil {
+		t.Fatal("sealed thumbnail decodes as a raw JPEG — plaintext on disk")
+	}
+
+	// Reading back with the same keys yields a valid, decodable JPEG.
+	data, _, err := metadata.ReadThumb(cairnDir, "enc-1", keys)
+	if err != nil {
+		t.Fatalf("ReadThumb: %v", err)
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode decrypted thumbnail: %v", err)
+	}
+	if cfg.Width != 400 || cfg.Height != 300 {
+		t.Errorf("decrypted thumbnail = %dx%d, want 400x300", cfg.Width, cfg.Height)
+	}
+
+	// The wrong passphrase cannot decrypt it.
+	wrong := crypto.NewKeys("nope")
+	if _, _, err := metadata.ReadThumb(cairnDir, "enc-1", wrong); err == nil {
+		t.Fatal("wrong passphrase read the sealed thumbnail")
 	}
 }
 
