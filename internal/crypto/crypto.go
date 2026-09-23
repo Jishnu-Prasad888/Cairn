@@ -1,158 +1,152 @@
-// Package crypto implements optional encryption at rest for Cairn-owned data
-// (Phase 13). It provides a passphrase-derived AES-256-GCM seal/open pair used
-// by the .cairn metadata artifacts (library identity JSON and thumbnails) so
-// nothing Cairn writes to a library disk is readable without the key.
+// Package crypto provides the shared at-rest encryption kernel for Cairn.
 //
-// The passphrase is the only secret: it is never stored, and each sealed blob
-// is self-describing (magic + nonce + ciphertext), so artifacts can be moved or
-// copied independently. When no passphrase is configured, Seal and Open are
-// transparent and behave like identity, which keeps existing libraries working
-// without any migration.
+// It implements the Phase 13 design (docs/encryption.md, ADR-0011): a single
+// optional passphrase-derived AES-256-GCM key that seals and opens Cairn-owned
+// on-disk data (the .cairn identity and generated thumbnails). It is shared by
+// library, metadata, and httpapi so the passphrase, the derivation, and the
+// on-disk blob format are defined in exactly one place.
+//
+// The key is derived from the passphrase with argon2id using a fixed protocol
+// salt, so nothing is persisted (no key file, no salt) and the same passphrase
+// always reproduces the same key across restarts. Encryption is optional: with
+// an empty passphrase the Keys are disabled and Seal/Open are transparent
+// passthroughs, so unencrypted installs are byte-identical to before and
+// legacy plaintext artifacts remain readable after enabling encryption.
 package crypto
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
-	"io"
+	"fmt"
 
 	"golang.org/x/crypto/argon2"
 )
 
 const (
-	// KeySize is the AES-256 key size in bytes.
-	KeySize = 32
-	// SaltSize is the argon2id salt size in bytes.
-	SaltSize = 16
-	// NonceSize is the AES-GCM nonce size in bytes.
-	NonceSize = 12
+	// protocolSalt is the fixed, version-pinned salt used for key derivation.
+	// It is intentionally not secret and is never written to disk; the secret
+	// input is entirely the passphrase. Keeping it constant means any Cairn
+	// process that knows the passphrase can derive the same key, with nothing
+	// stored alongside the data.
+	protocolSalt = "cairn-at-rest-v1"
+
+	// magic and formatVersion form the self-describing sealed blob header.
+	// formatMagic is a fixed 8-byte magic ("CAIRNATR") and formatVersion is the
+	// current AEAD scheme. blobHeaderLen = len(magic) + 1 version byte.
+	magic         = "CAIRNATR"
+	formatVersion = byte(1)
+	blobHeaderLen = len(magic) + 1
+	nonceLen      = 12 // AES-GCM standard nonce size
+	keyLen        = 32 // AES-256
+	saltLen       = 16 // argon2id salt (2 x hashLen)
+	// keyTime, keyMem, keyThreads mirror the passphrase derivation parameters
+	// used by backups (docs/adr/001 athletes and backups doc); kept identical so
+	// the whole stack agrees on one OWASP-recommended config.
+	keyTime    = 1
+	keyMem     = 64 * 1024 // 64 MiB
+	keyThreads = 4
 )
 
-// formatMagic identifies a sealed Cairn at-rest artifact.
-var formatMagic = [8]byte{'C', 'A', 'I', 'R', 'N', 'A', 'T', 'R'}
-
-// formatVersion is the current sealed-blob format version.
-const formatVersion = 1
-
-// headerSize is the fixed prefix of a sealed blob:
-//
-//	[8] magic | [1] version | [12] nonce | AES-256-GCM ciphertext + tag
-const headerSize = len(formatMagic) + 1 + NonceSize
-
-// protocolSalt is the fixed application-wide argon2id salt. Derivation must be
-// reproducible across restarts, and the passphrase is the only secret, so the
-// salt is constant protocol metadata (documented, not secret) rather than
-// random per-file state. The derived key is cached for the process lifetime.
-var protocolSalt = []byte("cairn-at-rest-v1")
-
-// Sentinels for the Open path.
 var (
-	// ErrInvalidPassphrase is returned when sealed data cannot be
-	// authenticated with the current key — a wrong passphrase, a corrupted
-	// artifact, or an artifact sealed under a different key.
-	ErrInvalidPassphrase = errors.New("invalid passphrase or corrupted data")
-
-	// ErrCorrupt is returned when a blob looks sealed but is malformed.
-	ErrCorrupt = errors.New("malformed encrypted data")
+	// ErrInvalidPassphrase is returned by Open when the sealed blob does not
+	// authenticate under the current key, i.e. the passphrase is wrong.
+	ErrInvalidPassphrase = errors.New("crypto: invalid passphrase")
+	// ErrCorrupt is returned by Open when a blob looks sealed but is truncated,
+	// has a bogus version, or is otherwise not a well-formed sealed blob.
+	ErrCorrupt = errors.New("crypto: corrupt sealed data")
 )
 
-// DeriveKey derives the AES-256 key from a passphrase via argon2id using the
-// protocol salt and the same parameters as the backup codec (time=1,
-// memory=64 MiB, threads=4), producing a 32-byte key.
-func DeriveKey(passphrase string) []byte {
-	return argon2.IDKey([]byte(passphrase), protocolSalt, 1, 64*1024, 4, KeySize)
-}
-
-// Keys is the optional server-wide at-rest encryption key. A zero-key instance
-// (constructed with an empty passphrase) is disabled and passes data through
-// unchanged, so callers never branch on configuration.
+// Keys is an optional at-rest encryption key. A Keys with an empty passphrase
+// is disabled: Seal returns its input unchanged and Open returns its input
+// unchanged, so callers never need to branch on whether encryption is on. A
+// Keys with a passphrase derives an AES-256 key via argon2id and seals/opens
+// every payload with AES-256-GCM and a fresh random nonce.
 type Keys struct {
-	enabled bool
-	key     []byte
-	gcm     cipher.AEAD
+	aead cipher.AEAD
+	key  []byte // retained so an enabled Keys is never misused as disabled
 }
 
-// NewKeys returns the at-rest encryption key for the given passphrase. An
-// empty passphrase disables encryption.
+// NewKeys derives an at-rest key from passphrase. An empty passphrase returns
+// a disabled Keys (transparent passthrough); any other passphrase returns an
+// enabled AES-256-GCM Keys. Derivation is CPU-bound (argon2id) and safe to do
+// once per process at boot.
 func NewKeys(passphrase string) *Keys {
 	if passphrase == "" {
-		return &Keys{enabled: false}
+		return &Keys{}
 	}
-	key := DeriveKey(passphrase)
+	salt := []byte(protocolSalt)
+	key := argon2.IDKey([]byte(passphrase), salt, keyTime, keyMem, keyThreads, keyLen)
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		// Can't happen for KeySize bytes, but fail closed.
-		return &Keys{enabled: false}
+		// AES-256 always succeeds for a 32-byte key; this is unreachable.
+		panic(fmt.Sprintf("crypto: cannot create AES-256 cipher: %v", err))
 	}
-	gcm, err := cipher.NewGCM(block)
+	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return &Keys{enabled: false}
+		// NewGCM only fails for a 2^n-1 nonce size; unreachable for 12 bytes.
+		panic(fmt.Sprintf("crypto: cannot create GCM: %v", err))
 	}
-	return &Keys{enabled: true, key: key, gcm: gcm}
+	return &Keys{aead: aead, key: key}
 }
 
-// Enabled reports whether a passphrase is configured.
-func (k *Keys) Enabled() bool { return k != nil && k.enabled }
+// Enabled reports whether this Keys encrypts at rest. A disabled Keys passes
+// data through untouched (legacy / unencrypted behavior).
+func (k *Keys) Enabled() bool { return k != nil && k.aead != nil }
 
-// Seal encrypts plaintext into a self-describing blob. When encryption is
-// disabled it returns the input unchanged.
-func (k *Keys) Seal(plaintext []byte) []byte {
+// Seal encrypts plain, returning a self-describing sealed blob when enabled,
+// or plain itself unchanged when disabled. The output of one call is
+// guaranteed non-empty and safe to store directly in place of the plaintext.
+func (k *Keys) Seal(plain []byte) []byte {
 	if !k.Enabled() {
-		return plaintext
+		return plain
 	}
-	nonce := make([]byte, NonceSize)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		// The only way this fails is an OS entropy failure; fall back to
-		// plaintext is unacceptable, so return an empty meaning no data was
-		// written is also wrong. Re-seal without entropy cannot happen in
-		// practice; treat it as disabled so callers keep working.
-		return plaintext
+	nonce := make([]byte, nonceLen)
+	if _, err := rand.Read(nonce); err != nil {
+		panic(fmt.Sprintf("crypto: cannot read nonce: %v", err))
 	}
-	out := make([]byte, 0, headerSize+len(plaintext)+k.gcm.Overhead())
-	out = append(out, formatMagic[:]...)
+	sealed := k.aead.Seal(nil, nonce, plain, nil)
+	out := make([]byte, 0, blobHeaderLen+nonceLen+len(sealed))
+	out = append(out, magic...)
 	out = append(out, formatVersion)
 	out = append(out, nonce...)
-	return k.gcm.Seal(out, nonce, plaintext, nil)
+	out = append(out, sealed...)
+	return out
 }
 
-// Open decrypts a blob produced by Seal, returning the plaintext. Behavior by
-// input and configuration:
-//
-//   - disabled keys: input is returned unchanged (encryption never enabled);
-//   - enabled keys + plaintext input: returned unchanged — a legacy artifact
-//     written before encryption was enabled;
-//   - enabled keys + sealed input: decrypted, or ErrInvalidPassphrase when the
-//     passphrase does not match.
+// Open decrypts a blob produced by Seal. If the blob is not sealed (legacy
+// plaintext, or encryption disabled) it is returned unchanged. A wrong
+// passphrase yields ErrInvalidPassphrase; a malformed sealed blob yields
+// ErrCorrupt.
 func (k *Keys) Open(data []byte) ([]byte, error) {
 	if !k.Enabled() {
 		return data, nil
 	}
 	if !IsSealed(data) {
+		// Legacy plaintext from before encryption was enabled; pass through.
 		return data, nil
 	}
-	if len(data) < headerSize || data[len(formatMagic)] != formatVersion {
+	if len(data) < blobHeaderLen || len(data) < blobHeaderLen+nonceLen {
 		return nil, ErrCorrupt
 	}
-	nonce := data[len(formatMagic)+1 : headerSize]
-	body := data[headerSize:]
-	plaintext, err := k.gcm.Open(nil, nonce, body, nil)
+	if data[blobHeaderLen-1] != formatVersion {
+		return nil, ErrCorrupt
+	}
+	nonce := data[blobHeaderLen : blobHeaderLen+nonceLen]
+	ct := data[blobHeaderLen+nonceLen:]
+	open, err := k.aead.Open(nil, nonce, ct, nil)
 	if err != nil {
 		return nil, ErrInvalidPassphrase
 	}
-	return plaintext, nil
+	return open, nil
 }
 
-// IsSealed reports whether data begins with the at-rest seal magic. It is used
-// to distinguish plaintext artifacts from sealed ones without decrypting.
+// IsSealed reports whether data looks like a sealed at-rest blob (i.e. was
+// produced by Seal with a non-empty key), as opposed to plaintext. It is used
+// by tests to assert that artifacts are encrypted on disk and by Open to detect
+// legacy plaintext.
 func IsSealed(data []byte) bool {
-	if len(data) < len(formatMagic) {
-		return false
-	}
-	for i, b := range formatMagic {
-		if data[i] != b {
-			return false
-		}
-	}
-	return true
+	return bytes.HasPrefix(data, []byte(magic))
 }
