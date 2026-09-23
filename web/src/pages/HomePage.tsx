@@ -74,6 +74,7 @@ export default function HomePage() {
         <p className="tagline">Your personal place for files, photos, videos, and memories.</p>
         <nav className="home-nav" aria-label="Sections">
           <Link to="/memories">Memories</Link>
+          <Link to="/people">People</Link>
         </nav>
       </header>
 
