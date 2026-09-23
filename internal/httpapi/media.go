@@ -54,6 +54,13 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, u *auth
 	defer cleanup()
 
 	opts := parseListOptions(r)
+	folder, ok := canonicalFolder(opts.FolderPath)
+	if !ok {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+			CodeBadRequest, "Invalid folder path.")
+		return
+	}
+	opts.FolderPath = folder
 	if !s.requireCap(w, r, u, folderKeyFromParent(lib.ID, opts.FolderPath), authz.CapRead) {
 		return
 	}
@@ -378,6 +385,13 @@ func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request, u *au
 	defer cleanup()
 
 	parent := r.URL.Query().Get("parent")
+	folder, ok := canonicalFolder(parent)
+	if !ok {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+			CodeBadRequest, "Invalid folder path.")
+		return
+	}
+	parent = folder
 	if !s.requireCap(w, r, u, folderKeyFromParent(lib.ID, parent), authz.CapRead) {
 		return
 	}
