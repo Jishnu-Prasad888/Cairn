@@ -141,17 +141,20 @@ type FaceDescriptor = []float32
 pixel grayscale buffer, runs `pigo.CascadeParams{MinSize, MaxSize,
 ShiftFactor: 0.15, ScaleFactor: 1.1}` + `ClusterDetections`, and returns boxes
 with a filterable confidence `Q` (normalized/normalised to 0..1; default
-threshold `CAIRN_ML_FACE_MIN_CONFIDENCE`, ~0.4). `MinSize` defaults to ~60 px
+threshold `CAIRN_ML_FACE_MIN_CONFIDENCE`, ~0.05; pigo scores `Q` on an ~0..100
+scale, so the default floor is a raw detector score around 5). `MinSize` defaults to
+~60 px
 (bounded scan cost; tunable via env for Pi). The cascade is embedded via
 `//go:embed cascade/facefinder`.
 
 **Appearance embedder** (default): crop the face rect from the color image,
-box-inflate slightly, resize to 64×64 with `draw.CatmullRom`, luma-convert,
-average-pool to 16×16, z-normalize, and store the 256 values as `[]float32`.
-Clustering compares descriptors by cosine similarity against a per-cluster
-mean. This is honest, dependency-free, and stable for frontal faces; it is
-explicitly *not* invariant to pose/lighting/expression — documented as a
-limitation and behind the seam.
+box-inflate by ~10%, resize to 48×48 with `draw.CatmullRom`, luma-convert,
+average-pool non-overlapping 3×3 blocks to 16×16 (256 values), z-normalize,
+and store the values as `[]float32`.
+Clustering compares descriptors by cosine similarity
+against a per-cluster mean. This is honest, dependency-free, and stable for
+frontal faces; it is explicitly *not* invariant to pose/lighting/expression —
+documented as a limitation and behind the seam.
 
 ### Passes (`internal/ml/faces.go`)
 
@@ -235,7 +238,7 @@ browse search, pagination, and the count path unchanged).
 |---|---|---|
 | `CAIRN_ML_FACES` | `false` | faces capability (requires `CAIRN_ML_ENABLED`) |
 | `CAIRN_ML_FACE_WORKERS` | `2` | concurrent files per pass |
-| `CAIRN_ML_FACE_MIN_CONFIDENCE` | `0.4` | detector score floor |
+| `CAIRN_ML_FACE_MIN_CONFIDENCE` | `0.05` | detector score floor (pigo `Q/100`) |
 | `CAIRN_ML_FACE_MIN_SIZE` | `60` | detector minimum window (px) |
 | `CAIRN_ML_FACE_THRESHOLD` | `0.82` | clustering cosine similarity |
 

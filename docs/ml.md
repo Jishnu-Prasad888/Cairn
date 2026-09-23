@@ -2,10 +2,12 @@
 
 Phase 11 ships **similarity** as the first local ML capability: a
 dependency-free, quadratic-free, privacy-first engine that finds perceptually
-similar images inside a library.
+similar images inside a library. Phase 15 adds **face recognition** — local
+face detection, appearance clustering into nameable people, and person search
+(see [Face recognition](#face-recognition-phase-15)).
 
-Face recognition, CLIP-style embedding vectors, and model versioning are
-deliberately **out of scope** for this phase. The subsystem is built behind a
+CLIP-style embedding vectors and model versioning are
+deliberately **out of scope**. The subsystem is built behind a
 provider abstraction so they can slot in later without restructuring (see
 ADR-0009).
 
@@ -26,8 +28,6 @@ In scope:
 
 Not in scope (later phases):
 
-- Face detection/recognition (requires a heavy model or runtime — contradicts
-  the "no hard build-time dependency" constraint).
 - Embedding vectors + nearest-neighbor ANN index.
 - Model versioning, model downloads, or any network access.
 
@@ -148,6 +148,72 @@ Admin-gated (like backups):
   given image, with similarity scores.
 - `POST /api/v1/libraries/{id}/ml/purge` — delete all derived signatures.
 
+## Face recognition (Phase 15)
+
+Faces are an optional capability on the same subsystem: a pure-Go run
+(`pigo` + the standard library) bundled as a static cascade, dependency-free
+at runtime. Nothing runs unless both `CAIRN_ML_ENABLED` and `CAIRN_ML_FACES`
+are on. Originals are never modified; all derived data is removable with the
+purge action without touching names or photos.
+
+### Pipeline
+
+1. **Detection pass** (`POST .../ml/faces/pass`, and automatically after a
+   scan finishes when faces are enabled) — selects `present` files with
+   `media_metadata.media_type = 'photo'` that have no face row for the current
+   provider/version, decodes each, runs `pigo` (`MinSize` bounded, shift
+   factor `0.15`, scale factor `1.1`, `ClusterDetections` IoU `0.2`), and
+   stores one `faces` row per detection: source file, box, confidence, and the
+   appearance descriptor.
+2. **Appearance descriptor** — 10%-inflated crop resized to 48×48
+   (`draw.CatmullRom`), luminance, non-overlapping 3×3 average pooling to
+   16×16, z-normalized; 256 `float32` values in the row.
+3. **Clustering pass** (`POST .../ml/faces/cluster`) — incremental online
+   clustering of unassigned faces: cosine similarity against per-person mean
+   descriptors (`CAIRN_ML_FACE_THRESHOLD`, default `0.82`); a match assigns to
+   that person, otherwise a new `Person N` is created. Assigned faces are
+   stable across passes; manual assignments are never overwritten.
+4. **People** — faces merge into named `people`; each person has a cover face,
+   rename/merge/delete operations, and unassign can return a face to the
+   clustering pool.
+
+### Configuration
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `CAIRN_ML_FACES` | `false` | Face capability (requires `CAIRN_ML_ENABLED`). |
+| `CAIRN_ML_FACE_WORKERS` | `2` | Max concurrent files per detection pass. |
+| `CAIRN_ML_FACE_MIN_CONFIDENCE` | `0.05` | Detector score floor (pigo `Q/100`). |
+| `CAIRN_ML_FACE_MIN_SIZE` | `60` | Detector minimum window (px). |
+| `CAIRN_ML_FACE_THRESHOLD` | `0.82` | Clustering cosine similarity. |
+
+### API
+
+Faces and people endpoints are admin-gated for passes/purge and follow
+permission capabilities for the rest:
+
+- `GET /api/v1/libraries/{id}/ml/faces` — face status (provider, faces/people/unassigned counts).
+- `POST /api/v1/libraries/{id}/ml/faces/pass` — enqueue a detection pass.
+- `POST /api/v1/libraries/{id}/ml/faces/cluster` — enqueue a clustering pass.
+- `POST /api/v1/libraries/{id}/ml/faces/purge` — delete all faces and assignments (names survive).
+- `GET /api/v1/libraries/{id}/faces` — unassigned faces (the clustering pool); `?person=` filters media by person in search.
+- `GET /api/v1/libraries/{id}/faces/{faceID}/image` — derived JPEG crop, gated on the owning file's read permission.
+- `GET /api/v1/libraries/{id}/people` / `POST` — list people / create a person.
+- `GET /api/v1/libraries/{id}/people/{personID}` — person detail with faces.
+- `POST /api/v1/libraries/{id}/people/{personID}/rename` — rename.
+- `POST /api/v1/libraries/{id}/people/{personID}/cover` — set the cover face.
+- `POST /api/v1/libraries/{id}/people/{personID}/merge` — merge another person's faces in.
+- `DELETE /api/v1/libraries/{id}/people/{personID}` — delete a person (faces become unassigned).
+- `POST/DELETE /api/v1/libraries/{id}/people/{personID}/faces/{faceID}` — assign / unassign a face.
+
+### Files
+
+- `internal/ml/face.go` — provider interface + pigo provider + appearance embedder.
+- `internal/ml/face_store.go` — `faces` / `people` / `person_faces` access (library db, schema v6).
+- `internal/ml/faces.go` — face manager: pass/cluster/purge/status + person curation.
+- `internal/ml/faces_test.go`, `internal/httpapi/faces_test.go` — tests.
+- `internal/ml/cascade/facefinder` — bundled pigo cascade (Apache-2.0, see its README).
+
 ## Files
 
 - `internal/ml/provider.go` — provider abstraction + registry.
@@ -156,12 +222,10 @@ Admin-gated (like backups):
 - `internal/ml/manager.go` — pass/status/similar/purge operations.
 - `internal/ml/manager_test.go` — provider, store, and pass/cancel tests.
 - `internal/httpapi/ml.go` — HTTP surface + tests.
-- library db schema v5: `ml_signatures` table.
+- library db schemas: v5 `ml_signatures` table; v6 adds `faces`, `people`, `person_faces`.
 
 ## Out of scope (follow-ups)
 
-- Face recognition (needs a bundled model; revisit when a pure-Go runtime
-  exists or after consensus — see Phase 13 note in the roadmap).
 - Learned embeddings and ANN search.
 - Cross-library similarity.
 - Removing per-image derived data via the web UI (API-only in this phase).
