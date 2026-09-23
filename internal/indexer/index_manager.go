@@ -28,6 +28,11 @@ type IndexStatus struct {
 // by its library.db.
 type IndexManager struct {
 	logger *slog.Logger
+
+	// AfterScan, when non-nil, is invoked with the library root after a scan
+	// job completes. main wires this to the ML manager so similarity passes
+	// run in the background once indexing settles.
+	AfterScan func(libraryID, root string)
 }
 
 // NewIndexManager returns a new IndexManager.
@@ -156,6 +161,9 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 	}
 	if enqueued > 0 {
 		m.logger.Info("enqueued media processing jobs", "library_id", libraryID, "count", enqueued)
+	}
+	if m.AfterScan != nil {
+		m.AfterScan(libraryID, root)
 	}
 	return nil
 }
