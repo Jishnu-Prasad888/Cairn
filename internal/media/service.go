@@ -16,13 +16,38 @@ const trashDirName = ".cairn/trash"
 // Service executes media file operations against the filesystem and keeps the
 // FileStore in sync. The libraryRoot is the absolute path to the library root.
 type Service struct {
-	store       *FileStore
-	libraryRoot string
+	store          *FileStore
+	libraryRoot    string
+	maxUploadBytes int64
+}
+
+// DefaultMaxUploadBytes is the fallback upload limit when none is configured.
+const DefaultMaxUploadBytes int64 = 2 << 30 // 2 GiB
+
+// MaxUploadBytes returns the configured upload cap in bytes.
+func (svc *Service) MaxUploadBytes() int64 {
+	if svc.maxUploadBytes <= 0 {
+		return DefaultMaxUploadBytes
+	}
+	return svc.maxUploadBytes
 }
 
 // NewService returns a new Service.
-func NewService(store *FileStore, libraryRoot string) *Service {
-	return &Service{store: store, libraryRoot: libraryRoot}
+func NewService(store *FileStore, libraryRoot string, opts ...Option) *Service {
+	svc := &Service{store: store, libraryRoot: libraryRoot}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc
+}
+
+// Option configures a Service at construction.
+type Option func(*Service)
+
+// WithMaxUploadBytes caps uploads accepted by WriteUpload. Values <= 0 keep
+// the DefaultMaxUploadBytes fallback.
+func WithMaxUploadBytes(n int64) Option {
+	return func(svc *Service) { svc.maxUploadBytes = n }
 }
 
 // Store returns the underlying FileStore for direct queries.
@@ -93,20 +118,26 @@ func (svc *Service) WriteUpload(ctx context.Context, destRelPath string, src io.
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
+	// An aborted upload must never strand a temp file (a crash between
+	// CreateTemp and Rename would otherwise leave junk that the scanner may
+	// later index). After a successful Rename the temp path no longer exists
+	// and this cleanup is a no-op.
+	defer func() { _ = os.Remove(tmpName) }()
 
-	written, copyErr := io.Copy(tmp, src)
+	limit := svc.MaxUploadBytes()
+	written, copyErr := io.Copy(tmp, io.LimitReader(src, limit+1))
 	closeErr := tmp.Close()
 	if copyErr != nil {
-		_ = os.Remove(tmpName)
 		return nil, fmt.Errorf("stream upload: %w", copyErr)
 	}
 	if closeErr != nil {
-		_ = os.Remove(tmpName)
 		return nil, fmt.Errorf("close temp file: %w", closeErr)
+	}
+	if written > limit {
+		return nil, ErrUploadTooLarge
 	}
 
 	if err := os.Rename(tmpName, abs); err != nil {
-		_ = os.Remove(tmpName)
 		return nil, fmt.Errorf("commit upload: %w", err)
 	}
 

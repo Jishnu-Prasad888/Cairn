@@ -2,6 +2,7 @@ package media_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,6 +204,43 @@ func TestListFilesFilterByFolder(t *testing.T) {
 	}
 }
 
+// TestListFolderEscapesLikeWildcards proves a folder whose name contains a
+// LIKE wildcard (here an underscore) is matched literally and does not pull
+// in siblings.
+func TestListFolderEscapesLikeWildcards(t *testing.T) {
+	store, root := newTestStore(t)
+	ctx := context.Background()
+	for _, p := range []string{
+		"a_b/one.jpg",
+		"a_b/two.jpg",
+		"ab/three.jpg",
+		"100%/four.jpg", // percent is not a path char issue on linux but is a LIKE wildcard
+		"100/five.jpg",
+	} {
+		seedFile(t, store, root, p)
+	}
+
+	page, err := store.List(ctx, media.ListOptions{FolderPath: "a_b", Recursive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Files) != 2 {
+		names := []string{}
+		for _, f := range page.Files {
+			names = append(names, f.RelPath)
+		}
+		t.Errorf("folder a_b = %v, want exactly 2 entries", names)
+	}
+
+	page, err = store.List(ctx, media.ListOptions{FolderPath: "100%", Recursive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Files) != 1 || page.Files[0].RelPath != "100%/four.jpg" {
+		t.Errorf("folder 100%% = %v, want only 100%%/four.jpg", page.Files)
+	}
+}
+
 // --- Upload ---
 
 func TestUpload(t *testing.T) {
@@ -247,6 +285,46 @@ func TestUploadPathTraversalRejected(t *testing.T) {
 	_, err := svc.WriteUpload(context.Background(), "../escape.txt", strings.NewReader("x"))
 	if err == nil {
 		t.Error("expected path traversal error")
+	}
+}
+
+func TestUploadCapEnforced(t *testing.T) {
+	store, root := newTestStore(t)
+	svc := media.NewService(store, root, media.WithMaxUploadBytes(64))
+	ctx := context.Background()
+
+	_, err := svc.WriteUpload(ctx, "big.bin", strings.NewReader("x"+strings.Repeat("y", 64)))
+	if !errors.Is(err, media.ErrUploadTooLarge) {
+		t.Fatalf("oversized upload error = %v, want ErrUploadTooLarge", err)
+	}
+
+	// Nothing may be committed the over-limit file.
+	if _, err := store.GetByRelPath(ctx, "big.bin"); !errors.Is(err, media.ErrNotFound) {
+		t.Errorf("over-limit upload was indexed: %v", err)
+	}
+
+	// And no temp residue remains in the library root.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".cairn-upload") {
+			t.Errorf("stale upload temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestUploadWithinCapSucceeds(t *testing.T) {
+	store, root := newTestStore(t)
+	svc := media.NewService(store, root, media.WithMaxUploadBytes(64))
+	content := strings.Repeat("z", 64)
+	f, err := svc.WriteUpload(context.Background(), "at-limit.bin", strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("WriteUpload at exact cap: %v", err)
+	}
+	if f.SizeBytes != int64(len(content)) {
+		t.Errorf("size = %d, want %d", f.SizeBytes, len(content))
 	}
 }
 

@@ -49,6 +49,10 @@ type Config struct {
 	// proxy.
 	CookieSecure bool
 
+	// MaxUploadBytes caps the size of a single upload body in bytes (Phase 16
+	// hardening). Zero falls back to media.DefaultMaxUploadBytes (2 GiB).
+	MaxUploadBytes int64
+
 	// BackupDir is where library and server backups are written. Empty means
 	// backups are disabled until configured.
 	BackupDir string
@@ -122,6 +126,7 @@ func Load() Config {
 		LogLevel:              envOrDefaultTrim("LOG_LEVEL", DefaultLogLevel),
 		WebDistDir:            envOrDefaultTrim("WEB_DIST", ""),
 		CookieSecure:          envOrDefaultBool("COOKIE_SECURE", false),
+		MaxUploadBytes:        envOrDefaultInt64("MAX_UPLOAD_BYTES", 2<<30),
 		BackupDir:             envOrDefaultTrim("BACKUP_DIR", ""),
 		BackupKeep:            envOrDefaultInt("BACKUP_KEEP", 4),
 		BackupIntervalMinutes: envOrDefaultInt("BACKUP_INTERVAL_MIN", 0),
@@ -231,6 +236,17 @@ func envOrDefaultFloat(name string, def float64) float64 {
 	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
 		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
 			return f
+		}
+	}
+	return def
+}
+
+// envOrDefaultInt64 parses a CAIRN_<name> 64-bit integer setting, falling
+// back to the default when unset or malformed.
+func envOrDefaultInt64(name string, def int64) int64 {
+	if v, ok := os.LookupEnv(EnvPrefix + "_" + name); ok {
+		if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+			return n
 		}
 	}
 	return def
