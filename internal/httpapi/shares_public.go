@@ -197,6 +197,9 @@ func (s *Server) handlePublicShareDownload(w http.ResponseWriter, r *http.Reques
 // subsequent requests; this endpoint exists so the web UI can confirm a
 // password before navigating.
 func (s *Server) handlePublicShareAuthenticate(w http.ResponseWriter, r *http.Request) {
+	if !s.limitPublicAuth(w, r, "") {
+		return
+	}
 	if _, ok := s.resolveShare(w, r); !ok {
 		return
 	}
