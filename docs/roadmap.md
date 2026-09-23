@@ -92,11 +92,13 @@ entry point: media-safe paths, renames, folder filters on file/folder listing
 and search, and backup restore (tampered-manifest containment). Symlink
 containment walks are deferred. Design: docs/sanitizers.md, ADR-0010.
 
-## Phase 13 — Encrypted metadata (backlog)
+## Phase 13 — Encrypted metadata (implemented)
 
-Encryption at rest for metadata and media, with optional keys (Plan and docs
-drafted in `docs/encryption.md`). Murky privacy territory; do not implement
-without consensus.
+Optional passphrase-driven encryption at rest for Cairn's on-disk metadata:
+each library's `.cairn/library.json` identity and generated thumbnails are
+sealed with AES-256-GCM (`CAIRN_ENCRYPTION_PASSPHRASE`, argon2id-derived, never
+stored). User media originals are never touched (ADR-0004). Implemented after
+explicit consensus. Design: docs/encryption.md, ADR-0011.
 
 ## Later phases (under design)
 
