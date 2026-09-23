@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/sanitize"
 )
 
 const trashDirName = ".cairn/trash"
@@ -124,12 +126,18 @@ func (svc *Service) Rename(ctx context.Context, relPath, newName string) (*File,
 	if err != nil {
 		return nil, err
 	}
+	// newName must be a bare filename, validated before any path composition so
+	// it cannot smuggle a directory change (e.g. "../x" or "a/b").
+	name, err := sanitize.BareName(newName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrPathTraversal, err)
+	}
 	f, err := svc.store.GetByRelPath(ctx, safe)
 	if err != nil {
 		return nil, err
 	}
 
-	newRelPath := filepath.ToSlash(filepath.Join(filepath.Dir(filepath.FromSlash(safe)), newName))
+	newRelPath := filepath.ToSlash(filepath.Join(filepath.Dir(filepath.FromSlash(safe)), name))
 	newSafe, err := SafeRelPath(newRelPath)
 	if err != nil {
 		return nil, err

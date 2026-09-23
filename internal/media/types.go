@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/sanitize"
 )
 
 // --- sentinel errors ---
@@ -234,20 +236,14 @@ type Page struct {
 // --- path safety ---
 
 // SafeRelPath validates that a caller-supplied relative path does not escape
-// the library root via traversal sequences. Returns a cleaned path on success.
+// the library root via traversal sequences. Returns a cleaned forward-slash
+// path on success. It is a thin wrapper over the shared sanitize package so a
+// single rule set is enforced by every entry point; ErrPathTraversal is
+// wrapped for the HTTP layer's error mapping.
 func SafeRelPath(raw string) (string, error) {
-	if raw == "" {
-		return "", fmt.Errorf("%w: empty path", ErrPathTraversal)
+	safe, err := sanitize.RelPath(raw)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrPathTraversal, err)
 	}
-	// Normalise to forward slashes then to the OS separator for filepath.Clean.
-	clean := filepath.Clean(filepath.FromSlash(raw))
-	// After cleaning, an absolute path means the input started with a slash.
-	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("%w: absolute path not allowed", ErrPathTraversal)
-	}
-	// A path beginning with ".." would escape the root.
-	if strings.HasPrefix(clean, "..") {
-		return "", fmt.Errorf("%w: %q", ErrPathTraversal, raw)
-	}
-	return filepath.ToSlash(clean), nil
+	return safe, nil
 }
