@@ -63,6 +63,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, u *auth.Us
 	defer cleanup()
 
 	q := parseSearchQuery(r)
+	folder, ok := canonicalFolder(q.FolderPath)
+	if !ok {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+			CodeBadRequest, "Invalid folder path.")
+		return
+	}
+	q.FolderPath = folder
 	if !s.requireCap(w, r, u, folderKeyFromParent(lib.ID, q.FolderPath), authz.CapRead) {
 		return
 	}
