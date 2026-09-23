@@ -56,6 +56,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("CAIRN_HTTP_ADDR", "0.0.0.0:9999")
 	t.Setenv("CAIRN_DATA_DIR", "/srv/cairn-state")
 	t.Setenv("CAIRN_LOG_LEVEL", "debug")
+	t.Setenv("CAIRN_ENCRYPTION_PASSPHRASE", "hunter2-at-rest")
 
 	cfg := Load()
 	if cfg.HTTPAddr != "0.0.0.0:9999" {
@@ -66,6 +67,9 @@ func TestLoadEnvOverrides(t *testing.T) {
 	}
 	if cfg.LogLevel != "debug" {
 		t.Errorf("LogLevel = %q", cfg.LogLevel)
+	}
+	if cfg.EncryptionPassphrase != "hunter2-at-rest" {
+		t.Errorf("EncryptionPassphrase = %q", cfg.EncryptionPassphrase)
 	}
 }
 

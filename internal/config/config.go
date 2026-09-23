@@ -67,6 +67,14 @@ type Config struct {
 	// restore requires the same passphrase.
 	BackupPassphrase string
 
+	// EncryptionPassphrase optionally encrypts Cairn-owned metadata at rest:
+	// each library's .cairn/library.json identity file and generated
+	// thumbnails are sealed with AES-256-GCM under this passphrase. The
+	// passphrase is never stored; the key is derived with argon2id using a
+	// fixed protocol salt. Empty disables encryption. User media files are
+	// never modified (see ADR-0004).
+	EncryptionPassphrase string
+
 	// MLEnabled is the master switch for local ML capabilities. All ML work
 	// is off and nothing is stored until this is true (default false).
 	MLEnabled bool
@@ -99,6 +107,7 @@ func Load() Config {
 		BackupKeep:            envOrDefaultInt("BACKUP_KEEP", 4),
 		BackupIntervalMinutes: envOrDefaultInt("BACKUP_INTERVAL_MIN", 0),
 		BackupPassphrase:      os.Getenv(EnvPrefix + "_BACKUP_PASSPHRASE"),
+		EncryptionPassphrase:  os.Getenv(EnvPrefix + "_ENCRYPTION_PASSPHRASE"),
 		MLEnabled:             envOrDefaultBool("ML_ENABLED", false),
 		MLSimilarity:          envOrDefaultBool("ML_SIMILARITY", true),
 		MLWorkers:             envOrDefaultInt("ML_WORKERS", 2),

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 )
 
 // Manager registers, probes, and reconciles storage libraries. It owns the
@@ -22,10 +23,14 @@ type Manager struct {
 	db     *sql.DB
 	logger *slog.Logger
 	audit  *audit.Service
+	keys   *crypto.Keys
 }
 
-func NewManager(db *sql.DB, logger *slog.Logger, audit *audit.Service) *Manager {
-	return &Manager{db: db, logger: logger, audit: audit}
+// NewManager returns a Manager. keys are the optional at-rest encryption key
+// used to seal the on-disk library identity; pass encryption.NewKeys("") (or
+// nil — treated as disabled) when encryption is not configured.
+func NewManager(db *sql.DB, logger *slog.Logger, audit *audit.Service, keys *crypto.Keys) *Manager {
+	return &Manager{db: db, logger: logger, audit: audit, keys: keys}
 }
 
 // Probe inspects a candidate root and reports what a registration would do. It
@@ -57,7 +62,7 @@ func (m *Manager) Probe(ctx context.Context, root string) (*ProbeResult, error) 
 
 	result.HasMetadata = hasMetadata(clean)
 	if result.HasMetadata {
-		if ident, err := loadIdentity(clean); err == nil {
+		if ident, err := loadIdentity(clean, m.keys); err == nil {
 			result.ExistingID = ident.ID
 			result.ExistingName = ident.Name
 		}
@@ -259,7 +264,7 @@ func (m *Manager) create(ctx context.Context, root, name string) (*Library, erro
 	label := resolveName(name, filepath.Base(root))
 
 	vid, _ := volumeID(root)
-	ident, err := createIdentity(root, label, vid)
+	ident, err := createIdentity(root, label, vid, m.keys)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +297,7 @@ func (m *Manager) create(ctx context.Context, root, name string) (*Library, erro
 }
 
 func (m *Manager) adopt(ctx context.Context, root, name string) (*Library, error) {
-	ident, err := loadIdentity(root)
+	ident, err := loadIdentity(root, m.keys)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +414,7 @@ func (m *Manager) reconnect(ctx context.Context, lib *Library, newPath string) (
 		return nil, err
 	}
 
-	ident, identErr := loadIdentity(clean)
+	ident, identErr := loadIdentity(clean, m.keys)
 	if identErr == nil {
 		if ident.ID != lib.ID {
 			return nil, &ValidationError{Field: "path",

@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -8,7 +9,9 @@ import (
 	_ "image/png"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"golang.org/x/image/draw"
 )
 
@@ -28,10 +31,11 @@ func ThumbPath(cairnDir, fileID string) string {
 }
 
 // GenerateThumbnail creates a JPEG thumbnail from srcPath and writes it to
-// ThumbPath(cairnDir, fileID). The original file is never modified.
-// Returns (true, nil) when the thumbnail was written, (false, nil) when the
-// file is not a supported image type.
-func GenerateThumbnail(srcPath, cairnDir, fileID string) (bool, error) {
+// ThumbPath(cairnDir, fileID). The original file is never modified; when keys
+// are enabled the on-disk thumbnail is sealed with the at-rest key. Returns
+// (true, nil) when the thumbnail was written, (false, nil) when the file is
+// not a supported image type.
+func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (bool, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return false, fmt.Errorf("open source for thumbnail: %w", err)
@@ -51,27 +55,43 @@ func GenerateThumbnail(srcPath, cairnDir, fileID string) (bool, error) {
 		return false, fmt.Errorf("create thumbs dir: %w", err)
 	}
 
-	destPath := ThumbPath(cairnDir, fileID)
-	tmp := destPath + ".tmp"
-	out, err := os.Create(tmp)
-	if err != nil {
-		return false, fmt.Errorf("create thumbnail temp: %w", err)
-	}
-
-	if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: ThumbnailQuality}); err != nil {
-		_ = out.Close()
-		_ = os.Remove(tmp)
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: ThumbnailQuality}); err != nil {
 		return false, fmt.Errorf("encode thumbnail: %w", err)
 	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return false, fmt.Errorf("close thumbnail: %w", err)
+	data := keys.Seal(buf.Bytes())
+
+	destPath := ThumbPath(cairnDir, fileID)
+	tmp := destPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return false, fmt.Errorf("write thumbnail: %w", err)
 	}
 	if err := os.Rename(tmp, destPath); err != nil {
 		_ = os.Remove(tmp)
 		return false, fmt.Errorf("commit thumbnail: %w", err)
 	}
 	return true, nil
+}
+
+// ReadThumb reads and decrypts the thumbnail for fileID, returning the JPEG
+// bytes and the file's modification time. A missing thumbnail returns an
+// os.ErrNotExist-wrapped error; legacy plaintext thumbnails are returned
+// unchanged even when keys are enabled.
+func ReadThumb(cairnDir, fileID string, keys *crypto.Keys) ([]byte, time.Time, error) {
+	path := ThumbPath(cairnDir, fileID)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("stat thumbnail: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, info.ModTime(), fmt.Errorf("read thumbnail: %w", err)
+	}
+	plain, err := keys.Open(data)
+	if err != nil {
+		return nil, info.ModTime(), fmt.Errorf("decrypt thumbnail: %w", err)
+	}
+	return plain, info.ModTime(), nil
 }
 
 // resizeToFit returns a new image scaled so the larger dimension equals

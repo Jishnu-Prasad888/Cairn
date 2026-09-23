@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/jobs"
 )
 
@@ -19,11 +20,13 @@ const KindProcessMedia = "process_media"
 // It updates the media_metadata table in the per-library database.
 type Processor struct {
 	logger *slog.Logger
+	keys   *crypto.Keys
 }
 
-// NewProcessor returns a new Processor.
-func NewProcessor(logger *slog.Logger) *Processor {
-	return &Processor{logger: logger}
+// NewProcessor returns a new Processor. keys seal generated thumbnails when
+// at-rest encryption is enabled.
+func NewProcessor(logger *slog.Logger, keys *crypto.Keys) *Processor {
+	return &Processor{logger: logger, keys: keys}
 }
 
 // Handle implements jobs.Handler for KindProcessMedia jobs.
@@ -57,7 +60,7 @@ func (p *Processor) Handle(ctx context.Context, job *jobs.Job) error {
 	}
 
 	// Generate thumbnail (also read-only; writes only to .cairn/thumbs/).
-	hasThumbnail, thumbErr := GenerateThumbnail(absPath, cairnDir, fileID)
+	hasThumbnail, thumbErr := GenerateThumbnail(absPath, cairnDir, fileID, p.keys)
 	if thumbErr != nil {
 		p.logger.Warn("thumbnail generation failed", "file_id", fileID, "error", thumbErr)
 		// Non-fatal: continue and persist what we have.

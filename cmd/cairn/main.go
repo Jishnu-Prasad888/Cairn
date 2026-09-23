@@ -17,6 +17,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/backups"
 	"github.com/Jishnu-Prasad888/Cairn/internal/config"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/httpapi"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
@@ -85,7 +86,11 @@ func run() error {
 
 	// Registered storage libraries; reconcile connectivity at startup so a
 	// disconnected disk is surfaced as offline immediately.
-	libraries := library.NewManager(pool, logger, auditSvc)
+	keys := crypto.NewKeys(cfg.EncryptionPassphrase)
+	if keys.Enabled() {
+		logger.Info("at-rest metadata encryption enabled")
+	}
+	libraries := library.NewManager(pool, logger, auditSvc, keys)
 	refreshCtx, cancelRefresh := context.WithTimeout(ctx, 15*time.Second)
 	if err := libraries.RefreshAll(refreshCtx); err != nil {
 		cancelRefresh()
@@ -139,6 +144,7 @@ func run() error {
 		Indexer:       idxManager,
 		ML:            mlManager,
 		Backups:       backupMgr,
+		Keys:          keys,
 		SecureCookies: cfg.CookieSecure,
 		WebUI:         webHandler,
 	})

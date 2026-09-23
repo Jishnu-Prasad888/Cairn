@@ -17,6 +17,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
@@ -42,7 +43,7 @@ func newMLTestServer(t *testing.T) (http.Handler, *testClient, *sql.DB, string) 
 	audSvc := audit.New(pool, logger)
 	authSvc := auth.NewService(pool, logger, audSvc)
 	authzSvc := authz.NewService(pool, logger, audSvc)
-	libraries := library.NewManager(pool, logger, audSvc)
+	libraries := library.NewManager(pool, logger, audSvc, crypto.NewKeys(""))
 
 	libRoot := filepath.Join(dir, "media")
 	if err := os.MkdirAll(filepath.Join(libRoot, "holiday"), 0o755); err != nil {
@@ -234,7 +235,7 @@ func TestMLDisabledEndpointUnavailable(t *testing.T) {
 	audSvc := audit.New(pool, logger)
 	authSvc := auth.NewService(pool, logger, audSvc)
 	authzSvc := authz.NewService(pool, logger, audSvc)
-	libraries := library.NewManager(pool, logger, audSvc)
+	libraries := library.NewManager(pool, logger, audSvc, crypto.NewKeys(""))
 
 	libRoot := filepath.Join(dir, "media")
 	if err := os.MkdirAll(libRoot, 0o755); err != nil {

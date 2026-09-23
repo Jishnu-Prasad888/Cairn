@@ -15,6 +15,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
@@ -26,6 +27,13 @@ import (
 // It returns the handler, an authenticated admin client, the library ID, and the
 // library root (so tests can seed the per-library database).
 func newSearchTestServer(t *testing.T) (http.Handler, *testClient, string, string) {
+	t.Helper()
+	return newSearchTestServerWithKeys(t, nil)
+}
+
+// newSearchTestServerWithKeys is newSearchTestServer with an optional at-rest
+// encryption key injected into the HTTP server dependencies.
+func newSearchTestServerWithKeys(t *testing.T, keys *crypto.Keys) (http.Handler, *testClient, string, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	pool, err := db.Open(filepath.Join(tmpDir, "test.db"))
@@ -40,7 +48,7 @@ func newSearchTestServer(t *testing.T) (http.Handler, *testClient, string, strin
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	auditSvc := audit.New(pool, logger)
 	authSvc := auth.NewService(pool, logger, auditSvc)
-	libManager := library.NewManager(pool, logger, auditSvc)
+	libManager := library.NewManager(pool, logger, auditSvc, crypto.NewKeys(""))
 
 	// Register a test library.
 	libRoot := filepath.Join(tmpDir, "library")
@@ -57,6 +65,7 @@ func newSearchTestServer(t *testing.T) (http.Handler, *testClient, string, strin
 		DB:        pool,
 		Auth:      authSvc,
 		Libraries: libManager,
+		Keys:      keys,
 	}).Handler()
 
 	client := &testClient{handler: handler}
