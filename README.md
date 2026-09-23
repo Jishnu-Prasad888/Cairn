@@ -75,13 +75,17 @@ See [docs/development.md](docs/development.md) for details.
 
 All settings use the `CAIRN_` prefix.
 
-| Variable             | Default                            | Description                             |
-| -------------------- | ---------------------------------- | --------------------------------------- |
-| `CAIRN_HTTP_ADDR`    | `127.0.0.1:8715`                   | HTTP listen address                     |
-| `CAIRN_DATA_DIR`     | `$XDG_DATA_HOME/cairn`             | Server-level data directory             |
-| `CAIRN_LOG_LEVEL`    | `info`                             | `debug`, `info`, `warn`, or `error`     |
-| `CAIRN_WEB_DIST`     | *(embedded frontend)*              | Serve an on-disk build instead (dev)    |
-| `CAIRN_COOKIE_SECURE`| `false`                            | Force `Secure` on session cookies (TLS-terminating proxy) |
+| Variable               | Default                            | Description                             |
+| ---------------------- | ---------------------------------- | --------------------------------------- |
+| `CAIRN_HTTP_ADDR`      | `127.0.0.1:8715`                   | HTTP listen address                     |
+| `CAIRN_DATA_DIR`       | `$XDG_DATA_HOME/cairn`             | Server-level data directory             |
+| `CAIRN_LOG_LEVEL`      | `info`                             | `debug`, `info`, `warn`, or `error`     |
+| `CAIRN_WEB_DIST`       | *(embedded frontend)*              | Serve an on-disk build instead (dev)    |
+| `CAIRN_COOKIE_SECURE`  | `false`                            | Force `Secure` on session cookies (TLS-terminating proxy) |
+| `CAIRN_BACKUP_DIR`     | *(disabled)*                       | Where backups are written; empty disables backups |
+| `CAIRN_BACKUP_KEEP`    | `4`                                | Completed backups retained; older are pruned |
+| `CAIRN_BACKUP_INTERVAL_MIN` | `0`                            | Scheduled backup cadence in minutes (`0` = manual only) |
+| `CAIRN_BACKUP_PASSPHRASE`| *(disabled)*                     | Encrypts backups (needed for restore/verify) |
 
 ## Repository layout
 
