@@ -45,14 +45,20 @@ Applied migrations:
 
 | File                     | Tables added                                   |
 | ------------------------ | ---------------------------------------------- |
-| `0001_baseline.sql`      | `server_settings`                              |
+| `0001_initial.sql`       | `server_settings`                              |
 | `0002_auth.sql`          | `users`, `sessions`, `audit_log`               |
+| `0003_libraries.sql`     | `libraries`                                    |
+| `0004_library_db_schema.sql` | adds `lib_db_schema_version` to `libraries` |
+| `0005_permissions.sql`   | `permission_grants`, `shares`                  |
+| `0006_backups.sql`       | `backups`                                      |
 
 `users` stores argon2id `password_hash`, `role`, and enabled state; `sessions`
 stores only the SHA-256 digest (`token_hash`) of each opaque session token;
 `audit_log` records security events with optional actor/target and non-sensitive
 JSON `metadata`. See [authentication.md](authentication.md) and
-[security.md](security.md).
+[security.md](security.md). `backups` tracks each backup run's destination,
+contents, verification result, and retention state; passphrases and keys are
+never stored. See [backups.md](backups.md) and ADR-0008.
 
 ## Futures
 

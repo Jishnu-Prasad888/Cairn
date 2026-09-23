@@ -69,9 +69,13 @@ phrases, exclusions, parentheses), and a hardened full-text query builder.
 Design: docs/search.md. The query builder, `internal/fts`, is shared by file
 and memory search; malformed queries return 400.
 
-## Phase 10 — Backups (planned)
+## Phase 10 — Backups (implemented)
 
-Incremental, encrypted, compressed, verified backups. Design: docs/backups.md.
+Incremental, encrypted, compressed, verified backups with retention, same-device
+warnings, and restore. Design: docs/backups.md, ADR-0008. The streaming payload
+codec (`internal/backups`) is shared by every backup; records live in the
+server database; the run/verify/restore surface is admin-only under
+`/api/v1/backups`.
 
 ## Phase 11 — Local ML (planned)
 
