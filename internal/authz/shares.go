@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/likeutil"
 )
 
 // NewShareInput describes an intended public share.
@@ -147,8 +148,8 @@ func (s *Service) ListShares(ctx context.Context, keyPrefix string) ([]Share, er
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, resource_key, capabilities, token_hash, password_hash, expires_at, revoked_at, created_by, created_at
 		FROM shares
-		WHERE resource_key = ? OR resource_key LIKE ?
-		ORDER BY created_at ASC`, keyPrefix, keyPrefix+keySep+"%")
+		WHERE resource_key = ? OR resource_key LIKE ? `+likeutil.EscapeClause+`
+		ORDER BY created_at ASC`, keyPrefix, likeutil.Escape(keyPrefix+keySep)+"%")
 	if err != nil {
 		return nil, fmt.Errorf("list shares: %w", err)
 	}

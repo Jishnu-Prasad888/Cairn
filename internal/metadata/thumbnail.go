@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
+	"github.com/Jishnu-Prasad888/Cairn/internal/safeimage"
 	"golang.org/x/image/draw"
 )
 
@@ -42,9 +43,10 @@ func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (boo
 	}
 	defer func() { _ = src.Close() }()
 
-	img, _, err := image.Decode(src)
+	img, _, err := safeimage.Decode(src)
 	if err != nil {
-		// Not a supported image — skip silently (video, audio, docs, etc.).
+		// Not a supported image (or exceeds safety limits) — skip silently
+		// (video, audio, docs, etc.).
 		return false, nil
 	}
 

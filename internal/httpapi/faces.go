@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -19,6 +18,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
+	"github.com/Jishnu-Prasad888/Cairn/internal/safeimage"
 )
 
 // facesLib resolves the library and requires the face capability to be on.
@@ -393,7 +393,7 @@ func (s *Server) handleFaceImage(w http.ResponseWriter, r *http.Request, u *auth
 		return
 	}
 	defer func() { _ = src.Close() }()
-	img, _, err := image.Decode(src)
+	img, _, err := safeimage.Decode(src)
 	if err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
 			CodeNotFound, "Source image for this face is not decodable.")

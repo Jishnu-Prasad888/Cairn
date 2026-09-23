@@ -153,18 +153,19 @@ func run() error {
 	}
 
 	api := httpapi.New(httpapi.Dependencies{
-		Logger:        logger,
-		DB:            pool,
-		Auth:          authSvc,
-		Authz:         authzSvc,
-		Libraries:     libraries,
-		Indexer:       idxManager,
-		ML:            mlManager,
-		Faces:         faces,
-		Backups:       backupMgr,
-		Keys:          keys,
-		SecureCookies: cfg.CookieSecure,
-		WebUI:         webHandler,
+		Logger:         logger,
+		DB:             pool,
+		Auth:           authSvc,
+		Authz:          authzSvc,
+		Libraries:      libraries,
+		Indexer:        idxManager,
+		ML:             mlManager,
+		Faces:          faces,
+		Backups:        backupMgr,
+		Keys:           keys,
+		SecureCookies:  cfg.CookieSecure,
+		MaxUploadBytes: cfg.MaxUploadBytes,
+		WebUI:          webHandler,
 	})
 
 	srv := &http.Server{

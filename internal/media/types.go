@@ -31,6 +31,7 @@ var (
 	ErrInTrash        = errors.New("file is in trash")
 	ErrNotInTrash     = errors.New("file is not in trash")
 	ErrPathTraversal  = errors.New("path traversal detected")
+	ErrUploadTooLarge = errors.New("upload exceeds the configured size limit")
 )
 
 // --- media type ---

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/fts"
+	"github.com/Jishnu-Prasad888/Cairn/internal/likeutil"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 )
 
@@ -212,8 +213,8 @@ func buildExtraFilters(q SearchQuery) ([]string, []any) {
 
 	if q.FolderPath != "" && q.FolderPath != "." {
 		fp := filepath.ToSlash(q.FolderPath)
-		conditions = append(conditions, "f.rel_path LIKE ?")
-		args = append(args, fp+"/%")
+		conditions = append(conditions, "f.rel_path LIKE ? "+likeutil.EscapeClause)
+		args = append(args, likeutil.Escape(fp)+"/%")
 	}
 	if q.Type != "" {
 		conditions = append(conditions, "f.id IN (SELECT file_id FROM media_metadata WHERE media_type = ?)")

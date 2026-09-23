@@ -163,6 +163,9 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 // session. Public because there is nothing to authenticate against yet; the
 // service rejects it with CONFLICT once any account exists.
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	if !s.limitPublicAuth(w, r, "") {
+		return
+	}
 	var body userRequest
 	if err := readJSON(w, r, &body); err != nil {
 		writeDomainError(w, s.logger, requestIDOrEmpty(r), err)
@@ -187,12 +190,21 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := clientIP(r)
+	if !s.limitPublicAuth(w, r, body.Username) {
+		return
+	}
+
 	user, token, err := s.auth.Login(r.Context(), body.Username, body.Password, metaFrom(r))
 	if err != nil {
+		if _, atLimit := s.ratelimit.recordFailure(ip, body.Username); atLimit {
+			s.logger.Warn("auth rate limit exceeded", "username", body.Username)
+		}
 		s.writeAuthError(w, r, err)
 		return
 	}
 
+	s.ratelimit.recordSuccess(ip, body.Username)
 	setSessionCookie(w, token, s.cookieSecure(r))
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"user": toUserResponse(user)})
 }
