@@ -85,13 +85,13 @@ func TestDetectMediaType(t *testing.T) {
 // --- SafeRelPath ---
 
 func TestSafeRelPath(t *testing.T) {
-	ok := []string{"photo.jpg", "2022/img.jpg", "a/b/c.mp4"}
+	ok := []string{"photo.jpg", "2022/img.jpg", "a/b/c.mp4", "2022/", "a//b//c.mp4", "a.b/c"}
 	for _, p := range ok {
 		if _, err := media.SafeRelPath(p); err != nil {
 			t.Errorf("SafeRelPath(%q) unexpected error: %v", p, err)
 		}
 	}
-	bad := []string{"", "../escape.jpg", "/absolute.jpg", "a/../../escape"}
+	bad := []string{"", "../escape.jpg", "/absolute.jpg", "a/../../escape", ".", "..", "./x", "a/./b", ".cairn/db", "a\x00b", "a\nb"}
 	for _, p := range bad {
 		if _, err := media.SafeRelPath(p); err == nil {
 			t.Errorf("SafeRelPath(%q) expected error", p)
@@ -268,6 +268,22 @@ func TestRename(t *testing.T) {
 	f, _ := store.GetByRelPath(ctx, "old.jpg")
 	if f != nil {
 		t.Error("old path still in index after rename")
+	}
+}
+
+func TestRenameRejectsTraversalName(t *testing.T) {
+	svc, store, root := newTestService(t)
+	ctx := context.Background()
+	seedFile(t, store, root, "old.jpg")
+
+	for _, name := range []string{"../escape.jpg", "a/b.jpg", ".cairn", "x\x00.jpg"} {
+		if _, err := svc.Rename(ctx, "old.jpg", name); err == nil {
+			t.Errorf("Rename with new_name %q expected error", name)
+		}
+	}
+	// Original is untouched and still present.
+	if f, err := store.GetByRelPath(ctx, "old.jpg"); err != nil || f == nil {
+		t.Errorf("old path not present after rejected renames: err=%v", err)
 	}
 }
 
