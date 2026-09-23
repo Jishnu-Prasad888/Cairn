@@ -261,13 +261,20 @@ func (s *FaceStore) ListPeople(ctx context.Context) ([]Person, error) {
 
 	var out []Person
 	for rows.Next() {
-		var p Person
+		var (
+			p                  Person
+			created, updated string
+		)
 		if err := rows.Scan(&p.ID, &p.Name, &p.CoverFaceID, &p.CoverFileID,
-			&p.CreatedAt, &p.UpdatedAt, &p.FaceCount); err != nil {
+			&created, &updated, &p.FaceCount); err != nil {
 			return nil, fmt.Errorf("scan person: %w", err)
 		}
-		p.CreatedAt = p.CreatedAt.UTC()
-		p.UpdatedAt = p.UpdatedAt.UTC()
+		if err := parseTime(created, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		if err := parseTime(updated, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
 		out = append(out, p)
 	}
 	return out, rows.Err()

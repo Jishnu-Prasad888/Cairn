@@ -269,7 +269,7 @@ func (m *FaceManager) ClusterPass(ctx context.Context, root string) (*FaceCluste
 		var bestID string
 		bestSim := float64(0)
 		for pid, mean := range means {
-			if sim := descriptorCosine(f.Descriptor, mean); sim > bestSim {
+			if sim := DescriptorCosine(f.Descriptor, mean); sim > bestSim {
 				bestSim = sim
 				bestID = pid
 			}
