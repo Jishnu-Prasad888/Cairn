@@ -326,10 +326,10 @@ func descriptorMagnitude(d []float32) float64 {
 	return math.Sqrt(s)
 }
 
-// descriptorCosine returns the cosine similarity of two equal-length
+// DescriptorCosine returns the cosine similarity of two equal-length
 // descriptors, in [0, 1] once both are normalized (the appearance descriptor
 // is unit- or zero-scale).
-func descriptorCosine(a, b []float32) float64 {
+func DescriptorCosine(a, b []float32) float64 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
