@@ -136,12 +136,22 @@ tracked in docs/designs/016-security-hardening.md and fixed behind tests.
 Design: docs/designs/016-security-hardening.md, ADR-0014.
 Merged to `main` via PR #17.
 
-## Phase 17 — Mobile and API documentation (in progress)
+## Phase 17 — Mobile and API documentation (done)
 
 Documentation hardening: finalize the OpenAPI contract, the API reference
 (auth, media, upload/download, permissions, sharing), and the mobile development
 guide with offline/sync guidance. Every documented endpoint must match the
 implemented server; new docs are added where the inventory has gaps.
+Merged to `main` via PR #18; the OpenAPI contract is verified 1:1 against the
+server route table. Also fixed a flaky `TestVerifyPasswordRejectsCorruptedKey`
+(a trailing-base64-char corruption that was a no-op ~1/64 runs).
+
+## Phase 18 — Production packaging (in progress)
+
+Single-binary distribution with the embedded frontend, ARM64 + AMD64
+cross-builds, Docker image, health/readiness/metrics endpoints, build version
+information, schema migrations, and installation documentation. Branch:
+`feature/production-packaging`.
 
 ## Later phases (under design)
 
