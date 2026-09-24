@@ -192,14 +192,14 @@ version 1.0 readiness:
 
 Progress:
 
-- **`qa/e2e.py`** — repeatable 59-check acceptance harness covering the whole
+- **`qa/e2e.py`** — repeatable 63-check acceptance harness covering the whole
   matrix (see `qa/README.md`); `make qa` runs it.
 - **Found and fixed a release blocker**: index/process-media jobs were written
   to the per-library queue but no worker ever executed them, so nothing was
   actually indexed in a running server. `IndexManager` now runs one background
   worker per library (started at boot and on every index trigger), anchored to
   the server lifetime. Regression tests added.
-- 59/59 QA checks pass; full backend suite passes with `-race`; AMD64 native
+- 63/63 QA checks pass; full backend suite passes with `-race`; AMD64 native
   build + smoke, linux/arm64 cross-build, and Docker build all green.
 
 Remaining before declaring release readiness: final review of the remaining QA
