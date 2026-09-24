@@ -178,6 +178,33 @@ Implemented on `feature/production-packaging`:
   `/libraries/{libraryID}/files/{fileID}` was documented under the `/copy`
   path; route-parity checker now reports 94/94.
 
+## Phase 19 — Final QA (in progress)
+
+Branch: `release/v1.0`. Perform complete end-to-end validation before declaring
+version 1.0 readiness:
+
+- fresh install (bootstrap), existing library, external drive, disconnect /
+  reconnect
+- media lifecycle: new, changed, missing, moved, duplicates, large video
+- uploads, permissions, sharing, memories, search, backups, restore
+- ML disabled + ML enabled
+- platforms: ARM64, AMD64, native binary, Docker
+
+Progress:
+
+- **`qa/e2e.py`** — repeatable 59-check acceptance harness covering the whole
+  matrix (see `qa/README.md`); `make qa` runs it.
+- **Found and fixed a release blocker**: index/process-media jobs were written
+  to the per-library queue but no worker ever executed them, so nothing was
+  actually indexed in a running server. `IndexManager` now runs one background
+  worker per library (started at boot and on every index trigger), anchored to
+  the server lifetime. Regression tests added.
+- 59/59 QA checks pass; full backend suite passes with `-race`; AMD64 native
+  build + smoke, linux/arm64 cross-build, and Docker build all green.
+
+Remaining before declaring release readiness: final review of the remaining QA
+notes, release artifacts re-run against the final tree, and the release PR.
+
 ## Later phases (under design)
 
 Share tokens as server features, webhooks/Plugins, docker compose manifest,

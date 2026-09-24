@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
+	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
 )
 
 // --- helpers ---
@@ -203,6 +205,92 @@ func TestStateStoreCounts(t *testing.T) {
 	}
 	if present != 2 || missing != 1 || deleted != 1 {
 		t.Errorf("counts = %d/%d/%d, want 2/1/1", present, missing, deleted)
+	}
+}
+
+// TestIndexManagerWorkerExecutesScanJob guards against the regression where
+// scan jobs were enqueued into the per-library queue but no worker ever ran
+// them: a freshly triggered scan must actually index the library.
+func TestIndexManagerWorkerExecutesScanJob(t *testing.T) {
+	root := t.TempDir()
+	cairnDir := filepath.Join(root, ".cairn")
+	if err := os.MkdirAll(cairnDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "a.jpg"), "photo a")
+	writeFile(t, filepath.Join(root, "b.txt"), "notes b")
+
+	mgr := indexer.NewIndexManager(discardLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr.SetMediaProcessor(metadata.NewProcessor(discardLogger(), crypto.NewKeys("")))
+	if err := mgr.StartLibraryWorker(ctx, "lib1", root); err != nil {
+		t.Fatalf("start library worker: %v", err)
+	}
+	defer mgr.StopLibraryWorker("lib1")
+
+	if _, err := mgr.TriggerScan(ctx, "lib1", root); err != nil {
+		t.Fatalf("trigger scan: %v", err)
+	}
+
+	// The worker claims one job per poll tick, so allow the scan job plus its
+	// process_media follow-ups to drain.
+	deadline := time.Now().Add(30 * time.Second)
+	var status *indexer.IndexStatus
+	for time.Now().Before(deadline) {
+		st, err := mgr.Status(ctx, "lib1", root)
+		if err != nil {
+			t.Fatalf("index status: %v", err)
+		}
+		if st.Present == 2 && st.Missing == 0 && st.ActiveJob == nil {
+			status = st
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if status == nil {
+		t.Fatal("index scan job was never executed by the library worker")
+	}
+}
+
+func TestIndexManagerWorkersRestartIsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	cairnDir := filepath.Join(root, ".cairn")
+	if err := os.MkdirAll(cairnDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "a.jpg"), "photo a")
+
+	mgr := indexer.NewIndexManager(discardLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Idempotent: starting the same library twice must not double-start a
+	// worker. The second call simply no-ops.
+	for i := 0; i < 2; i++ {
+		if err := mgr.StartLibraryWorker(ctx, "lib1", root); err != nil {
+			t.Fatalf("start worker (call %d): %v", i, err)
+		}
+	}
+	if _, err := mgr.TriggerScan(ctx, "lib1", root); err != nil {
+		t.Fatalf("trigger scan: %v", err)
+	}
+
+	// StopLibraryWorker must not resurrect a stopped worker.
+	mgr.StopLibraryWorker("lib1")
+
+	deadline := time.Now().Add(5 * time.Second)
+	var status *indexer.IndexStatus
+	for time.Now().Before(deadline) {
+		st, err := mgr.Status(ctx, "lib1", root)
+		if err != nil {
+			t.Fatalf("index status: %v", err)
+		}
+		status = st
+		time.Sleep(100 * time.Millisecond)
+	}
+	if status != nil && status.Present == 1 {
+		t.Fatalf("job ran after worker was stopped: present=%d", status.Present)
 	}
 }
 
