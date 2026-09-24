@@ -25,6 +25,7 @@ and exercises the Phase 19 validation matrix end to end:
 | S16b disaster recovery | fresh backup + restore mirrors the documented layout (`server/cairn.db`, `libraries/<id>/library.db`, media under `files/`) |
 | S17 upload cap | server with a small `CAIRN_MAX_UPLOAD_BYTES` rejects oversize with `413` |
 | S18 ML enabled | similarity signatures computed, face pass + status + list healthy |
+| S19 duplicate grouping | `GET /files/duplicates` returns one group per identical-content set, members carry hash + equal size, `limit` respected |
 
 ## Running
 
