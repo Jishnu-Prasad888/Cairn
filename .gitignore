@@ -28,4 +28,4 @@ vendor/
 .DS_Store
 
 # Developer scratch
-todos/
+todos/__pycache__/
