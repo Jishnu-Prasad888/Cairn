@@ -44,3 +44,56 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.logger, http.StatusOK, version.Get())
 }
+
+// readyResponse reports readiness to serve traffic.
+type readyResponse struct {
+	Status   string `json:"status"`
+	Database string `json:"database"`
+}
+
+// handleReady reports whether the server is ready to serve traffic.
+//
+// Unlike /health (liveness: "is the process alive?"), /ready answers "should a
+// load balancer / container orchestrator send traffic here?". It is 200 only
+// when the server has finished startup and the database answers pings; it
+// flips to 503 before graceful shutdown so proxies drain connections to the
+// remaining replica while this instance stops.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if !s.ready.Load() {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusServiceUnavailable,
+			CodeServiceUnavailable, "Server is shutting down.")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	dbStatus := "ok"
+	if err := s.db.PingContext(ctx); err != nil {
+		s.logger.Error("readiness check: database ping failed", "error", err)
+		dbStatus = "error"
+	}
+
+	if dbStatus != "ok" {
+		writeJSON(w, s.logger, http.StatusServiceUnavailable, readyResponse{
+			Status:   "unavailable",
+			Database: dbStatus,
+		})
+		return
+	}
+
+	writeJSON(w, s.logger, http.StatusOK, readyResponse{
+		Status:   "ready",
+		Database: dbStatus,
+	})
+}
+
+// handleMetrics renders the server metrics in Prometheus text format.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
+			CodeNotFound, "Metrics are not enabled on this server.")
+		return
+	}
+	s.metrics.Handler().ServeHTTP(w, r)
+}

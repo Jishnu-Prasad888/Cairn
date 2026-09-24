@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
@@ -11,6 +12,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
+	"github.com/Jishnu-Prasad888/Cairn/internal/metrics"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
 )
 
@@ -32,6 +34,10 @@ type Server struct {
 	secureCookies  bool
 	ratelimit      *rateLimiter
 	maxUploadBytes int64
+	metrics        *metrics.Registry
+	// ready gates the /ready endpoint: true once startup completes, flipped
+	// false by MarkNotReady before graceful shutdown so proxies drain.
+	ready atomic.Bool
 }
 
 // Dependencies are the services the HTTP layer needs. Keeping them explicit
@@ -76,12 +82,16 @@ type Dependencies struct {
 	// MaxUploadBytes caps the total size of single upload bodies; values <= 0
 	// fall back to media.DefaultMaxUploadBytes.
 	MaxUploadBytes int64
+	// Metrics records per-request counters for /api/v1/metrics. It may be
+	// nil, in which case the metrics endpoint reports NOT_FOUND and no
+	// request statistics are collected.
+	Metrics *metrics.Registry
 }
 
 // New returns a Server built from the given dependencies. The caller must
 // call Handler() to obtain the http.Handler.
 func New(deps Dependencies) *Server {
-	return &Server{
+	s := &Server{
 		logger:         deps.Logger,
 		db:             deps.DB,
 		web:            deps.WebUI,
@@ -96,7 +106,17 @@ func New(deps Dependencies) *Server {
 		secureCookies:  deps.SecureCookies,
 		ratelimit:      newRateLimiter(),
 		maxUploadBytes: deps.MaxUploadBytes,
+		metrics:        deps.Metrics,
 	}
+	s.ready.Store(true)
+	return s
+}
+
+// MarkNotReady flips the /ready endpoint to 503. Call it before the graceful
+// shutdown begins so load balancers and orchestrators stop routing traffic to
+// this instance while its remaining requests drain.
+func (s *Server) MarkNotReady() {
+	s.ready.Store(false)
 }
 
 // Handler builds the fully-middleware-wrapped http.Handler for this Server.
@@ -109,7 +129,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	mux.HandleFunc("GET /api/v1/ready", s.handleReady)
 	mux.HandleFunc("GET /api/v1/version", s.handleVersion)
+	mux.HandleFunc("GET /api/v1/metrics", s.handleMetrics)
 
 	// Public authentication surface.
 	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
@@ -263,7 +285,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 
-	return WithMiddleware(s.logger, mux)
+	return WithMiddleware(s.logger, metricsRecording(s.metrics, mux))
 }
 
 // requireSession wraps a plain http.HandlerFunc with authentication. The
