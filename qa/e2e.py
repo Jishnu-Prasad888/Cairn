@@ -489,7 +489,7 @@ def main():
         # ---- S14 backups ---------------------------------------------------
         s, body, _ = C.json("POST", "/api/v1/backups")
         backup_id = (body or {}).get("id")
-        REPORT.check("S14", "backup runs", s == 200 and backup_id, f"{s} {str(body)[:120]}")
+        REPORT.check("S14", "backup runs", s == 200 and backup_id and (body or {}).get("status") == "completed", f"{s} {str(body)[:120]}")
         s, body, _ = C.json("GET", "/api/v1/backups")
         backups = body if isinstance(body, list) else []
         all_ids = [b.get("id") for b in backups]
@@ -530,6 +530,29 @@ def main():
         C.json("POST", f"/api/v1/libraries/{drive_id}/index", {})
         st = wait_index_done(C, drive_id, "S16")
         REPORT.check("S16", "reconnected library rescans to present state", st.get("present") == 3 and st.get("missing") == 0, f"present={st.get('present')} missing={st.get('missing')}")
+
+        # ---- S16b disaster recovery: backup the full world, restore, boot ----
+        s, body, _ = C.json("POST", "/api/v1/backups")
+        backup2 = (body or {}).get("id")
+        rec = None
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            _, body, _ = C.json("GET", "/api/v1/backups")
+            rec = next((b for b in (body if isinstance(body, list) else []) if b.get("id") == backup2), None)
+            if rec and rec.get("status") == "completed":
+                break
+            time.sleep(0.5)
+        REPORT.check("S16b", "backup after reconnect completes", bool(rec) and rec.get("status") == "completed", f"{str(rec)[:120]}")
+        dest2 = os.path.join(work, "restore-dest2")
+        s, _, _ = C.json("POST", f"/api/v1/backups/{backup2}/restore", {"destination": dest2})
+        # Restore mirrors the documented layout: server/cairn.db + libraries/<id>/...
+        srv_db = os.path.join(dest2, "server", "cairn.db")
+        lib1_db = os.path.join(dest2, "libraries", lib_id, "library.db")
+        lib2_db = os.path.join(dest2, "libraries", drive_id, "library.db")
+        media_ok = any(os.path.isfile(os.path.join(dest2, "libraries", lib_id, "files", p)) for p in ("notes.txt", "IMG_0001.png"))
+        REPORT.check("S16b", "restore mirrors server DB layout", s == 200 and os.path.isfile(srv_db), f"{s} srv_db={os.path.isfile(srv_db)}")
+        REPORT.check("S16b", "restore mirrors library DBs for all libraries", os.path.isfile(lib1_db) and os.path.isfile(lib2_db), f"main={os.path.isfile(lib1_db)} drive={os.path.isfile(lib2_db)}")
+        REPORT.check("S16b", "restore brings back media files", media_ok, f"media={media_ok}")
 
         # ---- S17 upload cap (413) -----------------------------------------
         cap_srv = start_server("cap", env={"CAIRN_MAX_UPLOAD_BYTES": "2048"})

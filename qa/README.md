@@ -22,6 +22,7 @@ and exercises the Phase 19 validation matrix end to end:
 | S14 backups | run, list, verify, restore to a fresh destination |
 | S15 ML disabled | `/ml` reports disabled; passes rejected with `503` |
 | S16 external drive | unplug → `refresh` → offline; reconnect → online; rescan to present |
+| S16b disaster recovery | fresh backup + restore mirrors the documented layout (`server/cairn.db`, `libraries/<id>/library.db`, media under `files/`) |
 | S17 upload cap | server with a small `CAIRN_MAX_UPLOAD_BYTES` rejects oversize with `413` |
 | S18 ML enabled | similarity signatures computed, face pass + status + list healthy |
 
