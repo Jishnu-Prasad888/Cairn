@@ -7,7 +7,7 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **Phase 17 is the current deliverable and is tracked as an open PR.**
+- **All phases 0–22 are merged to `main`; v1.0 is feature-complete.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
@@ -46,8 +46,9 @@ Merged to `main` via PRs #5 and #6. Design: docs/media.md.
 Albums, tags, folders-as-categories, people, favorites, duplicates, time
 clusters, and cleanup workflows — driven by the in-place indexing contract.
 Albums, tags, and favorites shipped with Phase 7 (PR #7); the People/face
-surface shipped with Phase 15 (PR #16). Duplicates, time clusters, and cleanup
-workflows remain backlog.
+surface shipped with Phase 15 (PR #16); duplicate grouping shipped with
+Phase 20; the web album/tag management UI shipped with Phase 22. Time clusters
+and bulk cleanup workflows remain backlog.
 
 ## Phase 6 — Permissions and sharing (implemented)
 
@@ -263,6 +264,50 @@ Validation:
 
 Result: web typecheck + lint + 46 tests + build all green; no server surface
 changed, so no new QA scenario or migration was needed.
+
+## Phase 22 — Web organization: albums and tags (complete ✅)
+
+Close the remaining web-interface gap against Definition of Success #11
+("Organize media with tags and albums"): the organization API shipped in
+Phases 5/7/9 but had no web surface, so users could not manage albums or tags
+from the app. This phase adds the `/albums` and `/tags` pages plus tag
+management in the shared file viewer. No server, database, or migration
+changes — only existing `albums`, `tags`, `search` (tag filter), and per-file
+tag endpoints are consumed.
+
+Implementation:
+
+- **Shared UI extraction** — `web/src/components/`: `ViewerModal.tsx` and
+  `FileGrid.tsx` extracted from `BrowserPage` (pure moves, same testids),
+  `media.ts` URL/glyph helpers, and `views.css` shared styles. The browser and
+  the new pages use the same components instead of duplicating viewer code.
+- **Albums (`/albums`)** — `web/src/pages/AlbumsPage.tsx`: create (prompt) and
+  delete (confirm) albums, album cards, album detail with a file grid,
+  per-file remove, and an "Add files" picker that searches the library and adds
+  selected files (idempotent membership POSTs).
+- **Tags (`/tags`)** — `web/src/pages/TagsPage.tsx`: create and delete tags,
+  tag cards, and a per-tag file listing via `{search}?tag=<name>` with per-file
+  tag removal.
+- **Viewer tag management** — the shared `ViewerModal` now shows a file's tags
+  with remove buttons and an "Add tag" input that auto-completes existing tags
+  and creates new ones on the fly (create-then-attach), available everywhere
+  the viewer opens.
+- **Route + nav** — `/albums` and `/tags` registered in `App.tsx`; "Albums" and
+  "Tags" links on Home.
+- **Docs** — `docs/web.md` organization section; stale status text fixed in
+  `docs/roadmap.md` (header, Phase 5 duplicates) and `README.md`.
+
+Validation:
+
+- Frontend: 13 new tests (AlbumsPage 7, TagsPage 6) — suite now 59 tests;
+  typecheck, eslint, prettier, and build all green.
+- No Go changes and no new endpoints: existing organization handlers were
+  already covered by Phase 7/9 store + handler suites, so no new QA scenario or
+  migration was needed.
+
+Result: web typecheck + lint + 59 tests + build all green; no server surface
+changed. With this phase merged, every Definition of Success capability is
+reachable from the web interface.
 
 ## Later phases (under design)
 

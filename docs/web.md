@@ -15,6 +15,8 @@ fails. All pages share the same design tokens, the `page-header` /
 | `/people`    | Face people: list, rename, merge          | `web/src/pages/PeoplePage.tsx`       |
 | `/duplicates`| Duplicate file groups (content hash)      | `web/src/pages/DuplicatesPage.tsx`   |
 | `/browse`    | File browser: folders, grid/list, upload, download, photo/video viewer, trash, rename/move/copy | `web/src/pages/BrowserPage.tsx` |
+| `/albums`    | Albums: create, delete, add/remove files  | `web/src/pages/AlbumsPage.tsx`       |
+| `/tags`      | Tags: create, delete, browse by tag       | `web/src/pages/TagsPage.tsx`         |
 
 ## File browser (`/browse`)
 
@@ -44,6 +46,31 @@ files from the web UI.
 The page consumes only existing endpoints (`folders`, `files`, `search`,
 `trash`, `upload`, `thumbnail`, `download`, per-file `rename`/`move`/`copy`/
 `delete`/`restore`); the Phase 21 PR added no server surface.
+
+## Organization (`/albums`, `/tags`)
+
+The organization pages are the Phase 22 deliverable and close the gap between
+the organization API (Phase 5) and a browsable web interface. Both are
+library-scoped and use the shared `ViewerModal` and `FileGrid` components.
+
+- **Albums (`/albums`)** — album cards with a create prompt and delete
+  confirmation. Opening an album shows its file grid with a per-file remove
+  button and an **Add files** picker: type to search the library, tick results,
+  and add them to the album. Membership POSTs are idempotent; adding never
+  duplicates media (albums are logical collections).
+- **Tags (`/tags`)** — tag cards with a create prompt and delete confirmation
+  (removal propagates to every file). Opening a tag lists every file carrying
+  it (via `{search}?tag=…`) with a per-file remove button.
+- **Tag management in the viewer** — the shared photo/video viewer now carries a
+  **Tags** section: current tags with a per-tag remove button and an "Add tag"
+  input that auto-completes existing tags and creates new ones on the fly
+  (create-then-attach). This works from `/browse`, `/albums`, and `/tags`
+  alike.
+
+Shared UI lives in `web/src/components/` (`ViewerModal.tsx`, `FileGrid.tsx`,
+`media.ts`, `views.css`); the pages reuse it rather than duplicating viewer
+code. The Phase 22 PR added no server surface — only existing `albums`, `tags`,
+`search`, and per-file tag endpoints are consumed.
 
 ## Adding a page
 
