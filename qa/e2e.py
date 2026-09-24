@@ -13,6 +13,7 @@ data directories, exercising the Phase 19 validation matrix:
   S07 duplicate content (hash)         S16 disconnect/reconnect (external drive)
   S08 search                           S17 upload cap (413)
   S09 uploads                          S18 ML enabled (similarity + faces)
+  S19 duplicate grouping API
 
 Platform coverage (AMD64/ARM64/native/Docker) is exercised by CI; see
 qa/README.md for how the pieces fit together.
@@ -388,6 +389,35 @@ def main():
             "S07", "identical bytes recorded with equal content hash",
             "IMG_0002.png" in dup and "IMG_0002_copy.png" in dup and len(hashes) == 1 and None not in hashes,
             f"{dup}",
+        )
+
+        # ---- S19 duplicate grouping API -----------------------------------
+        # The group endpoint must flag same-content files (including the copy
+        # created in S07 and IMG_0001.png, which shares its bytes).
+        s, body, _ = C.json("GET", f"/api/v1/libraries/{lib_id}/files/duplicates")
+        groups = (body or {}).get("groups", [])
+        total = (body or {}).get("total", -1)
+        h = next(iter(hashes), None)
+        hit = next((g for g in groups if g.get("content_hash") == h), None)
+        members = sorted(m.get("rel_path", "") for m in (hit or {}).get("files", []))
+        sizes = {m.get("size_bytes") for m in (hit or {}).get("files", [])}
+        REPORT.check(
+            "S19", "duplicate groups API flags same-content files",
+            s == 200 and total == 1 and hit is not None
+            and any("IMG_0002.png" in p for p in members)
+            and any("IMG_0002_copy.png" in p for p in members),
+            f"total={total} group_hash={bool(hit)} members={members}",
+        )
+        REPORT.check(
+            "S19", "duplicate group members carry hash + equal size",
+            hit is not None and len(sizes) == 1 and None not in sizes and len(members) == 3,
+            f"sizes={sizes} members={members}",
+        )
+        s, body, _ = C.json("GET", f"/api/v1/libraries/{lib_id}/files/duplicates?limit=1")
+        REPORT.check(
+            "S19", "duplicate groups respond to limit param",
+            s == 200 and len((body or {}).get("groups", [])) <= 1,
+            f"groups={len((body or {}).get('groups', []))}",
         )
 
         # ---- S08 search ----------------------------------------------------
