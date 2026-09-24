@@ -1,0 +1,282 @@
+/* Shared file/viewer controls used by the file browser and organization pages. */
+
+.button {
+  font: inherit;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-invert, var(--text));
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.danger-button {
+  color: var(--danger);
+}
+
+/* File grid */
+.file-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-3);
+}
+
+.file-card {
+  min-width: 0;
+  position: relative;
+}
+
+.file-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.file-card-main:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.file-card-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--background);
+}
+
+.file-card-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+}
+
+.file-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-card-action {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--danger);
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.file-card-action:hover {
+  background: var(--danger);
+  color: var(--text-invert, #fff);
+}
+
+/* Viewer */
+.viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: var(--space-4);
+}
+
+.viewer-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, var(--radius-sm));
+  max-width: min(960px, 94vw);
+  max-height: 92vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.viewer-close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
+  border: none;
+  background: var(--surface);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.viewer-stage {
+  min-height: 280px;
+  background: var(--background);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.viewer-media {
+  max-width: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+}
+
+.viewer-generic {
+  text-align: center;
+  padding: var(--space-6);
+  color: var(--text-muted);
+}
+
+.viewer-glyph {
+  font-size: 48px;
+  display: block;
+}
+
+.viewer-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.viewer-meta h2 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-meta p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.viewer-tags {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.viewer-tags h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.viewer-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--primary);
+  font-size: 13px;
+}
+
+.tag-chip button {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.tag-chip button:hover {
+  color: var(--danger);
+}
+
+.viewer-tag-form {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.viewer-tag-input {
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: var(--space-1) var(--space-2);
+  min-width: 180px;
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .viewer-actions .button {
+    flex: 1 1 auto;
+  }
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { API_BASE, apiGet, apiPost, apiRequest, apiUpload } from '../api/client';
+import { apiGet, apiPost, apiUpload } from '../api/client';
 import type {
   FileListResponse,
   FileSummary,
@@ -10,31 +10,10 @@ import type {
   Library,
 } from '../api/types';
 import { formatBytes } from '../api/types';
+import { FileGrid } from '../components/FileGrid';
+import { ViewerModal } from '../components/ViewerModal';
+import { downloadUrl, mediaGlyph, thumbnailUrl } from '../components/media';
 import './BrowserPage.css';
-
-const MEDIA_LABEL: Record<string, string> = {
-  photo: 'Photo',
-  video: 'Video',
-  audio: 'Audio',
-  document: 'Document',
-  other: 'File',
-};
-
-function downloadUrl(libraryId: string, file: FileSummary): string {
-  return `${API_BASE}/libraries/${libraryId}/files/${file.id}/download`;
-}
-
-function thumbnailUrl(libraryId: string, file: FileSummary): string {
-  return `${API_BASE}/libraries/${libraryId}/files/${file.id}/thumbnail`;
-}
-
-function mediaGlyph(file: FileSummary): string {
-  if (file.media_type === 'photo') return '🖼';
-  if (file.media_type === 'video') return '🎬';
-  if (file.media_type === 'audio') return '🎵';
-  if (file.media_type === 'document') return '📄';
-  return '📦';
-}
 
 /** Breadcrumb segments for a relative path ("vacation/2024" -> two hops). */
 function crumbSegments(folderPath: string): Array<{ label: string; path: string }> {
@@ -46,158 +25,6 @@ function crumbSegments(folderPath: string): Array<{ label: string; path: string 
     crumbs.push({ label: part, path: acc });
   }
   return crumbs;
-}
-
-interface ViewerModalProps {
-  libraryId: string;
-  file: FileSummary;
-  onClose: () => void;
-  onChanged: (action: 'rename' | 'move' | 'copy' | 'delete') => Promise<void>;
-}
-
-/** Photo/video viewer with the file operations for this file. */
-function ViewerModal({ libraryId, file, onClose, onChanged }: ViewerModalProps) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const runAction = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-      await onChanged('delete'); // refresh the listing (also after rename/move/copy)
-      onClose();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-      setBusy(false);
-    }
-  };
-
-  const rename = () => {
-    const name = window.prompt('New file name', file.name);
-    if (!name || name === file.name) return;
-    void runAction(() =>
-      apiPost<{ file: FileSummary }>(`/libraries/${libraryId}/files/${file.id}/rename`, {
-        path: file.rel_path,
-        new_name: name,
-      }).then(() => undefined),
-    );
-  };
-
-  const move = () => {
-    const dest = window.prompt('Destination folder (relative path, e.g. archival/2024)', '');
-    if (dest === null) return;
-    const target = dest.replace(/^\/+|\/+$/g, '') || 'archival';
-    void runAction(() =>
-      apiPost<{ file: FileSummary }>(`/libraries/${libraryId}/files/${file.id}/move`, {
-        path: file.rel_path,
-        new_path: `${target}/${file.name}`,
-      }).then(() => undefined),
-    );
-  };
-
-  const copy = () => {
-    const dest = window.prompt('Copy to folder (relative path)', '');
-    if (dest === null) return;
-    const target = dest.replace(/^\/+|\/+$/g, '') || 'copies';
-    void runAction(() =>
-      apiPost<{ file: FileSummary }>(`/libraries/${libraryId}/files/${file.id}/copy`, {
-        path: file.rel_path,
-        dest_path: `${target}/${file.name}`,
-      }).then(() => undefined),
-    );
-  };
-
-  const trash = () => {
-    if (!window.confirm(`Move "${file.name}" to the trash?`)) return;
-    void runAction(() =>
-      apiRequest<undefined>(`/libraries/${libraryId}/files/${file.id}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ path: file.rel_path }),
-      }),
-    );
-  };
-
-  const preview = file.media_type === 'photo' && (
-    <img className="viewer-media" src={thumbnailUrl(libraryId, file)} alt={file.name} />
-  );
-  const video = file.media_type === 'video' && (
-    <video className="viewer-media" src={downloadUrl(libraryId, file)} controls />
-  );
-
-  return (
-    <div className="viewer-backdrop" onClick={onClose} data-testid="viewer">
-      <div
-        className="viewer-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={file.name}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button type="button" className="viewer-close" onClick={onClose} aria-label="Close viewer">
-          ×
-        </button>
-        <div className="viewer-stage">
-          {file.media_type === 'photo' ? (
-            preview
-          ) : file.media_type === 'video' ? (
-            video
-          ) : (
-            <div className="viewer-generic">
-              <span className="viewer-glyph">{mediaGlyph(file)}</span>
-              <p>
-                {MEDIA_LABEL[file.media_type] ?? 'File'} — preview is not available for this type.
-              </p>
-            </div>
-          )}
-        </div>
-        <div className="viewer-info">
-          <div className="viewer-meta">
-            <h2 title={file.rel_path}>{file.name}</h2>
-            <p className="muted">
-              {file.folder_path || 'Library root'} · {formatBytes(file.size_bytes)} ·{' '}
-              {MEDIA_LABEL[file.media_type] ?? file.media_type}
-            </p>
-          </div>
-          <div className="viewer-actions">
-            <a
-              className="button"
-              href={downloadUrl(libraryId, file)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Download
-            </a>
-            <button type="button" className="button" onClick={rename} disabled={busy}>
-              Rename
-            </button>
-            <button type="button" className="button" onClick={move} disabled={busy}>
-              Move
-            </button>
-            <button type="button" className="button" onClick={copy} disabled={busy}>
-              Copy
-            </button>
-            <button type="button" className="button danger-button" onClick={trash} disabled={busy}>
-              Move to trash
-            </button>
-          </div>
-          {error && (
-            <p className="error-text" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 interface FileGridProps {
@@ -245,31 +72,7 @@ function FileEntries({ libraryId, files, view, onOpen }: FileGridProps) {
     );
   }
 
-  return (
-    <ul className="file-grid" data-testid="file-grid">
-      {files.map((f) => (
-        <li key={f.id} className="file-card">
-          <button type="button" className="file-card-main" onClick={() => onOpen(f)}>
-            {f.media_type === 'photo' ? (
-              <img
-                className="file-card-thumb"
-                src={thumbnailUrl(libraryId, f)}
-                alt=""
-                loading="lazy"
-              />
-            ) : (
-              <span className="file-card-thumb file-card-glyph" aria-hidden="true">
-                {mediaGlyph(f)}
-              </span>
-            )}
-            <span className="file-card-name" title={f.rel_path}>
-              {f.name}
-            </span>
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
+  return <FileGrid libraryId={libraryId} files={files} onOpen={onOpen} />;
 }
 
 export default function BrowserPage() {

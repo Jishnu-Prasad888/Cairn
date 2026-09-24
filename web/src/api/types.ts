@@ -136,6 +136,38 @@ export interface FileListResponse {
   total: number;
 }
 
+export interface Album {
+  id: string;
+  name: string;
+  description?: string;
+  cover_file_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlbumListResponse {
+  albums: Album[];
+}
+
+export interface Tag {
+  id: string;
+  name: string;
+  color?: string;
+  created_at: string;
+}
+
+export interface TagListResponse {
+  tags: Tag[];
+}
+
+export interface TagEnvelope {
+  tag: Tag;
+}
+
+export interface FileCollectionResponse {
+  files: FileSummary[];
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
