@@ -28,4 +28,5 @@ vendor/
 .DS_Store
 
 # Developer scratch
-todos/__pycache__/
+# Python bytecode artifacts
+__pycache__/
