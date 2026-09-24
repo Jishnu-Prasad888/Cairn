@@ -75,6 +75,7 @@ export default function HomePage() {
         <nav className="home-nav" aria-label="Sections">
           <Link to="/memories">Memories</Link>
           <Link to="/people">People</Link>
+          <Link to="/duplicates">Duplicates</Link>
         </nav>
       </header>
 

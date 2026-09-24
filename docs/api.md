@@ -195,6 +195,7 @@ authenticated user, `admin` = admin role, `cap` = capability-checked
 | Method | Path                                                        | Purpose                          | Auth |
 | ------ | ----------------------------------------------------------- | -------------------------------- | ---- |
 | GET    | `/libraries/{libraryID}/files`                              | Paged file listing               | cap  |
+| GET    | `/libraries/{libraryID}/files/duplicates`                   | Duplicate groups by content hash | cap  |
 | GET    | `/libraries/{libraryID}/files/{fileID}`                     | One file                         | cap  |
 | GET    | `/libraries/{libraryID}/files/{fileID}/download`            | Stream original (Range)          | cap  |
 | POST   | `/libraries/{libraryID}/files/upload`                       | Multipart upload                 | cap  |
