@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/jobs"
+	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
+	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
 )
 
 // IndexStatus is the current state of a library's index.
@@ -25,7 +28,7 @@ type IndexStatus struct {
 
 // IndexManager coordinates opening the per-library database, enqueueing scan
 // jobs, and reporting index status. Each library gets its own job queue backed
-// by its library.db.
+// by its library.db and one background worker that drains it.
 type IndexManager struct {
 	logger *slog.Logger
 
@@ -33,11 +36,118 @@ type IndexManager struct {
 	// job completes. main wires this to the ML manager so similarity passes
 	// run in the background once indexing settles.
 	AfterScan func(libraryID, root string)
+
+	// mediaProcessor, when set, handles process_media jobs (metadata
+	// extraction and thumbnail generation) on every library worker.
+	mediaProcessor *metadata.Processor
+
+	// baseCtx is the server-lifetime context (signal context from main) that
+	// library workers live under. Request-scoped contexts must never parent a
+	// worker, or it would stop the moment the triggering request returns.
+	baseCtx context.Context
+
+	// workerMu guards workers, one running worker per library. token gives
+	// cleanup a unique identity so a stale worker cannot cancel its successor.
+	workerMu sync.Mutex
+	workers  map[string]*workerHandle
+}
+
+// SetBaseContext anchors library workers to a server-lifetime context. Call
+// once at startup with the process signal context; workers started for new
+// libraries and reconnected volumes then survive the requests that triggered
+// them.
+func (m *IndexManager) SetBaseContext(ctx context.Context) {
+	m.baseCtx = ctx
+}
+
+// workerHandle tracks one running per-library job worker.
+type workerHandle struct {
+	cancel context.CancelFunc
+	token  *struct{}
 }
 
 // NewIndexManager returns a new IndexManager.
 func NewIndexManager(logger *slog.Logger) *IndexManager {
-	return &IndexManager{logger: logger}
+	return &IndexManager{logger: logger, workers: make(map[string]*workerHandle)}
+}
+
+// SetMediaProcessor configures the handler for process_media jobs. When nil,
+// process_media jobs are executed anyway but metadata and thumbnails are not
+// produced (jobs fail with "no handler" only when the processor is required).
+func (m *IndexManager) SetMediaProcessor(p *metadata.Processor) {
+	m.mediaProcessor = p
+}
+
+// StartLibraryWorker opens the library database for root and starts a
+// background jobs.Worker for its queue, so queued scan and media-processing
+// jobs are executed on their own. It is idempotent per library: a library that
+// already has a worker is left untouched. The worker stops when ctx is
+// cancelled or StopLibraryWorker is called.
+func (m *IndexManager) StartLibraryWorker(ctx context.Context, libraryID, root string) error {
+	m.workerMu.Lock()
+	defer m.workerMu.Unlock()
+	if _, ok := m.workers[libraryID]; ok {
+		return nil
+	}
+	ldb, err := m.openLibraryDB(root)
+	if err != nil {
+		return fmt.Errorf("open library db for worker %s: %w", libraryID, err)
+	}
+	// Anchor the worker to the server lifetime; the triggering request context
+	// ends almost immediately.
+	parent := ctx
+	if m.baseCtx != nil {
+		parent = m.baseCtx
+	}
+	wctx, cancel := context.WithCancel(parent)
+	q := jobs.NewQueue(ldb.DB(), m.logger)
+	w := jobs.NewWorker(q, m.logger)
+	w.Register(jobs.KindIndex, m.RunScanJob)
+	if p := m.mediaProcessor; p != nil {
+		db := ldb.DB()
+		w.Register(jobs.KindProcessMedia, func(jctx context.Context, job *jobs.Job) error {
+			return p.Handle(metadata.WithDB(jctx, db), job)
+		})
+	}
+	handle := &workerHandle{cancel: cancel, token: &struct{}{}}
+	m.workers[libraryID] = handle
+	go func() {
+		defer func() {
+			_ = ldb.Close()
+			m.workerMu.Lock()
+			if m.workers[libraryID] == handle {
+				delete(m.workers, libraryID)
+			}
+			m.workerMu.Unlock()
+		}()
+		w.Run(wctx)
+	}()
+	m.logger.Info("library job worker started", "library_id", libraryID, "root", root)
+	return nil
+}
+
+// StopLibraryWorker cancels the background worker for a library, if one is
+// running. Queued jobs remain persisted in the library database.
+func (m *IndexManager) StopLibraryWorker(libraryID string) {
+	m.workerMu.Lock()
+	if handle, ok := m.workers[libraryID]; ok {
+		delete(m.workers, libraryID)
+		handle.cancel()
+	}
+	m.workerMu.Unlock()
+}
+
+// StartWorkers starts a background job worker for every registered library so
+// that persisted scan jobs are recovered after a restart. Libraries that are
+// offline (for example an unplugged drive) are skipped with a warning and are
+// picked up on the next TriggerScan once the volume is back.
+func (m *IndexManager) StartWorkers(ctx context.Context, libs []library.Library) {
+	for _, lib := range libs {
+		if err := m.StartLibraryWorker(ctx, lib.ID, lib.Root); err != nil {
+			m.logger.Warn("skip library worker at startup",
+				"library_id", lib.ID, "root", lib.Root, "error", err)
+		}
+	}
 }
 
 // openLibraryDB opens (and migrates) the library-level SQLite database for the
@@ -48,9 +158,17 @@ func (m *IndexManager) openLibraryDB(root string) (*librarydb.DB, error) {
 }
 
 // TriggerScan opens the library DB, resets any stuck jobs, and enqueues a new
-// index scan job. Returns the job ID. It is safe to call even if a scan is
-// already queued (a second scan will simply queue behind the first).
+// index scan job. Returns the job ID. The library's background worker is
+// (re)started first so the job is actually executed: this covers libraries
+// registered after startup and volumes that were offline when the server
+// booted. It is safe to call even if a scan is already queued (a second scan
+// will simply queue behind the first).
 func (m *IndexManager) TriggerScan(ctx context.Context, libraryID, root string) (string, error) {
+	if err := m.StartLibraryWorker(ctx, libraryID, root); err != nil {
+		m.logger.Warn("cannot ensure scan worker", "library_id", libraryID, "error", err)
+		// Fall through: if the library database is genuinely missing the
+		// enqueue below returns the authoritative error.
+	}
 	ldb, err := m.openLibraryDB(root)
 	if err != nil {
 		return "", fmt.Errorf("open library db for %s: %w", libraryID, err)
