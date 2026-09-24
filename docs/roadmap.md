@@ -7,7 +7,7 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **Phase 16 is the current deliverable and is tracked as an open PR.**
+- **Phase 17 is the current deliverable and is tracked as an open PR.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
@@ -17,33 +17,37 @@ Repo scaffolding, Go backend skeleton, embedded React frontend skeleton, build
 system, tests, CI, OpenAPI foundation, docs, and ADRs. Merged to `main` via
 PR #1.
 
-## Phase 1 — Authentication (in progress)
+## Phase 1 — Authentication (done)
 
 Users, sessions (HTTP-only cookies), roles (Admin/User), audit log, and the
-permission subsystem skeleton. Design: docs/authentication.md, docs/permissions.md.
+permission subsystem skeleton. Merged to `main` via PR #2.
+Design: docs/authentication.md, docs/permissions.md.
 
-## Phase 2 — Storage libraries (planned)
+## Phase 2 — Storage libraries (done)
 
 Register libraries, detect/adopt existing libraries, metadata directories,
 server DB schema for libraries, library status (online/offline), and safe path
-handling. Design: docs/libraries.md.
+handling. Merged to `main` via PR #3. Design: docs/libraries.md.
 
-## Phase 3 — Incremental indexing (planned)
+## Phase 3 — Incremental indexing (done)
 
 Persistent incremental indexer with staged change detection, metadata
 extraction, missing-marker reconciliation, and watch-based updates on Linux.
-Design: docs/indexing.md.
+Merged to `main` via PR #4. Design: docs/indexing.md.
 
-## Phase 4 — Media (planned)
+## Phase 4 — Media (done)
 
 Full metadata extraction (EXIF, video, audio), thumbnails, photo/video viewers,
 time-based views, and bulk upload/download with hardware-tolerant limits.
-Design: docs/media.md.
+Merged to `main` via PRs #5 and #6. Design: docs/media.md.
 
-## Phase 5 — Albums and organization (planned)
+## Phase 5 — Albums and organization (done)
 
 Albums, tags, folders-as-categories, people, favorites, duplicates, time
 clusters, and cleanup workflows — driven by the in-place indexing contract.
+Albums, tags, and favorites shipped with Phase 7 (PR #7); the People/face
+surface shipped with Phase 15 (PR #16). Duplicates, time clusters, and cleanup
+workflows remain backlog.
 
 ## Phase 6 — Permissions and sharing (implemented)
 
@@ -123,13 +127,21 @@ is opt-in (`CAIRN_ML_ENABLED` + `CAIRN_ML_FACES`), local, and original-free;
 people are library-scoped and travel with the library database. Design:
 docs/designs/015-face-recognition.md, ADR-0013.
 
-## Phase 16 — Security hardening (in progress)
+## Phase 16 — Security hardening (implemented)
 
 A defensive review of the server surface: authentication, authorization,
 path traversal, uploads and MIME handling, sessions, shares, XSS, CSRF, SQL
 injection, rate limits, secrets, resource isolation, and logging. Findings are
 tracked in docs/designs/016-security-hardening.md and fixed behind tests.
 Design: docs/designs/016-security-hardening.md, ADR-0014.
+Merged to `main` via PR #17.
+
+## Phase 17 — Mobile and API documentation (in progress)
+
+Documentation hardening: finalize the OpenAPI contract, the API reference
+(auth, media, upload/download, permissions, sharing), and the mobile development
+guide with offline/sync guidance. Every documented endpoint must match the
+implemented server; new docs are added where the inventory has gaps.
 
 ## Later phases (under design)
 

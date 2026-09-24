@@ -8,6 +8,19 @@ against it without reading Go source.
 The machine-readable contract is [openapi.yaml](openapi.yaml). This document
 describes conventions and anything that JSON Schema cannot express well.
 
+Area-specific references:
+
+- [libraries.md](libraries.md) — library lifecycle, probe, indexing.
+- [media.md](media.md) — file listing, media types, metadata, thumbnails,
+  upload/streaming download, trash, favorites.
+- [search.md](search.md), [memories.md](memories.md), [markdown.md](markdown.md)
+  — search, memories, and Markdown rendering.
+- [permissions.md](permissions.md), [sharing.md](sharing.md) — authorization
+  and public shares.
+- [ml.md](ml.md) — local ML similarity and faces.
+- [mobile-development.md](mobile-development.md) — client/native guidance,
+  offline behavior, and upload/download practice.
+
 ## Base URL
 
 ```
@@ -71,14 +84,21 @@ it will be echoed. The same value appears as `request_id` in errors.
 
 ## Pagination
 
-List-oriented endpoints (added in later phases) use **cursor pagination**:
+List-oriented endpoints use **cursor pagination**:
 
 ```
-GET /api/v1/media?limit=50&after=<cursor>
+GET /api/v1/libraries/{libraryID}/files?limit=50
 ```
 
-Responses return `next_cursor` and `has_more`. Cursors are opaque; clients must
-not parse or construct them. See the OpenAPI schemas for each endpoint.
+```json
+{ "files": [ ... ], "next_cursor": "...", "total": 1234 }
+```
+
+Responses return `next_cursor` and `total`. Pass `next_cursor` back as the
+`cursor` query parameter for the next page; an empty `next_cursor` means the
+last page. Cursors are opaque; clients must not parse or construct them. See
+the OpenAPI schemas for each endpoint, and [media.md](media.md) for the file
+listing parameters.
 
 ## Authentication
 
@@ -129,21 +149,135 @@ preferred over breaking changes.
 
 ## Endpoints today
 
+The full surface is 90+ operations. Tables below group them by area; the
+authoritative contract (parameters, bodies, responses) is in
+[openapi.yaml](openapi.yaml). `Auth` column: `none` = public, `session` = any
+authenticated user, `admin` = admin role, `cap` = capability-checked
+(see [permissions.md](permissions.md)).
+
+### System and auth
+
 | Method | Path                                  | Purpose                          | Auth |
 | ------ | ------------------------------------- | -------------------------------- | ---- |
-| GET    | `/api/v1/health`                      | Liveness + dependency status     | none |
-| GET    | `/api/v1/version`                     | Build metadata                   | none |
-| GET    | `/api/v1/auth/status`                 | Bootstrap/auth state             | none |
-| POST   | `/api/v1/auth/bootstrap`              | Create initial admin (once)      | none |
-| POST   | `/api/v1/auth/login`                  | Start a session                  | none |
-| POST   | `/api/v1/auth/logout`                 | Revoke the current session       | session |
-| GET    | `/api/v1/auth/me`                     | Current principal                | session |
-| GET    | `/api/v1/users`                       | List accounts                    | admin |
-| POST   | `/api/v1/users`                       | Create an account                | admin |
-| POST   | `/api/v1/users/{id}/sessions/revoke`  | Invalidate a user's sessions     | admin |
+| GET    | `/health`                             | Liveness + dependency status     | none |
+| GET    | `/version`                            | Build metadata                   | none |
+| GET    | `/auth/status`                        | Bootstrap/auth state             | none |
+| POST   | `/auth/bootstrap`                     | Create initial admin (once)      | none |
+| POST   | `/auth/login`                         | Start a session                  | none |
+| POST   | `/auth/logout`                        | Revoke the current session       | session |
+| GET    | `/auth/me`                            | Current principal                | session |
 
-Local ML endpoints (`/libraries/{id}/ml/...`, similarity + face recognition,
-and the `/people` + face/assignment routes) are documented in
+### Users
+
+| Method | Path                                  | Purpose                          | Auth |
+| ------ | ------------------------------------- | -------------------------------- | ---- |
+| GET    | `/users`                              | List accounts                    | admin |
+| POST   | `/users`                              | Create an account                | admin |
+| POST   | `/users/{id}/sessions/revoke`         | Invalidate a user's sessions     | admin |
+
+### Libraries and indexing
+
+| Method | Path                                  | Purpose                          | Auth |
+| ------ | ------------------------------------- | -------------------------------- | ---- |
+| GET    | `/libraries`                          | List libraries                   | admin |
+| POST   | `/libraries`                          | Register a library               | admin |
+| POST   | `/libraries/probe`                    | Pre-registration probe           | admin |
+| GET    | `/libraries/{libraryID}`              | Library details + status         | session |
+| POST   | `/libraries/{libraryID}/refresh`      | Rescan roots, reconcile          | admin |
+| DELETE | `/libraries/{libraryID}`              | Unregister (never deletes data)  | admin |
+| POST   | `/libraries/{libraryID}/index`        | Trigger an index job             | admin |
+| GET    | `/libraries/{libraryID}/index/status` | Current index job state          | admin |
+
+### Media, files, and folders
+
+| Method | Path                                                        | Purpose                          | Auth |
+| ------ | ----------------------------------------------------------- | -------------------------------- | ---- |
+| GET    | `/libraries/{libraryID}/files`                              | Paged file listing               | cap  |
+| GET    | `/libraries/{libraryID}/files/{fileID}`                     | One file                         | cap  |
+| GET    | `/libraries/{libraryID}/files/{fileID}/download`            | Stream original (Range)          | cap  |
+| POST   | `/libraries/{libraryID}/files/upload`                       | Multipart upload                 | cap  |
+| POST   | `/libraries/{libraryID}/files/{fileID}/rename`              | Rename a file                    | cap  |
+| POST   | `/libraries/{libraryID}/files/{fileID}/move`                | Move a file                      | cap  |
+| POST   | `/libraries/{libraryID}/files/{fileID}/copy`                | Copy a file                      | cap  |
+| DELETE | `/libraries/{libraryID}/files/{fileID}`                     | Soft-delete (to trash)           | cap  |
+| POST   | `/libraries/{libraryID}/files/{fileID}/restore`             | Restore from trash               | cap  |
+| DELETE | `/libraries/{libraryID}/files/{fileID}/permanent`           | Permanent delete                 | cap  |
+| GET    | `/libraries/{libraryID}/files/{fileID}/metadata`            | EXIF/GPS/dimensions metadata     | cap  |
+| GET    | `/libraries/{libraryID}/files/{fileID}/thumbnail`           | JPEG thumbnail                   | cap  |
+| GET    | `/libraries/{libraryID}/folders`                            | Child folders                    | cap  |
+| GET    | `/libraries/{libraryID}/trash`                              | Trashed files                    | cap  |
+
+### Favorites, tags, and albums
+
+| Method | Path                                                        | Purpose                          | Auth |
+| ------ | ----------------------------------------------------------- | -------------------------------- | ---- |
+| POST   | `/libraries/{libraryID}/files/{fileID}/favorite`            | Favorite a file (204)            | cap  |
+| DELETE | `/libraries/{libraryID}/files/{fileID}/favorite`            | Unfavorite a file (204)          | cap  |
+| GET    | `/libraries/{libraryID}/favorites`                          | Favorited files                  | cap  |
+| GET    | `/libraries/{libraryID}/tags`                               | List tags                        | cap  |
+| POST   | `/libraries/{libraryID}/tags`                               | Create a tag                     | cap  |
+| DELETE | `/libraries/{libraryID}/tags/{tagID}`                       | Delete a tag                     | cap  |
+| GET    | `/libraries/{libraryID}/files/{fileID}/tags`                | A file's tags                    | cap  |
+| POST   | `/libraries/{libraryID}/files/{fileID}/tags`                | Attach a tag to a file           | cap  |
+| DELETE | `/libraries/{libraryID}/files/{fileID}/tags/{tagID}`        | Detach a tag                     | cap  |
+| GET    | `/libraries/{libraryID}/albums`                             | List albums                      | cap  |
+| POST   | `/libraries/{libraryID}/albums`                             | Create an album                  | cap  |
+| DELETE | `/libraries/{libraryID}/albums/{albumID}`                   | Delete an album                  | cap  |
+| GET    | `/libraries/{libraryID}/albums/{albumID}/files`             | Album contents                   | cap  |
+| POST   | `/libraries/{libraryID}/albums/{albumID}/files/{fileID}`    | Add file to album (204)          | cap  |
+| DELETE | `/libraries/{libraryID}/albums/{albumID}/files/{fileID}`    | Remove file from album (204)     | cap  |
+
+### Search and memories
+
+| Method | Path                                                        | Purpose                          | Auth |
+| ------ | ----------------------------------------------------------- | -------------------------------- | ---- |
+| GET    | `/libraries/{libraryID}/search`                             | FTS5 file search + filters       | cap  |
+| GET    | `/libraries/{libraryID}/memories`                           | List / search memories           | session |
+| POST   | `/libraries/{libraryID}/memories`                           | Create a memory                  | session |
+| GET    | `/libraries/{libraryID}/memories/{memoryID}`                | Latest revision                  | session |
+| PUT    | `/libraries/{libraryID}/memories/{memoryID}`                | Autosave (new revision)          | session |
+| DELETE | `/libraries/{libraryID}/memories/{memoryID}`                | Soft delete                      | session |
+| POST   | `/libraries/{libraryID}/memories/{memoryID}/restore`        | Restore                          | session |
+| GET    | `/libraries/{libraryID}/memories/{memoryID}/versions`       | Revision list                    | session |
+| GET    | `/libraries/{libraryID}/memories/{memoryID}/versions/{version}` | One revision                | session |
+| GET    | `/libraries/{libraryID}/memories/{memoryID}/refs`           | Parsed wikilink references       | session |
+
+### Permissions and shares (management)
+
+| Method | Path                                                        | Purpose                          | Auth |
+| ------ | ----------------------------------------------------------- | -------------------------------- | ---- |
+| GET    | `/libraries/{libraryID}/permissions`                        | List grants                      | session |
+| POST   | `/libraries/{libraryID}/permissions`                        | Create a grant                   | session |
+| DELETE | `/libraries/{libraryID}/permissions/{grantID}`              | Revoke a grant                   | session |
+| GET    | `/libraries/{libraryID}/shares`                             | List shares                      | session |
+| POST   | `/libraries/{libraryID}/shares`                             | Create a share                   | session |
+| DELETE | `/libraries/{libraryID}/shares/{shareID}`                   | Revoke a share                   | session |
+
+### Public shares (token-authenticated)
+
+| Method | Path                                                        | Purpose                          | Auth |
+| ------ | ----------------------------------------------------------- | -------------------------------- | ---- |
+| GET    | `/shares/{token}`                                           | Share metadata                   | token |
+| GET    | `/shares/{token}/files`                                     | Share file listing               | token |
+| GET    | `/shares/{token}/files/{fileID}`                            | One shared file                  | token |
+| GET    | `/shares/{token}/files/{fileID}/download`                   | Stream shared file               | token |
+| POST   | `/shares/{token}/authenticate`                              | Unlock a password-protected share | token |
+
+### Backups (admin)
+
+| Method | Path                                  | Purpose                          | Auth |
+| ------ | ------------------------------------- | -------------------------------- | ---- |
+| POST   | `/backups`                            | Run a backup                     | admin |
+| GET    | `/backups`                            | List backups                     | admin |
+| GET    | `/backups/{id}`                       | Backup details                   | admin |
+| POST   | `/backups/{id}/verify`                | Verify a backup                  | admin |
+| POST   | `/backups/{id}/restore`               | Restore from a backup            | admin |
+
+### Local ML (opt-in build)
+
+Similarity, face recognition, and people endpoints under
+`/libraries/{libraryID}/ml*`, `/people*`, and `/faces*` (plus the
+`/files/{fileID}/similar` route) are documented in
 [`ml.md`](ml.md); `/search` is documented in [`search.md`](search.md).
 
 ## Request/response examples

@@ -1,8 +1,12 @@
 package auth
 
 import (
+	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/argon2"
 )
 
 func TestHashAndVerifyPassword(t *testing.T) {
@@ -60,8 +64,20 @@ func TestVerifyPasswordRejectsCorruptedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Flip the final base64 char, corrupting the stored key.
-	corrupted := hash[:len(hash)-1] + "a"
+	// Corrupt a byte inside the stored key and rebuild the PHC string. Flipping
+	// a bit guarantees the key actually changes (replacing a trailing character
+	// can be a no-op when the base64 encoding happens to end with that exact
+	// character, which made this test flaky ~1/64 runs).
+	salt, params, key, err := parsePhc(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key[0] ^= 0x01
+	corrupted := fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version, params.memory, params.time, params.threads,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(key),
+	)
 	ok, err := VerifyPassword("pw", corrupted)
 	if err != nil {
 		t.Fatalf("VerifyPassword corrupt: %v", err)
