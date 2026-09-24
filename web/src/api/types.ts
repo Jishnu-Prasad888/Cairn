@@ -117,6 +117,25 @@ export interface DuplicatesResponse {
   total: number;
 }
 
+export interface Folder {
+  id: string;
+  library_id?: string;
+  rel_path: string;
+  parent_id?: string;
+  name: string;
+  file_count: number;
+}
+
+export interface FolderListResponse {
+  folders: Folder[];
+}
+
+export interface FileListResponse {
+  files: FileSummary[];
+  next_cursor?: string;
+  total: number;
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];

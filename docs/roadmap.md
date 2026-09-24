@@ -230,6 +230,40 @@ Validation:
 Result: **66/66 QA checks pass**, Go suite passes with `-race`, frontend
 typecheck + lint + 38 tests + build all green.
 
+## Phase 21 — Web file browser (complete ✅)
+
+Close the Phase 6 (Web File Browser) deliverable from `todos/prompt.md`: the
+files UI existed only as raw endpoints, so this phase builds the `/browse`
+page on top of the already-shipped file API. No server, database, or migration
+changes — the browser consumes existing endpoints (`folders`, `files`, `search`,
+`trash`, `upload`, `thumbnail`, `download`, per-file `rename`/`move`/`copy`/
+`delete`/`restore`).
+
+Implementation:
+
+- **Navigation + views** — `web/src/pages/BrowserPage.tsx`: library selector,
+  breadcrumb navigation over `rel_path` folders, folder cards with file counts,
+  grid/list toggle, and `data-testid` empty states (`browser-empty`,
+  `search-empty`).
+- **Photo/video viewer** — modal using the `{thumbnail}` endpoint for photos and
+  the `{download}` endpoint for inline video playback; escape/backdrop dismiss.
+- **Operations** — upload (multipart, destination = current folder), download,
+  rename, move, copy, soft delete to trash, restore from trash panel, and live
+  search over file names.
+- **Route + nav** — `/browse` registered in `App.tsx`; "Files" link on Home.
+- **Docs** — `docs/web.md` new (page inventory + browser docs); roadmap updated.
+
+Validation:
+
+- Frontend: 8 new `BrowserPage` tests (render, grid/list, photo + video viewer,
+  multipart upload shape, search + empty state, empty folder, trash) — suite now
+  46 tests; typecheck, eslint, prettier, and build all green.
+- No Go changes: existing file/media handlers were already tested by prior
+  phases (store + handler suites pass with `-race`).
+
+Result: web typecheck + lint + 46 tests + build all green; no server surface
+changed, so no new QA scenario or migration was needed.
+
 ## Later phases (under design)
 
 Share tokens as server features, webhooks/Plugins, docker compose manifest,
