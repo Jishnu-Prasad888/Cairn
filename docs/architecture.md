@@ -79,7 +79,7 @@ stored inside the library metadata directory and can be regenerated.
 The React frontend is compiled and embedded into the Go binary. The Go server
 serves it as a single-page application with fallback routing, so the result is
 one deployable artifact. In development, the Vite dev server proxies `/api` to
-the Go backend.
+the Go backend. See `docs/web.md` for the page inventory and how to add pages.
 
 ## Consistency and concurrency
 
