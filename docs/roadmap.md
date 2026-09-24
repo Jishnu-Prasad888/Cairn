@@ -192,7 +192,7 @@ version 1.0 readiness:
 
 Result: **release-ready.** Merged via PR #20 (`d0bd10e`).
 
-- **`qa/e2e.py`** — repeatable 63-check acceptance harness covering the whole
+- **`qa/e2e.py`** — repeatable 66-check acceptance harness covering the whole
   matrix (see `qa/README.md`); `make qa` runs it.
 - **Found and fixed a release blocker**: index/process-media jobs were written
   to the per-library queue but no worker ever executed them, so nothing was
@@ -203,6 +203,32 @@ Result: **release-ready.** Merged via PR #20 (`d0bd10e`).
   build + smoke, linux/arm64 cross-build, and Docker build all green.
 - Known gap (backlog, not a regression): duplicate *flagging*/grouping UI is
   not implemented; the harness verifies the underlying content-hash primitive.
+  **Addressed in Phase 20.**
+
+## Phase 20 — Duplicate detection (complete ✅)
+
+Close the Phase 19 backlog gap: surface duplicate files to users instead of
+only hashing them. Delivered as a library-scoped read API plus a web UI.
+
+Implementation:
+
+- **`GET /api/v1/libraries/{id}/files/duplicates`** — groups of present files
+  sharing a content hash, ordered by hash with cursor pagination that never
+  splits a group (`limit` 1–200). Requires `read` on the library scope; missing,
+  trashed, and un-hashed files are excluded. Store query runs via the partial
+  index on `content_hash` (see `docs/media.md`).
+- **Web UI** — `/duplicates` page: library selector, per-group cards with member
+  thumbnails / paths / sizes, redundant-bytes summary, and download links.
+
+Validation:
+
+- Go: `TestListDuplicates*` (store: grouping, ordering, pagination, empty,
+  cursor boundary) and `TestHandleListDuplicates*` (handler: envelope,
+  pagination, empty, 401).
+- qa/e2e.py: S19 adds duplicate-group checks (66 checks total).
+
+Result: **66/66 QA checks pass**, Go suite passes with `-race`, frontend
+typecheck + lint + 38 tests + build all green.
 
 ## Later phases (under design)
 
