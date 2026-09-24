@@ -16,8 +16,12 @@ directory full of years of photos and videos and it indexes them where they are.
 
 ## Current status
 
-Phase 0 (repository and architecture) — done.
-Phase 1 (authentication) — in progress.
+v1.0 — feature-complete. Phases 0–22 are merged to `main` (see
+[docs/roadmap.md](docs/roadmap.md)), including storage libraries, the
+incremental indexer, media processing, file browsing, search, memories,
+albums/tags, resource-based authorization, sharing, backups, optional local ML,
+face recognition, duplicate detection, and the web file-browser + organization
+UI.
 
 The foundation is in place:
 
@@ -31,10 +35,6 @@ The foundation is in place:
 - Configuration via environment variables
 - Build system (`Makefile`), container image, and CI
 - Documentation and architecture decision records
-
-Later phases add storage libraries, the incremental indexer, media processing,
-search, memories, resource-based authorization, sharing, backups, and optional
-local ML.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan.
 
