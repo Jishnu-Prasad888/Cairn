@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom';
 
+import DuplicatesPage from './pages/DuplicatesPage';
 import HomePage from './pages/HomePage';
 import MemoriesPage from './pages/MemoriesPage';
 import PeoplePage from './pages/PeoplePage';
@@ -10,6 +11,7 @@ export default function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/memories" element={<MemoriesPage />} />
       <Route path="/people" element={<PeoplePage />} />
+      <Route path="/duplicates" element={<DuplicatesPage />} />
     </Routes>
   );
 }

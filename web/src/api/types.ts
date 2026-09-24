@@ -90,3 +90,41 @@ export interface FaceSummary {
   height: number;
   confidence: number;
 }
+
+export interface FileSummary {
+  id: string;
+  library_id: string;
+  rel_path: string;
+  name: string;
+  folder_path: string;
+  size_bytes: number;
+  mod_time: string;
+  media_type: string;
+  mime_type: string;
+  status: string;
+  content_hash?: string;
+}
+
+export interface DuplicateGroup {
+  content_hash: string;
+  size_bytes: number;
+  files: FileSummary[];
+}
+
+export interface DuplicatesResponse {
+  groups: DuplicateGroup[];
+  next_cursor?: string;
+  total: number;
+}
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 && unit > 0 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
