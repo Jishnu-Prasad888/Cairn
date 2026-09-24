@@ -178,7 +178,7 @@ Implemented on `feature/production-packaging`:
   `/libraries/{libraryID}/files/{fileID}` was documented under the `/copy`
   path; route-parity checker now reports 94/94.
 
-## Phase 19 — Final QA (in progress)
+## Phase 19 — Final QA (complete ✅)
 
 Branch: `release/v1.0`. Perform complete end-to-end validation before declaring
 version 1.0 readiness:
@@ -190,7 +190,7 @@ version 1.0 readiness:
 - ML disabled + ML enabled
 - platforms: ARM64, AMD64, native binary, Docker
 
-Progress:
+Result: **release-ready.** Merged via PR #20 (`d0bd10e`).
 
 - **`qa/e2e.py`** — repeatable 63-check acceptance harness covering the whole
   matrix (see `qa/README.md`); `make qa` runs it.
@@ -201,9 +201,8 @@ Progress:
   the server lifetime. Regression tests added.
 - 63/63 QA checks pass; full backend suite passes with `-race`; AMD64 native
   build + smoke, linux/arm64 cross-build, and Docker build all green.
-
-Remaining before declaring release readiness: final review of the remaining QA
-notes, release artifacts re-run against the final tree, and the release PR.
+- Known gap (backlog, not a regression): duplicate *flagging*/grouping UI is
+  not implemented; the harness verifies the underlying content-hash primitive.
 
 ## Later phases (under design)
 
