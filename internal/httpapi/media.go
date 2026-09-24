@@ -78,6 +78,56 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, u *auth
 	})
 }
 
+// handleListDuplicates — GET /api/v1/libraries/{id}/files/duplicates
+func (s *Server) handleListDuplicates(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeLibraryError(w, r, err)
+		return
+	}
+	svc, cleanup, ok := s.openMediaService(w, r, lib)
+	if !ok {
+		return
+	}
+	defer cleanup()
+
+	// Duplicate detection is a library-wide read, so it requires read access
+	// to the library scope rather than to any single folder.
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapRead) {
+		return
+	}
+
+	opts := media.DuplicateOptions{Cursor: r.URL.Query().Get("cursor")}
+	if lim := r.URL.Query().Get("limit"); lim != "" {
+		if n, err := strconv.Atoi(lim); err == nil {
+			opts.Limit = n
+		}
+	}
+	opts.Defaults()
+
+	page, err := svc.Store().ListDuplicates(r.Context(), opts)
+	if err != nil {
+		s.logger.Error("list duplicates", "library_id", lib.ID, "error", err)
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to list duplicate files.")
+		return
+	}
+
+	groups := make([]duplicateGroupResponse, 0, len(page.Groups))
+	for _, g := range page.Groups {
+		groups = append(groups, duplicateGroupResponse{
+			ContentHash: g.ContentHash,
+			SizeBytes:   g.SizeBytes,
+			Files:       toFileResponses(g.Files),
+		})
+	}
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{
+		"groups":      groups,
+		"next_cursor": page.NextCursor,
+		"total":       page.Total,
+	})
+}
+
 // handleGetFile — GET /api/v1/libraries/{id}/files/{fileID}
 func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
@@ -488,6 +538,13 @@ type fileResponse struct {
 	MIMEType    string `json:"mime_type"`
 	Status      string `json:"status"`
 	ContentHash string `json:"content_hash,omitempty"`
+}
+
+// duplicateGroupResponse is one duplicate group in the duplicates listing.
+type duplicateGroupResponse struct {
+	ContentHash string         `json:"content_hash"`
+	SizeBytes   int64          `json:"size_bytes"`
+	Files       []fileResponse `json:"files"`
 }
 
 type folderResponse struct {
