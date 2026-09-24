@@ -73,6 +73,9 @@ test: test-go test-web ## Run all tests
 test-go: ## Run backend tests
 	go test -race ./cmd/... ./internal/...
 
+qa: bin/cairn ## Run the Phase 19 end-to-end QA harness
+	python3 qa/e2e.py
+
 test-web: ## Run frontend tests
 	cd web && npm test
 

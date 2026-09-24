@@ -23,6 +23,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/logging"
+	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
 	"github.com/Jishnu-Prasad888/Cairn/internal/metrics"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
 	"github.com/Jishnu-Prasad888/Cairn/internal/version"
@@ -99,8 +100,22 @@ func run() error {
 	}
 	cancelRefresh()
 
-	// Incremental indexer: manages per-library scan jobs.
+	// Incremental indexer: manages per-library scan jobs. Each library gets a
+	// background job worker (index scans + media processing) once it is
+	// registered; workers for already-registered libraries are started below.
 	idxManager := indexer.NewIndexManager(logger)
+	idxManager.SetBaseContext(ctx)
+	mediaProc := metadata.NewProcessor(logger, keys)
+	idxManager.SetMediaProcessor(mediaProc)
+
+	// Recover persisted scan and media-processing jobs after a restart:
+	// start one job worker per registered library. Offline libraries are
+	// skipped and gain their worker on the next index trigger.
+	if libs, err := libraries.List(ctx); err == nil {
+		idxManager.StartWorkers(ctx, libs)
+	} else {
+		logger.Warn("list libraries for job workers", "error", err)
+	}
 
 	// Local ML: optional similarity signatures. The manager is inert unless
 	// CAIRN_ML_ENABLED is set; similarity passes run after index scans and on
