@@ -91,6 +91,65 @@ paths:
               schema:
                 $ref: '#/components/schemas/Version'
 
+  /ready:
+    get:
+      tags: [System]
+      operationId: getReady
+      summary: Report whether the server is ready to serve traffic
+      description: >
+        Liveness (`/health`) asks whether the process is alive; readiness asks
+        whether traffic should be routed here. Returns 200 only after startup
+        completes and the database answers pings, and flips to 503 during
+        graceful shutdown so load balancers and orchestrators drain
+        connections to remaining instances.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Server is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ready'
+        '503':
+          description: Server is not ready (starting, database down, or draining)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ready'
+            examples:
+              draining:
+                summary: Shutting down or database unreachable
+                value:
+                  status: unavailable
+                  database: error
+
+  /metrics:
+    get:
+      tags: [System]
+      operationId: getMetrics
+      summary: Render server metrics in Prometheus text format
+      description: >
+        Lightweight, dependency-free metrics in the Prometheus text exposition
+        format: HTTP request counters (method + status), a request latency
+        histogram, in-flight gauge, process uptime, and Go runtime gauges.
+        Suitable for scraping by Prometheus, Grafana Agent, or curl-based
+        checks. Restricted hosts may firewall this endpoint; it exposes
+        operational counters only, never file or library content.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Metrics in Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP cairn_http_requests_total Total HTTP requests by method and status code.
+                # TYPE cairn_http_requests_total counter
+                cairn_http_requests_total{method="GET",status="200"} 42
+
   /auth/status:
     get:
       tags: [Authentication]
@@ -766,6 +825,42 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Files]
+      operationId: trashFile
+      summary: Move a file to the library trash (soft delete)
+      description: >
+        Requires an authenticated session with the `delete` capability on the
+        file. The bytes move to `.cairn/trash/<fileID>` on the library; the
+        index row, metadata, tags, and relationships are retained and the row
+        keeps its original path. A file already in trash yields CONFLICT.
+        Restore it with POST .../restore.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '204':
+          description: File moved to trash
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /libraries/{libraryID}/files/{fileID}/download:
     get:
       tags: [Files]
@@ -926,42 +1021,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-    delete:
-      tags: [Files]
-      operationId: trashFile
-      summary: Move a file to the library trash (soft delete)
-      description: >
-        Requires an authenticated session with the `delete` capability on the
-        file. The bytes move to `.cairn/trash/<fileID>` on the library; the index
-        row, metadata, tags, and relationships are retained and the row keeps its
-        original path. A file already in trash yields CONFLICT. Restore it with
-        POST .../restore.
-      parameters:
-        - $ref: '#/components/parameters/LibraryID'
-        - name: fileID
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DeleteRequest'
-      responses:
-        '204':
-          description: File moved to trash
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3074,6 +3133,21 @@ components:
           type: string
           enum: [ok, degraded]
           description: Overall server status.
+        database:
+          type: string
+          enum: [ok, error]
+          description: Status of the server-level database check.
+    Ready:
+      type: object
+      required: [status, database]
+      properties:
+        status:
+          type: string
+          enum: [ready, unavailable]
+          description: >
+            `ready` when traffic may be routed here; `unavailable` while
+            starting, when the database is unreachable, or during graceful
+            shutdown.
         database:
           type: string
           enum: [ok, error]
