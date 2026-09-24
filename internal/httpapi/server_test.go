@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/db"
+	"github.com/Jishnu-Prasad888/Cairn/internal/metrics"
 )
 
 func testLogger() *slog.Logger {
@@ -102,6 +103,102 @@ func TestVersionEndpoint(t *testing.T) {
 		if v, ok := body[field]; !ok || v == "" {
 			t.Errorf("version response missing %q", field)
 		}
+	}
+}
+
+func TestReadyOK(t *testing.T) {
+	handler, _ := newTestServer(t)
+	rec := doJSON(t, handler, http.MethodGet, "/api/v1/ready")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body struct {
+		Status   string `json:"status"`
+		Database string `json:"database"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Status != "ready" || body.Database != "ok" {
+		t.Errorf("body = %+v, want status=ready database=ok", body)
+	}
+}
+
+func TestReadyUnavailableWhenDatabaseDown(t *testing.T) {
+	handler, pool := newTestServer(t)
+	_ = pool.Close() // simulate database failure
+
+	rec := doJSON(t, handler, http.MethodGet, "/api/v1/ready")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestReadyUnavailableWhileShuttingDown(t *testing.T) {
+	// Build a server we can mark not-ready, exercising the real drain path:
+	// readiness flips to 503 before graceful shutdown so proxies stop routing.
+	pool, err := db.Open(filepath.Join(t.TempDir(), "notready.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	readySrv := New(Dependencies{Logger: testLogger(), DB: pool})
+	readySrv.MarkNotReady()
+
+	rec := doJSON(t, readySrv.Handler(), http.MethodGet, "/api/v1/ready")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 after MarkNotReady", rec.Code)
+	}
+}
+
+func TestMetricsEndpointWithoutRegistry(t *testing.T) {
+	handler, _ := newTestServer(t)
+	rec := doJSON(t, handler, http.MethodGet, "/api/v1/metrics")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 without a metrics registry", rec.Code)
+	}
+	assertErrorEnvelope(t, rec, http.StatusNotFound, CodeNotFound)
+}
+
+func TestMetricsEndpointRecordsAndRenders(t *testing.T) {
+	pool, err := db.Open(filepath.Join(t.TempDir(), "metrics.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	reg := metrics.New()
+	srv := New(Dependencies{Logger: testLogger(), DB: pool, Metrics: reg})
+	handler := srv.Handler()
+
+	// Drive a couple of real requests so counters populate.
+	for i := 0; i < 3; i++ {
+		if rec := doJSON(t, handler, http.MethodGet, "/api/v1/health"); rec.Code != http.StatusOK {
+			t.Fatalf("health status = %d", rec.Code)
+		}
+	}
+
+	rec := doJSON(t, handler, http.MethodGet, "/api/v1/metrics")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `cairn_http_requests_total{method="GET",status="200"}`) {
+		t.Errorf("metrics do not include health requests:\n%s", body)
+	}
+	if !strings.Contains(body, "cairn_http_request_duration_seconds_count") {
+		t.Errorf("metrics do not include latency histogram:\n%s", body)
+	}
+	if !strings.Contains(body, "go_goroutines") {
+		t.Errorf("metrics do not include runtime gauges:\n%s", body)
 	}
 }
 

@@ -89,6 +89,9 @@ jobs:
           sleep 2
           curl -fsS http://127.0.0.1:18717/api/v1/health
           echo
+          curl -fsS http://127.0.0.1:18717/api/v1/ready
+          echo
+          curl -fsS http://127.0.0.1:18717/api/v1/metrics | grep -q "cairn_http_requests_total"
           curl -fsS http://127.0.0.1:18717/ | grep -q "<title>Cairn</title>"
           kill "$pid"
       - name: Upload binary artifact
@@ -96,6 +99,14 @@ jobs:
         with:
           name: cairn-linux-amd64
           path: bin/cairn
+          if-no-files-found: error
+      - name: Cross-compile ARM64 release binary
+        run: make release-cross PLATFORMS="linux/arm64"
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cairn-linux-arm64
+          path: dist/cairn-linux-arm64
           if-no-files-found: error
 
   docker:

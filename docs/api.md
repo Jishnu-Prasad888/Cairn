@@ -160,7 +160,9 @@ authenticated user, `admin` = admin role, `cap` = capability-checked
 | Method | Path                                  | Purpose                          | Auth |
 | ------ | ------------------------------------- | -------------------------------- | ---- |
 | GET    | `/health`                             | Liveness + dependency status     | none |
+| GET    | `/ready`                              | Readiness gate (routable?)       | none |
 | GET    | `/version`                            | Build metadata                   | none |
+| GET    | `/metrics`                            | Prometheus-text metrics          | none |
 | GET    | `/auth/status`                        | Bootstrap/auth state             | none |
 | POST   | `/auth/bootstrap`                     | Create initial admin (once)      | none |
 | POST   | `/auth/login`                         | Start a session                  | none |
@@ -295,6 +297,42 @@ GET /api/v1/health
 When the database is unreachable the response is still HTTP 200 so that probes
 can distinguish "server alive but degraded" from "server gone", with
 `"status": "degraded"`.
+
+### Readiness
+
+```text
+GET /api/v1/ready
+```
+
+```json
+{ "status": "ready", "database": "ok" }
+```
+
+Unlike `/health` (liveness), `/ready` returns HTTP 200 only when traffic should
+be routed to this instance: startup has completed and the database answers
+pings. It returns 503 with `"status": "unavailable"` while starting, when the
+database is unreachable, or once graceful shutdown begins (so load balancers
+and orchestrators drain connections to remaining instances).
+
+### Metrics
+
+```text
+GET /api/v1/metrics
+```
+
+```text
+# HELP cairn_http_requests_total Total HTTP requests by method and status code.
+# TYPE cairn_http_requests_total counter
+cairn_http_requests_total{method="GET",status="200"} 42
+# HELP cairn_http_request_duration_seconds HTTP request latency.
+# TYPE cairn_http_request_duration_seconds histogram
+cairn_http_request_duration_seconds_bucket{le="0.25"} 41
+```
+
+Prometheus text exposition format, with no third-party dependencies. Exposes
+request counters (method + status), a latency histogram, in-flight requests,
+process uptime, and Go runtime gauges. See [installation.md](installation.md)
+for scraping notes.
 
 ### Login lifecycle
 
