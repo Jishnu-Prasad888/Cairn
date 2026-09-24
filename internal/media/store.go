@@ -345,6 +345,102 @@ func (s *FileStore) ListFolders(ctx context.Context, parentPath string) ([]*Fold
 	return s.scanFolders(rows)
 }
 
+// --- duplicates ---
+
+// ListDuplicates returns groups of present files that share a content hash
+// (identical bytes), ordered by content hash. Cursor pagination is by the last
+// seen content hash so page boundaries never split a group. The per-hash
+// member lookups hit the partial index on content_hash, so each page only
+// touches the groups it returns.
+func (s *FileStore) ListDuplicates(ctx context.Context, opts DuplicateOptions) (*DuplicatesPage, error) {
+	opts.Defaults()
+
+	page := &DuplicatesPage{}
+
+	// Total number of duplicate groups (distinct hashes with >1 present file).
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT content_hash FROM indexed_files
+			WHERE status = 'present' AND content_hash IS NOT NULL
+			GROUP BY content_hash
+			HAVING COUNT(*) > 1
+		)`).Scan(&page.Total)
+	if err != nil {
+		return nil, fmt.Errorf("count duplicate groups: %w", err)
+	}
+
+	// Next page of duplicate hashes. Fetch one extra to detect the next page.
+	hashQuery := `
+		SELECT content_hash FROM indexed_files
+		WHERE status = 'present' AND content_hash IS NOT NULL
+		AND content_hash > ?
+		GROUP BY content_hash
+		HAVING COUNT(*) > 1
+		ORDER BY content_hash
+		LIMIT ?`
+	args := []any{opts.Cursor, opts.Limit + 1}
+	if opts.Cursor == "" {
+		// No cursor: hashes are non-null so any value sorts above empty;
+		// "content_hash > ''" is a no-op for non-null rows.
+		args[0] = ""
+	}
+
+	rows, err := s.db.QueryContext(ctx, hashQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("find duplicate hashes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var hashes []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		hashes = append(hashes, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(hashes) > opts.Limit {
+		page.NextCursor = hashes[opts.Limit-1]
+		hashes = hashes[:opts.Limit]
+	}
+
+	for _, h := range hashes {
+		members, err := s.queryFiles(ctx,
+			`WHERE status = 'present' AND content_hash = ? ORDER BY rel_path`, h)
+		if err != nil {
+			return nil, err
+		}
+		if len(members) < 2 {
+			continue // hash group shrank since the page query; keep pages consistent
+		}
+		page.Groups = append(page.Groups, &DuplicateGroup{
+			ContentHash: h,
+			SizeBytes:   members[0].SizeBytes,
+			Files:       members,
+		})
+	}
+
+	return page, nil
+}
+
+// queryFiles runs a file-select query whose WHERE clause is appended to the
+// canonical column list, returning scanned files.
+func (s *FileStore) queryFiles(ctx context.Context, whereTail string, args ...any) ([]*File, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, rel_path, size_bytes, mod_time, content_hash, status,
+		        first_seen_at, last_seen_at
+		 FROM indexed_files `+whereTail, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return s.scanFiles(rows)
+}
+
 // --- row scanners ---
 
 type rowScanner interface {
