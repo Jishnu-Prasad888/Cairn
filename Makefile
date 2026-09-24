@@ -6,13 +6,16 @@ VERSION     ?= dev
 COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DOCKER_TAG  ?= cairn:dev
 
+RELEASE_DIR  := dist
+PLATFORMS   ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+
 LDFLAGS := -s -w \
 	-X "$(MODULE)/internal/version.Version=$(VERSION)" \
 	-X "$(MODULE)/internal/version.Commit=$(COMMIT)" \
 	-X "$(MODULE)/internal/version.BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 .PHONY: help build test test-go test-web web-install web-build web-dev dev gofmt lint \
-	fmt fmt-check lint-go lint-web docker-build docker-buildx clean
+	fmt fmt-check lint-go lint-web docker-build docker-buildx release release-cross clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' Makefile | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -22,6 +25,32 @@ build: web-build ## Build the production binary with the embedded frontend
 	cp -r web/dist/. internal/webui/dist/
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/cairn
 	@echo "Built $(BINARY)"
+
+release: web-build ## Build release binaries for every platform in PLATFORMS
+	@mkdir -p $(RELEASE_DIR)
+	cp -r web/dist/. internal/webui/dist/
+	@for p in $(PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; \
+		out="$(RELEASE_DIR)/cairn-$$os-$$arch"; \
+		[ "$$os" = "windows" ] && out="$$out.exe"; \
+		echo "Building $$os/$$arch -> $$out"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o "$$out" ./cmd/cairn; \
+	done
+	shasum -a 256 $(RELEASE_DIR)/cairn-* > $(RELEASE_DIR)/SHA256SUMS
+	@echo "Release artifacts written to $(RELEASE_DIR)/ (see SHA256SUMS)"
+
+release-cross: ## Build release binaries without rebuilding the frontend (uses web/dist as-is)
+	@mkdir -p $(RELEASE_DIR)
+	cp -r web/dist/. internal/webui/dist/
+	@for p in $(PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; \
+		out="$(RELEASE_DIR)/cairn-$$os-$$arch"; \
+		[ "$$os" = "windows" ] && out="$$out.exe"; \
+		echo "Building $$os/$$arch -> $$out"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o "$$out" ./cmd/cairn; \
+	done
+	shasum -a 256 $(RELEASE_DIR)/cairn-* > $(RELEASE_DIR)/SHA256SUMS
+	@echo "Cross-compiled binaries written to $(RELEASE_DIR)/ (see SHA256SUMS)"
 
 dev: ## Run the backend with the on-disk built frontend, watched by the API proxy
 	@mkdir -p $(CURDIR)/web/dist

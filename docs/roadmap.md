@@ -136,12 +136,47 @@ tracked in docs/designs/016-security-hardening.md and fixed behind tests.
 Design: docs/designs/016-security-hardening.md, ADR-0014.
 Merged to `main` via PR #17.
 
-## Phase 17 — Mobile and API documentation (in progress)
+## Phase 17 — Mobile and API documentation (done)
 
 Documentation hardening: finalize the OpenAPI contract, the API reference
 (auth, media, upload/download, permissions, sharing), and the mobile development
 guide with offline/sync guidance. Every documented endpoint must match the
 implemented server; new docs are added where the inventory has gaps.
+Merged to `main` via PR #18; the OpenAPI contract is verified 1:1 against the
+server route table. Also fixed a flaky `TestVerifyPasswordRejectsCorruptedKey`
+(a trailing-base64-char corruption that was a no-op ~1/64 runs).
+
+## Phase 18 — Production packaging (done)
+
+Single-binary distribution with the embedded frontend, ARM64 + AMD64
+cross-builds, Docker image, health/readiness/metrics endpoints, build version
+information, schema migrations, and installation documentation. Branch:
+`feature/production-packaging`.
+
+Implemented on `feature/production-packaging`:
+
+- **Readiness** — `GET /api/v1/ready` (200 when started + DB reachable; 503 while
+  starting, degraded, or draining). `MarkNotReady()` flips the gate before
+  graceful shutdown so proxies drain to remaining instances; the Docker
+  `HEALTHCHECK` targets `/ready`.
+- **Metrics** — `GET /api/v1/metrics` in Prometheus text format from a
+  dependency-free `internal/metrics` registry (request counters by
+  method/status, latency histogram, in-flight gauge, uptime, Go runtime
+  gauges); every request is observed via middleware.
+- **Native binaries** — `make release` / `make release-cross` build the single
+  static binary for linux/darwin (amd64 + arm64) and windows/amd64 with a
+  `SHA256SUMS` manifest; CI cross-compiles and uploads the linux/arm64
+  artifact alongside amd64.
+- **Version info** — unchanged (`internal/version` via ldflags) and now
+  documented in the installation guide.
+- **Migrations** — schema migrations were already implemented for both the
+  server DB and per-library DBs; the upgrade procedure is documented.
+- **Installation docs** — new `docs/installation.md` (binary/checksums,
+  systemd, config table, upgrades, Prometheus scraping); refresh of
+  `docs/api.md`, `deployment.md`, `docker.md`.
+- Fixed a pre-existing spec defect: the trash `DELETE` op for
+  `/libraries/{libraryID}/files/{fileID}` was documented under the `/copy`
+  path; route-parity checker now reports 94/94.
 
 ## Later phases (under design)
 

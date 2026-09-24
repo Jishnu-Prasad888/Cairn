@@ -135,6 +135,7 @@ API without reading Go source.
 - [Mobile development](docs/mobile-development.md)
 - [Database](docs/database.md)
 - [Indexing](docs/indexing.md)
+- [Installation](docs/installation.md)
 - [Deployment](docs/deployment.md)
 - [Docker](docs/docker.md)
 - [Roadmap](docs/roadmap.md)

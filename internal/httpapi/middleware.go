@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/metrics"
 )
 
 // maxRequestIDLen bounds the length of client-supplied request IDs so the log
@@ -21,6 +23,24 @@ const maxRequestIDLen = 128
 // wraps the application handler most closely.
 func WithMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return requestID(recoverPanics(logger, securityHeaders(accessLog(logger, sameOrigin(logger, next)))))
+}
+
+// metricsRecording observes every request handled by the server and feeds the
+// shared metrics registry. It is a no-op when reg is nil so callers that do
+// not opt into metrics keep the exact previous behavior.
+func metricsRecording(reg *metrics.Registry, next http.Handler) http.Handler {
+	if reg == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reg.AddInFlight(1)
+		defer reg.AddInFlight(-1)
+
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		reg.Observe(r.Method, rec.status, time.Since(start))
+	})
 }
 
 // requestID ensures every request has a request ID, preferring a

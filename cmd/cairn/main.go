@@ -23,6 +23,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/logging"
+	"github.com/Jishnu-Prasad888/Cairn/internal/metrics"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
 	"github.com/Jishnu-Prasad888/Cairn/internal/version"
 	"github.com/Jishnu-Prasad888/Cairn/internal/webui"
@@ -166,6 +167,7 @@ func run() error {
 		SecureCookies:  cfg.CookieSecure,
 		MaxUploadBytes: cfg.MaxUploadBytes,
 		WebUI:          webHandler,
+		Metrics:        metrics.New(),
 	})
 
 	srv := &http.Server{
@@ -196,6 +198,9 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	// Flip /ready to 503 before draining so proxies and orchestrators stop
+	// sending new traffic while in-flight requests finish.
+	api.MarkNotReady()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
