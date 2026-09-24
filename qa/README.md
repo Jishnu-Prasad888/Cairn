@@ -64,6 +64,6 @@ Regression tests: `TestIndexManagerWorkerExecutesScanJob` and
 `TestIndexManagerWorkersRestartIsIdempotent` in
 `internal/indexer/indexer_test.go`.
 
-Remaining known gap (roadmap backlog, not a regression): duplicate *flagging*
-/ grouping is not implemented; the harness verifies the content-hash primitive
-that would drive it.
+Duplicate detection: since Phase 20, S19 verifies the grouping endpoint
+(`GET /files/duplicates`) directly, and the routine never deletes or modifies
+any copy automatically (see `docs/media.md` and the roadmap Phase 20 entry).
