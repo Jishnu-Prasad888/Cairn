@@ -91,3 +91,28 @@ export const apiPatch = <T>(path: string, body?: unknown) =>
 export const apiPut = <T>(path: string, body?: unknown) =>
   apiRequest<T>(path, withJsonBody('PUT', body));
 export const apiDelete = <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' });
+
+/** Multipart upload. The browser sets the multipart boundary, so no
+ * Content-Type header is sent here. `path` is the destination relative path
+ * (falls back to the file name server-side). */
+export async function apiUpload<T>(endpoint: string, file: File, path?: string): Promise<T> {
+  const form = new FormData();
+  if (path) form.append('path', path);
+  form.append('file', file);
+
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const body = await readErrorEnvelope(response);
+    throw new ApiError(body, response.status);
+  }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
