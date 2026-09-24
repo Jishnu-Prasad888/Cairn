@@ -746,6 +746,47 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/duplicates:
+    get:
+      tags: [Files]
+      operationId: listDuplicates
+      summary: List duplicate files grouped by content hash
+      description: >
+        Groups of present files that share a content hash (identical bytes),
+        ordered by content hash. Missing, trashed, and un-hashed files are
+        excluded. Groups are never split across pages. Requires the `read`
+        capability on the library scope.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: cursor
+          in: query
+          required: false
+          description: Content hash from a previous response's `next_cursor`.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Max duplicate groups per page (1-200, default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: A page of duplicate groups
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DuplicatesEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /libraries/{libraryID}/files/upload:
     post:
       tags: [Files]
@@ -3489,6 +3530,34 @@ components:
           type: string
         total:
           type: integer
+    DuplicatesEnvelope:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/DuplicateGroup'
+        next_cursor:
+          type: string
+          description: Content hash to continue from; empty on the last page.
+        total:
+          type: integer
+          description: Total duplicate groups in the library (ignoring the cursor).
+    DuplicateGroup:
+      type: object
+      required: [content_hash, size_bytes, files]
+      properties:
+        content_hash:
+          type: string
+          description: SHA-256 of the identical bytes shared by every member.
+        size_bytes:
+          type: integer
+          description: Size of every member file (identical within a group).
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/File'
     Library:
       type: object
       required: [id, name, root, status, schema_version, created_at, updated_at]

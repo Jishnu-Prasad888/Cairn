@@ -319,6 +319,45 @@ Irreversibly deletes the file and its index entry — `204 No Content`.
 Permanent deletion requires the `delete` capability on the file; there is no
 confirmation or undo, so clients should present an explicit confirmation UI.
 
+## Duplicate detection
+
+Every indexed file records a `content_hash` (SHA-256 of its bytes), so files
+with identical content can be found and grouped even when their names, folders,
+and modification times differ.
+
+```
+GET /api/v1/libraries/{libraryID}/files/duplicates?limit=50&cursor=…
+```
+
+Returns **duplicate groups** — sets of *present* files that share a content
+hash. Files that are missing, trashed, or were never hashed are excluded.
+
+```json
+{
+  "groups": [
+    {
+      "content_hash": "8c5f…",
+      "size_bytes": 245760,
+      "files": [
+        { "id": "…", "rel_path": "IMG_0002.png",  "size_bytes": 245760, … },
+        { "id": "…", "rel_path": "2024/IMG_0002 copy.png", "size_bytes": 245760, … }
+      ]
+    }
+  ],
+  "next_cursor": "8c5f…",
+  "total": 1
+}
+```
+
+- `total` is the number of duplicate groups in the library (ignoring the
+  cursor), so clients can render "N duplicate groups".
+- Pagination is cursor-based on `content_hash` (`limit` defaults to 50, max
+  200) and never splits a group across pages.
+- Every member inside a group reports the same `size_bytes`; the redundant
+  space a group represents is `size_bytes × (files − 1)`.
+- Requires `read` access to the library scope; returns `404` for an unknown
+  library and `401`/`403` without a valid session / capability.
+
 ## Favorites
 
 ```
