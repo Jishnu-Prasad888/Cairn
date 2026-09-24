@@ -31,6 +31,18 @@ tags:
     description: Server, library metadata, and media backups (admin only)
   - name: ML
     description: Local similarity search via perceptual hashing (admin for writes, per-file reads)
+  - name: Libraries
+    description: Register, adopt, refresh, and remove storage libraries; trigger and inspect indexing
+  - name: Files
+    description: Browse, upload, download, and operate on files, folders, and trash
+  - name: Organization
+    description: Tags, albums, and favorites
+  - name: Search
+    description: Full-text search over library content
+  - name: Authorization
+    description: Resource-based permissions and public share administration
+  - name: Shares
+    description: Anonymous access to public shares
 security:
   - cookieAuth: []
 paths:
@@ -268,6 +280,218 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /libraries:
+    get:
+      tags: [Libraries]
+      operationId: listLibraries
+      summary: List registered libraries
+      description: Requires an admin session. Returns every registered library.
+      responses:
+        '200':
+          description: Registered libraries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Libraries]
+      operationId: createLibrary
+      summary: Register a library (create or adopt)
+      description: >
+        Requires an admin session. Registers the absolute `path`. When the path
+        already contains a `.cairn` metadata directory the library is adopted:
+        the persistent identity, database, tags, albums, and index are reused and
+        nothing is reprocessed. Otherwise fresh metadata is written. The response
+        `mode` reports which happened. A root that is already registered or
+        overlaps a registered root is rejected with CONFLICT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryRequest'
+      responses:
+        '201':
+          description: The registered library and how it was bound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryCreateResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/probe:
+    post:
+      tags: [Libraries]
+      operationId: probeLibrary
+      summary: Inspect a candidate path without registering it
+      description: >
+        Requires an admin session. Read-only: reports whether the path exists, is
+        a directory, is writable, already carries `.cairn` metadata, and is
+        already registered. Non-existent paths are valid; they report
+        `path_exists: false` instead of erroring.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryProbeRequest'
+      responses:
+        '200':
+          description: Probe results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeResultEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /libraries/{libraryID}:
+    get:
+      tags: [Libraries]
+      operationId: getLibrary
+      summary: Get a library by id
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        library. `status` reflects live connectivity of the backing storage.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: The library
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Libraries]
+      operationId: deleteLibrary
+      summary: Unregister a library
+      description: >
+        Requires an admin session. Removes the registration only; the `.cairn`
+        metadata directory is left in place so the library can be re-adopted
+        later. Content on disk is never modified.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '204':
+          description: Library unregistered
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /libraries/{libraryID}/refresh:
+    post:
+      tags: [Libraries]
+      operationId: refreshLibrary
+      summary: Re-check connectivity or reconnect at a new path
+      description: >
+        Requires an admin session. With an empty body the last-known root is
+        re-stat'd and `status` reconciled to `online`/`offline`. With `path`, the
+        library is reconnected there; the new location must contain the same
+        `.cairn` identity or the request is rejected with BAD_REQUEST.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: The reconciled library
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/index:
+    post:
+      tags: [Libraries]
+      operationId: triggerIndex
+      summary: Enqueue an incremental index scan
+      description: >
+        Requires an admin session. Queues a background scan that reconciles the
+        index with the filesystem using staged change detection (path, size,
+        mod time; hashing only when necessary). Scans queue behind one another;
+        repeating the call adds another scan. Offline libraries reject with
+        CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '202':
+          description: Scan queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexTriggerResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          description: The indexer is not available
+  /libraries/{libraryID}/index/status:
+    get:
+      tags: [Libraries]
+      operationId: indexStatus
+      summary: Report index counts and the active scan job
+      description: >
+        Requires an admin session. Counts indexed files by status (present,
+        missing, deleted) and, when a scan is queued or running, the job itself.
+        A registered-but-never-scanned or offline library returns an empty status
+        rather than an error.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Index state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexStatusEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: The indexer is not available
+
   /libraries/{libraryID}/search:
     get:
       tags: [Search]
@@ -380,6 +604,991 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/files:
+    get:
+      tags: [Files]
+      operationId: listFiles
+      summary: List files in a library (optionally inside a folder)
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        folder. Returns files with cursor pagination. Without `folder` only
+        root-level files are returned unless `recursive=true`.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: folder
+          in: query
+          required: false
+          description: Folder relative path; omit or use "." for the library root.
+          schema:
+            type: string
+        - name: recursive
+          in: query
+          required: false
+          description: When exactly "true", list all descendants instead of direct children.
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          description: Media type filter.
+          schema:
+            type: string
+            enum: [photo, video, audio, document, other]
+        - name: status
+          in: query
+          required: false
+          description: File status; defaults to `present`.
+          schema:
+            type: string
+            enum: [present, missing, deleted]
+        - name: sort
+          in: query
+          required: false
+          description: Sort field; defaults to `name`.
+          schema:
+            type: string
+            enum: [name, size, mod_time]
+        - name: order
+          in: query
+          required: false
+          description: Sort direction; defaults to `asc`.
+          schema:
+            type: string
+            enum: [asc, desc]
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque keyset cursor from a previous response's `next_cursor`.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Page size (1-200, default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: A page of files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/upload:
+    post:
+      tags: [Files]
+      operationId: uploadFile
+      summary: Upload a file into the library
+      description: >
+        Requires an authenticated session with the `create` capability on the
+        destination folder. `multipart/form-data` with a `file` part and an
+        optional `path` part (the destination relative path; the part's filename
+        is used when omitted). Bytes are streamed to a temporary file and renamed
+        into place atomically; a file already at the destination yields CONFLICT.
+        Uploads are capped by server configuration (default 2 GiB).
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file bytes. Uploads are streamed, never buffered whole.
+                path:
+                  type: string
+                  description: Destination relative path; falls back to the part's filename.
+      responses:
+        '201':
+          description: The indexed file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          description: Upload exceeds the configured maximum size
+  /libraries/{libraryID}/files/{fileID}:
+    get:
+      tags: [Files]
+      operationId: getFile
+      summary: Get file metadata by id
+      description: >
+        Requires an authenticated session with the `read` capability on the file.
+        The file must still exist on disk (`status: present`).
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          description: File id (returned by file endpoints).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/download:
+    get:
+      tags: [Files]
+      operationId: downloadFile
+      summary: Stream the original bytes of a file
+      description: >
+        Requires an authenticated session with the `download` capability on the
+        file. Serves the original bytes from the library filesystem with
+        `Content-Type` set to the file's detected MIME, `Content-Disposition:
+        attachment`, and single-range `Range`/`If-Range`/`If-Modified-Since`
+        support (206/304 responses). The body is streamed; it is never buffered.
+        An optional `path` query parameter resolves by relative path first,
+        falling back to `fileID`.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          description: Relative path used as the primary lookup before `fileID`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The original file bytes (Content-Type is the file's MIME type)
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="IMG_0012.jpg"'
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/rename:
+    post:
+      tags: [Files]
+      operationId: renameFile
+      summary: Rename a file within its folder
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        `new_name` must be a bare filename (no separators). A destination that
+        already exists is rejected with CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameRequest'
+      responses:
+        '200':
+          description: The renamed file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/move:
+    post:
+      tags: [Files]
+      operationId: moveFile
+      summary: Move a file (may change folder and name)
+      description: >
+        Requires an authenticated session with the `move` capability on the file.
+        `new_path` is the destination relative path; parent folders are created
+        as needed. A destination that already exists is rejected with CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveRequest'
+      responses:
+        '200':
+          description: The moved file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/copy:
+    post:
+      tags: [Files]
+      operationId: copyFile
+      summary: Copy a file to a new path
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        source and the `create` capability on the destination folder. Bytes are
+        streamed (32 KiB chunks) to a temporary file and renamed into place. The
+        copy gets a new file id; a destination that already exists is rejected
+        with CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyRequest'
+      responses:
+        '201':
+          description: The new copy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Files]
+      operationId: trashFile
+      summary: Move a file to the library trash (soft delete)
+      description: >
+        Requires an authenticated session with the `delete` capability on the
+        file. The bytes move to `.cairn/trash/<fileID>` on the library; the index
+        row, metadata, tags, and relationships are retained and the row keeps its
+        original path. A file already in trash yields CONFLICT. Restore it with
+        POST .../restore.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '204':
+          description: File moved to trash
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/restore:
+    post:
+      tags: [Files]
+      operationId: restoreFile
+      summary: Restore a file from the library trash
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        Moves bytes back from `.cairn/trash/<fileID>` to the original path and
+        marks the file `present`. A file not in trash, or whose original path is
+        now occupied, yields CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The restored file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/permanent:
+    delete:
+      tags: [Files]
+      operationId: permanentDeleteFile
+      summary: Permanently delete a trashed file
+      description: >
+        Requires an authenticated session with the `delete` capability on the
+        file. Irreversibly removes the trashed bytes and the index row. A file
+        not in trash yields CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: File permanently deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/metadata:
+    get:
+      tags: [Files]
+      operationId: getFileMetadata
+      summary: Get extracted media metadata for a file
+      description: >
+        Requires an authenticated session with the `read` capability on the file.
+        Returns derived metadata (dimensions, duration, EXIF/GPS fields, thumbnail
+        availability) extracted asynchronously by the media processor. Fields the
+        extractor has not populated are omitted.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Extracted metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileMetadataEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/thumbnail:
+    get:
+      tags: [Files]
+      operationId: getThumbnail
+      summary: Get the derived thumbnail for a file
+      description: >
+        Requires an authenticated session with the `read` capability on the file.
+        Returns a JPEG thumbnail (max 400 px on the longer side, quality 82) with
+        Range support. Thumbnails are derived data under `.cairn/`; the original
+        is never modified. Missing thumbnails are generated on demand when the
+        file is a decodeable image; otherwise NOT_FOUND.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JPEG thumbnail bytes
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/folders:
+    get:
+      tags: [Files]
+      operationId: listFolders
+      summary: List the direct child folders of a folder
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        parent folder. Returns only direct children (one level, no recursion),
+        ordered by name. `parent` is relative to the library root; omit or use
+        "." for the root.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: parent
+          in: query
+          required: false
+          description: Parent folder relative path.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Child folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FolderListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/trash:
+    get:
+      tags: [Files]
+      operationId: listTrash
+      summary: List files in the library trash
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        library. Returns every trashed file with its original (pre-delete) path,
+        newest first. Restore with POST .../restore or delete permanently with
+        DELETE .../permanent.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Trashed files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileCollectionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/tags:
+    get:
+      tags: [Organization]
+      operationId: listTags
+      summary: List tags in the library
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        library. Returns every tag, ordered by name. Tags are library-scoped and
+        independent of folders.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Tags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    post:
+      tags: [Organization]
+      operationId: createTag
+      summary: Create a tag
+      description: >
+        Requires an authenticated session with the `create` capability on the
+        library. Tag names are unique case-insensitively; a duplicate yields
+        CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagRequest'
+      responses:
+        '201':
+          description: The created tag
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/tags/{tagID}:
+    delete:
+      tags: [Organization]
+      operationId: deleteTag
+      summary: Delete a tag
+      description: >
+        Requires an authenticated session with the `delete` capability on the
+        tag. Detaches the tag from every file (join rows cascade).
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: tagID
+          in: path
+          required: true
+          description: Tag id (returned by tag endpoints).
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Tag deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/tags:
+    get:
+      tags: [Organization]
+      operationId: listFileTags
+      summary: List tags attached to a file
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tags attached to the file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    post:
+      tags: [Organization]
+      operationId: addFileTag
+      summary: Attach a tag to a file
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        Attaching a tag that is already attached is a no-op success.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagAttachRequest'
+      responses:
+        '204':
+          description: Tag attached
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/tags/{tagID}:
+    delete:
+      tags: [Organization]
+      operationId: removeFileTag
+      summary: Remove a tag from a file
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        Removing a tag that is not attached yields NOT_FOUND.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tagID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Tag removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/albums:
+    get:
+      tags: [Organization]
+      operationId: listAlbums
+      summary: List albums in the library
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        library. Returns every album ordered by name. Albums are logical
+        collections; adding a file never duplicates it.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Albums
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    post:
+      tags: [Organization]
+      operationId: createAlbum
+      summary: Create an album
+      description: >
+        Requires an authenticated session with the `create` capability on the
+        library. Album names are not required to be unique.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlbumRequest'
+      responses:
+        '201':
+          description: The created album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/albums/{albumID}:
+    delete:
+      tags: [Organization]
+      operationId: deleteAlbum
+      summary: Delete an album
+      description: >
+        Requires an authenticated session with the `delete` capability on the
+        album. Only the logical collection is removed; files are untouched.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: albumID
+          in: path
+          required: true
+          description: Album id (returned by album endpoints).
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Album deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/albums/{albumID}/files:
+    get:
+      tags: [Organization]
+      operationId: listAlbumFiles
+      summary: List files in an album
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        album. Returns files in insertion order.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: albumID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Files in the album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileCollectionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/albums/{albumID}/files/{fileID}:
+    post:
+      tags: [Organization]
+      operationId: addAlbumFile
+      summary: Add a file to an album
+      description: >
+        Requires an authenticated session with the `edit` capability on the album.
+        Idempotent: adding a file already in the album is a no-op success.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: albumID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: File added to the album
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Organization]
+      operationId: removeAlbumFile
+      summary: Remove a file from an album
+      description: >
+        Requires an authenticated session with the `edit` capability on the album.
+        Removing a file that is not in the album yields NOT_FOUND.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: albumID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: File removed from the album
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/favorite:
+    post:
+      tags: [Organization]
+      operationId: favoriteFile
+      summary: Add a file to favorites
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        A file already in favorites yields CONFLICT.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: File favorited
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Organization]
+      operationId: unfavoriteFile
+      summary: Remove a file from favorites
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        Removing a file that is not in favorites yields NOT_FOUND.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: File unfavorited
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/favorites:
+    get:
+      tags: [Organization]
+      operationId: listFavorites
+      summary: List favorite files
+      description: >
+        Requires an authenticated session with the `read` capability on the
+        library. Returns present files only (trashed and missing files are
+        excluded), newest-favorite first.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+      responses:
+        '200':
+          description: Favorite files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileCollectionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /libraries/{libraryID}/memories:
     get:
@@ -1657,6 +2866,49 @@ paths:
         - cookieAuth: []
 
 components:
+  parameters:
+    LibraryID:
+      name: libraryID
+      in: path
+      required: true
+      description: Library id (returned by the library endpoints).
+      schema:
+        type: string
+    MemoryID:
+      name: memoryID
+      in: path
+      required: true
+      description: Memory id (returned by the memory endpoints).
+      schema:
+        type: string
+    RequestIdHeader:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: >
+        Client-provided request identifier echoed in the response header and in
+        error bodies. Must be 1-128 chars of letters, digits, '-', '_', ':'.
+      schema:
+        type: string
+    ShareToken:
+      name: token
+      in: path
+      required: true
+      description: >
+        The raw share token returned once by createShare. Authenticates the
+        share; a password-protected share also requires the `X-Cairn-Share-Password`
+        header.
+      schema:
+        type: string
+    SharePasswordHeader:
+      name: X-Cairn-Share-Password
+      in: header
+      required: false
+      description: >
+        Optional password for a password-protected public share. Sent with every
+        request to a share endpoint that gates a password.
+      schema:
+        type: string
   schemas:
     BackupRecord:
       type: object
@@ -2163,49 +3415,405 @@ components:
           type: string
         total:
           type: integer
-  parameters:
-    LibraryID:
-      name: libraryID
-      in: path
-      required: true
-      description: Library id (returned by the library endpoints).
-      schema:
-        type: string
-    MemoryID:
-      name: memoryID
-      in: path
-      required: true
-      description: Memory id (returned by the memory endpoints).
-      schema:
-        type: string
-    RequestIdHeader:
-      name: X-Request-ID
-      in: header
-      required: false
+    Library:
+      type: object
+      required: [id, name, root, status, schema_version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Stable opaque library id.
+        name:
+          type: string
+          description: Human-readable label chosen at registration.
+        root:
+          type: string
+          description: Absolute filesystem path of the library root.
+        status:
+          type: string
+          enum: [online, offline]
+          description: >
+            `online` when the backing storage is reachable at `root`; `offline`
+            when it is not. Offline metadata stays browsable; media bytes are
+            unavailable until the storage is reconnected.
+        volume_id:
+          type: string
+          description: Filesystem volume identifier; absent when unknown.
+        schema_version:
+          type: integer
+          description: Metadata schema version of the library.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    LibraryEnvelope:
+      type: object
+      required: [library]
+      properties:
+        library:
+          $ref: '#/components/schemas/Library'
+    LibraryListEnvelope:
+      type: object
+      required: [libraries]
+      properties:
+        libraries:
+          type: array
+          items:
+            $ref: '#/components/schemas/Library'
+    LibraryRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: Absolute path to register.
+        name:
+          type: string
+          maxLength: 128
+          description: Optional label; defaults to the directory base name.
+    LibraryCreateResult:
+      type: object
+      required: [library, mode]
+      properties:
+        library:
+          $ref: '#/components/schemas/Library'
+        mode:
+          type: string
+          enum: [created, adopted]
+          description: >
+            `created` means fresh metadata was written; `adopted` means an
+            existing `.cairn` metadata directory was bound and reused.
+    LibraryProbeRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: >
+            Absolute path to inspect. Non-existent paths are valid; they report
+            `path_exists: false` instead of erroring.
+    ProbeResult:
+      type: object
+      required: [path_exists, is_directory, is_writable, has_metadata, registered]
+      properties:
+        path_exists:
+          type: boolean
+        is_directory:
+          type: boolean
+        is_writable:
+          type: boolean
+        has_metadata:
+          type: boolean
+          description: A `.cairn` metadata directory already exists at the path.
+        existing_id:
+          type: string
+          description: Existing library id when `has_metadata` is true.
+        existing_name:
+          type: string
+          description: Existing library name when `has_metadata` is true.
+        registered:
+          type: boolean
+          description: The path is already registered with this server.
+        volume_id:
+          type: string
+          description: Filesystem volume identifier when determinable.
+    ProbeResultEnvelope:
+      type: object
+      required: [probe]
+      properties:
+        probe:
+          $ref: '#/components/schemas/ProbeResult'
+    RefreshRequest:
+      type: object
+      description: An empty object `{}` re-checks the last-known root.
+      properties:
+        path:
+          type: string
+          description: >
+            Optional new location to reconnect to; the new root must contain the
+            same `.cairn` identity.
+    IndexTriggerResult:
+      type: object
+      required: [job_id, library_id]
+      properties:
+        job_id:
+          type: string
+          description: Id of the enqueued index scan job.
+        library_id:
+          type: string
+    IndexStatus:
+      type: object
+      required: [library_id, present, missing, deleted]
+      properties:
+        library_id:
+          type: string
+        present:
+          type: integer
+          description: Indexed files currently present on disk.
+        missing:
+          type: integer
+          description: Indexed files whose bytes are currently unavailable.
+        deleted:
+          type: integer
+          description: Indexed files in the library trash.
+        active_job:
+          $ref: '#/components/schemas/Job'
+          description: The running (or next queued) scan job, when any.
+        last_job_id:
+          type: string
+          description: Id of the most recent scan job, when any.
+    IndexStatusEnvelope:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/IndexStatus'
+    Job:
+      type: object
       description: >
-        Client-provided request identifier echoed in the response header and in
-        error bodies. Must be 1-128 chars of letters, digits, '-', '_', ':'.
-      schema:
-        type: string
-    ShareToken:
-      name: token
-      in: path
-      required: true
-      description: >
-        The raw share token returned once by createShare. Authenticates the
-        share; a password-protected share also requires the `X-Cairn-Share-Password`
-        header.
-      schema:
-        type: string
-    SharePasswordHeader:
-      name: X-Cairn-Share-Password
-      in: header
-      required: false
-      description: >
-        Optional password for a password-protected public share. Sent with every
-        request to a share endpoint that gates a password.
-      schema:
-        type: string
+        Snapshot of a background job. Field names are as serialized by the
+        server (the struct carries no JSON tags). `Status` is one of `queued`,
+        `running`, `completed`, `failed`, `cancelled`; `Kind` is `index` or
+        `process_media`.
+      properties:
+        ID:
+          type: string
+        Kind:
+          type: string
+        Status:
+          type: string
+        Priority:
+          type: integer
+        Payload:
+          type: object
+          additionalProperties: true
+        Result:
+          type: string
+        ErrorMsg:
+          type: string
+        Attempt:
+          type: integer
+        MaxAttempts:
+          type: integer
+        CreatedAt:
+          type: string
+          format: date-time
+        StartedAt:
+          type: string
+          format: date-time
+        FinishedAt:
+          type: string
+          format: date-time
+        NextRunAt:
+          type: string
+          format: date-time
+    Folder:
+      type: object
+      required: [id, library_id, rel_path, name, file_count]
+      properties:
+        id:
+          type: string
+        library_id:
+          type: string
+        rel_path:
+          type: string
+          description: Folder path relative to the library root.
+        name:
+          type: string
+        file_count:
+          type: integer
+          description: Indexed count of files directly in the folder.
+    FolderListEnvelope:
+      type: object
+      required: [folders]
+      properties:
+        folders:
+          type: array
+          items:
+            $ref: '#/components/schemas/Folder'
+    FileCollectionEnvelope:
+      type: object
+      required: [files]
+      description: A plain, non-paginated file list (albums, trash, favorites).
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/File'
+    FileMetadata:
+      type: object
+      required: [file_id, has_thumbnail]
+      properties:
+        file_id:
+          type: string
+        media_type:
+          type: string
+          enum: [photo, video, audio, document, other]
+        mime_type:
+          type: string
+        width:
+          type: integer
+          description: Pixel width; omitted when unknown.
+        height:
+          type: integer
+          description: Pixel height; omitted when unknown.
+        duration_secs:
+          type: number
+          format: double
+          description: Duration for audio/video; omitted when unknown.
+        taken_at:
+          type: string
+          format: date-time
+          description: Capture time from EXIF; omitted when unknown.
+        camera_make:
+          type: string
+        camera_model:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        has_thumbnail:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+          description: Last time the extracted metadata was refreshed.
+    FileMetadataEnvelope:
+      type: object
+      required: [metadata]
+      properties:
+        metadata:
+          $ref: '#/components/schemas/FileMetadata'
+    RenameRequest:
+      type: object
+      required: [path, new_name]
+      properties:
+        path:
+          type: string
+          description: Current relative path of the file.
+        new_name:
+          type: string
+          description: New bare filename; must not contain separators.
+    MoveRequest:
+      type: object
+      required: [path, new_path]
+      properties:
+        path:
+          type: string
+          description: Source relative path.
+        new_path:
+          type: string
+          description: Destination relative path; may change folder and name.
+    CopyRequest:
+      type: object
+      required: [path, dest_path]
+      properties:
+        path:
+          type: string
+          description: Source relative path.
+        dest_path:
+          type: string
+          description: Destination relative path.
+    DeleteRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: Relative path of the file to move to trash.
+    Tag:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: Unique case-insensitively within the library.
+        color:
+          type: string
+          description: Optional display color (free-form, e.g. a hex code).
+        created_at:
+          type: string
+          format: date-time
+    TagEnvelope:
+      type: object
+      required: [tag]
+      properties:
+        tag:
+          $ref: '#/components/schemas/Tag'
+    TagListEnvelope:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+    TagRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Tag name; unique case-insensitively.
+        color:
+          type: string
+          description: Optional display color.
+    TagAttachRequest:
+      type: object
+      required: [tag_id]
+      properties:
+        tag_id:
+          type: string
+          description: Tag id (returned by tag endpoints).
+    Album:
+      type: object
+      required: [id, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        cover_file_id:
+          type: string
+          description: File powering the cover thumbnail, when set.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AlbumEnvelope:
+      type: object
+      required: [album]
+      properties:
+        album:
+          $ref: '#/components/schemas/Album'
+    AlbumListEnvelope:
+      type: object
+      required: [albums]
+      properties:
+        albums:
+          type: array
+          items:
+            $ref: '#/components/schemas/Album'
+    AlbumRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
     MLStatus:
       type: object
       required: [library_id, enabled, provider, provider_version, signatured, distance_limit]
