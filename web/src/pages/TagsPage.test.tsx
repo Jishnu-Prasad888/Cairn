@@ -58,6 +58,27 @@ function renderPage(overrides: { tags?: typeof tags; tagFiles?: typeof tagFiles 
       const name = url.split('tag=')[1]?.split('&')[0] ?? '';
       return json(name === 'vacation' ? files : { files: [] });
     }
+    if (url.includes('/files/f1/note')) {
+      return json({ note: { file_id: 'f1', body: '', updated_at: '' } });
+    }
+    if (url.includes('/favorites')) {
+      return json({ files: [] });
+    }
+    if (url.includes('/files/f1/metadata')) {
+      return json({
+        metadata: {
+          file_id: 'f1',
+          media_type: 'photo',
+          mime_type: 'image/jpeg',
+          width: 4032,
+          height: 3024,
+          camera_make: 'Apple',
+          camera_model: 'iPhone 15',
+          taken_at: '2026-06-01T12:00:00Z',
+          has_thumbnail: true,
+        },
+      });
+    }
     return err(404);
   });
   globalThis.fetch = fn as unknown as typeof fetch;
