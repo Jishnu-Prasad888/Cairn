@@ -1,0 +1,301 @@
+/* The viewer's own layout: a top toolbar, a stage that can go fullscreen, and
+   a details panel with tabs. The base `.viewer-*` primitives live in views.css
+   and are shared with the older single-purpose viewer. */
+
+.viewer-modal {
+  width: min(1240px, calc(100vw - var(--space-4) * 2));
+  height: min(92vh, 900px);
+  max-height: 92vh;
+}
+
+.viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: none;
+}
+
+.viewer-position {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.viewer-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.viewer-tool {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.viewer-tool:hover:not(:disabled) {
+  background: var(--border-subtle);
+}
+
+.viewer-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.viewer-tool.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.viewer-tool-wide {
+  min-width: 52px;
+  font-size: 13px;
+}
+
+.viewer-slideshow-note {
+  flex: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-4);
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.viewer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The stage owns the fullscreen request so the media can expand past the
+   dialog chrome on browsers that support element fullscreen. */
+.viewer-stage {
+  flex: 1 1 auto;
+  min-height: 220px;
+  background: #1c1614;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.viewer-stage:fullscreen {
+  background: #000;
+}
+
+.viewer-stage[data-zoomed='true'] {
+  cursor: grab;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.viewer-stage .viewer-media {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: transform 120ms ease;
+}
+
+.viewer-stage:fullscreen .viewer-media {
+  max-height: 100vh;
+  max-width: 100vw;
+}
+
+/* ----------------------------- side panel ----------------------------- */
+
+.viewer-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.viewer-panel .viewer-meta h2 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.viewer-panel .viewer-meta p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.viewer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-1);
+}
+
+.viewer-tab {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.viewer-tab:hover {
+  background: var(--border-subtle);
+}
+
+.viewer-tab[aria-selected='true'] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.viewer-tabpanel {
+  min-height: 96px;
+}
+
+.viewer-tabpanel:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.viewer-panel-footnote {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+}
+
+.viewer-facts {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-3);
+  font-size: 13px;
+}
+
+.viewer-facts dt {
+  color: var(--text-muted);
+}
+
+.viewer-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.viewer-person-list,
+.viewer-memory-list,
+.viewer-similar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.viewer-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.viewer-person-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--border-subtle);
+}
+
+.viewer-similar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+}
+
+.viewer-similar-thumb {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--border-subtle);
+  cursor: pointer;
+}
+
+.viewer-similar-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.viewer-similar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-share-key {
+  margin: var(--space-2) 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.viewer-share-result {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.viewer-hint {
+  flex: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.viewer-note {
+  flex: none;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+@media (max-width: 720px) {
+  .viewer-modal {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .viewer-hint {
+    display: none;
+  }
+}
