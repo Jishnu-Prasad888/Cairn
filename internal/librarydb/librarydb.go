@@ -262,6 +262,16 @@ CREATE TABLE IF NOT EXISTS favorites (
 	created_at TEXT NOT NULL
 );
 
+-- file_notes stores per-file Markdown notes (captions, descriptions, journal
+-- entries) written in the web UI. Like memories, they are app-level data and
+-- live in the library database so they travel with a portable library. Each
+-- file has at most one note; an empty/missing body means no note.
+CREATE TABLE IF NOT EXISTS file_notes (
+	file_id    TEXT PRIMARY KEY REFERENCES indexed_files(id) ON DELETE CASCADE,
+	body       TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL
+);
+
 -- memories are long-form Markdown documents. They are app-level data and live
 -- in the library database so they travel with a portable library. deleted is a
 -- soft-delete flag: deleting a memory is reversible and keeps its history.

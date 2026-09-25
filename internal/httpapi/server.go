@@ -217,6 +217,11 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/metadata", s.withAuth(allowAny, s.handleGetFileMetadata))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handleGetThumbnail))
 
+		// Per-file Markdown notes (captions).
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/note", s.withAuth(allowAny, s.handleGetFileNote))
+		mux.Handle("PUT /api/v1/libraries/{id}/files/{fileID}/note", s.withAuth(allowAny, s.handleSetFileNote))
+		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/note", s.withAuth(allowAny, s.handleClearFileNote))
+
 		// Folders and trash.
 		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAny, s.handleListFolders))
 		mux.Handle("GET /api/v1/libraries/{id}/trash", s.withAuth(allowAny, s.handleListTrash))
