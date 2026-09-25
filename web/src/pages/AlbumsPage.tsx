@@ -1,350 +1,361 @@
-import { useEffect, useState } from 'react';
+/**
+ * Albums — a manual grouping of files that crosses folders.
+ *
+ * Two screens: the album grid, and one album's contents with a searchable
+ * file picker for adding to it. The picker is the reason this page exists
+ * separately from Tags: an album is a curated set, a tag is a label.
+ */
 
-import { apiDelete, apiGet, apiPost } from '../api/client';
-import type {
-  Album,
-  AlbumListResponse,
-  FileCollectionResponse,
-  FileSummary,
-  Library,
-} from '../api/types';
+import { useCallback, useState } from 'react';
+
+import { useAuth } from '../auth/authContext';
+import { useLibraryGate } from '../api/libraries';
+import { useLibraryResource } from '../api/resources';
+import {
+  addAlbumFile,
+  createAlbum,
+  deleteAlbum,
+  listAlbums,
+  listAlbumFiles,
+  removeAlbumFile,
+  searchFiles,
+} from '../api/queries';
+import type { Album, FileSummary } from '../api/types';
+import { ConfirmDialog, Dialog, PromptDialog } from '../components/Dialog';
 import { FileGrid } from '../components/FileGrid';
+import { useFileOperations } from '../components/FileOperations';
+import LibraryPicker from '../components/LibraryPicker';
+import { mediaGlyph, thumbnailUrl } from '../components/media';
+import {
+  EmptyState,
+  ErrorState,
+  LibraryOfflineNotice,
+  LoadingState,
+  NoLibrariesState,
+  PageHeader,
+} from '../components/States';
 import { ViewerModal } from '../components/ViewerModal';
-import { thumbnailUrl } from '../components/media';
 import './AlbumsPage.css';
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
-}
-
-export default function AlbumsPage() {
-  const [libraries, setLibraries] = useState<Library[] | null>(null);
-  const [libraryId, setLibraryId] = useState<string | null>(null);
-  const [albums, setAlbums] = useState<Album[] | null>(null);
-  const [albumId, setAlbumId] = useState<string | null>(null);
-  const [albumFiles, setAlbumFiles] = useState<FileSummary[] | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerQuery, setPickerQuery] = useState('');
-  const [pickerResults, setPickerResults] = useState<FileSummary[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [pickerError, setPickerError] = useState<string | null>(null);
+/** Adding files to an album: search, tick, confirm. */
+function AddFilesDialog({
+  libraryId,
+  album,
+  alreadyIn,
+  onClose,
+  onAdded,
+}: {
+  libraryId: string;
+  album: Album;
+  alreadyIn: string[];
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<FileSummary[]>([]);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [viewer, setViewer] = useState<FileSummary | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiGet<{ libraries: Library[] }>('/libraries')
-      .then((resp) => {
-        if (cancelled) return;
-        const libs = resp.libraries ?? [];
-        setLibraries(libs);
-        if (libs.length > 0) setLibraryId((prev) => prev ?? libs[0]!.id);
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setLibraries([]);
-        setError(e.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const runSearch = useCallback(
+    async (q: string) => {
+      setError(null);
+      try {
+        const resp = await searchFiles(libraryId, { q, limit: 50 });
+        setResults(resp.files ?? []);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [libraryId],
+  );
 
-  const reload = () => setReloadKey((k) => k + 1);
-
-  useEffect(() => {
-    if (!libraryId) return;
-    let cancelled = false;
-    void apiGet<AlbumListResponse>(`/libraries/${libraryId}/albums`)
-      .then((resp) => {
-        if (!cancelled) setAlbums(resp.albums ?? []);
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setAlbums([]);
-        setError(e.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, reloadKey]);
-
-  useEffect(() => {
-    if (!libraryId || !albumId) return;
-    let cancelled = false;
-    void apiGet<FileCollectionResponse>(`/libraries/${libraryId}/albums/${albumId}/files`)
-      .then((resp) => {
-        if (!cancelled) setAlbumFiles(resp.files ?? []);
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setAlbumFiles([]);
-        setError(e.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, albumId, reloadKey]);
-
-  // Picker search: live results by file name.
-  useEffect(() => {
-    if (!libraryId || !pickerOpen || pickerQuery.trim() === '') return;
-    let cancelled = false;
-    const q = pickerQuery.trim();
-    void apiGet<{ files: FileSummary[] }>(
-      `/libraries/${libraryId}/search?q=${encodeURIComponent(q)}&limit=50`,
-    )
-      .then((resp) => {
-        if (!cancelled) setPickerResults(resp.files ?? []);
-      })
-      .catch((e: Error) => {
-        if (!cancelled) setPickerError(e.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, pickerOpen, pickerQuery]);
-
-  const createAlbum = async () => {
-    if (!libraryId) return;
-    const name = window.prompt('Album name');
-    if (!name || !name.trim()) return;
-    try {
-      await apiPost(`/libraries/${libraryId}/albums`, { name: name.trim() });
-      reload();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const deleteAlbum = async () => {
-    if (!libraryId || !albumId) return;
-    const album = albums?.find((a) => a.id === albumId);
-    if (!window.confirm(`Delete album "${album?.name ?? ''}"? Files are not affected.`)) return;
-    try {
-      await apiDelete(`/libraries/${libraryId}/albums/${albumId}`);
-      setAlbumId(null);
-      setAlbumFiles(null);
-      reload();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const removeFromAlbum = async (file: FileSummary) => {
-    if (!libraryId || !albumId) return;
-    try {
-      await apiDelete(`/libraries/${libraryId}/albums/${albumId}/files/${file.id}`);
-      setAlbumFiles((rows) => (rows ? rows.filter((f) => f.id !== file.id) : rows));
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const toggleSelected = (id: string) => {
+  const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+
+  const submit = () => {
+    setBusy(true);
+    setError(null);
+    Promise.all([...selected].map((id) => addAlbumFile(libraryId, album.id, id)))
+      .then(() => {
+        onAdded();
+        onClose();
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
   };
 
-  const addSelected = async () => {
-    if (!libraryId || !albumId || selected.size === 0) return;
-    setPickerError(null);
-    try {
-      await Promise.all(
-        [...selected].map((id) => apiPost(`/libraries/${libraryId}/albums/${albumId}/files/${id}`)),
-      );
-      setSelected(new Set());
-      setPickerOpen(false);
-      setPickerQuery('');
-      reload();
-    } catch (e: unknown) {
-      setPickerError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  return (
+    <Dialog
+      open
+      size="medium"
+      title={`Add files to “${album.name}”`}
+      onClose={onClose}
+      dismissible={!busy}
+      testId="add-files-dialog"
+      footer={
+        <>
+          <button type="button" className="button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="button primary-button"
+            onClick={submit}
+            disabled={busy || selected.size === 0}
+            data-testid="confirm-add-files"
+          >
+            {busy ? 'Adding…' : `Add ${selected.size || ''}`.trim()}
+          </button>
+        </>
+      }
+    >
+      <div className="album-picker">
+        <label className="visually-hidden" htmlFor="album-picker-search">
+          Search library files
+        </label>
+        <input
+          id="album-picker-search"
+          className="search-input"
+          type="search"
+          placeholder="Search library files…"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (e.target.value.trim() === '') setResults([]);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && query.trim() !== '') void runSearch(query.trim());
+          }}
+          data-testid="album-picker-search"
+        />
+        <button
+          type="button"
+          className="button"
+          onClick={() => void runSearch(query.trim())}
+          disabled={query.trim() === ''}
+        >
+          Search
+        </button>
 
-  if (libraries === null) {
-    return (
-      <main className="albums-page">
-        <p className="muted">Loading libraries…</p>
-      </main>
-    );
-  }
+        {results.length > 0 && (
+          <ul className="picker-results">
+            {results.map((f) => {
+              const inAlbum = alreadyIn.includes(f.id);
+              return (
+                <li key={f.id} className="picker-row">
+                  <label className="picker-label">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${f.name}`}
+                      checked={selected.has(f.id)}
+                      disabled={inAlbum}
+                      onChange={() => toggle(f.id)}
+                    />
+                    {f.media_type === 'photo' ? (
+                      <img className="picker-thumb" src={thumbnailUrl(libraryId, f)} alt="" />
+                    ) : (
+                      <span className="picker-thumb picker-glyph" aria-hidden="true">
+                        {mediaGlyph(f)}
+                      </span>
+                    )}
+                    <span className="picker-name" title={f.rel_path}>
+                      {f.name}
+                    </span>
+                  </label>
+                  {inAlbum && <span className="muted picker-note">in album</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
-  if (libraries.length === 0) {
-    return (
-      <div className="page-muted">
-        No libraries yet. Add a library from the server to organize media.
+        {query.trim() !== '' && results.length === 0 && (
+          <p className="muted">No files match “{query.trim()}”.</p>
+        )}
+
+        {error && (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        )}
       </div>
-    );
-  }
+    </Dialog>
+  );
+}
 
-  if (!libraryId) {
+export default function AlbumsPage() {
+  const gate = useLibraryGate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
+  const [albumId, setAlbumId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<Album | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
+
+  const albums = useLibraryResource(
+    useCallback(async (id: string) => (await listAlbums(id)).albums ?? [], []),
+  );
+  const files = useLibraryResource(
+    useCallback((id: string) => listAlbumFiles(id, albumId!).then((r) => r.files ?? []), [
+      albumId,
+    ]),
+    [albumId],
+    albumId !== null,
+  );
+
+  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', () => {
+    files.reload();
+    albums.reload();
+  });
+
+  const run = useCallback(
+    async (action: () => Promise<unknown>, after?: () => void) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await action();
+        after?.();
+        albums.reload();
+        files.reload();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [albums, files],
+  );
+
+  if (gate.kind === 'loading') {
     return (
       <main className="albums-page">
-        <p className="muted">Loading…</p>
+        <LoadingState label="Loading libraries…" />
       </main>
     );
   }
 
-  const activeAlbum = albums?.find((a) => a.id === albumId);
+  const header = (
+    <PageHeader
+      title="Albums"
+      subtitle="Curated groups of files from anywhere in the library."
+      controls={
+        <>
+          <LibraryPicker />
+          <button
+            type="button"
+            className="button primary-button"
+            onClick={() => {
+              setPromptError(null);
+              setCreating(true);
+            }}
+            disabled={gate.kind !== 'ready'}
+            data-testid="new-album-button"
+          >
+            New album
+          </button>
+        </>
+      }
+    />
+  );
+
+  if (gate.kind === 'error') {
+    return (
+      <main className="albums-page">
+        {header}
+        <ErrorState message={gate.message} onRetry={albums.reload} />
+      </main>
+    );
+  }
+
+  if (gate.kind === 'empty') {
+    return (
+      <main className="albums-page">
+        {header}
+        <NoLibrariesState isAdmin={isAdmin} />
+      </main>
+    );
+  }
+
+  const library = gate.library;
+  const activeAlbum = albums.data?.find((a) => a.id === albumId) ?? null;
 
   return (
     <main className="albums-page">
-      <header className="page-header albums-header">
-        <h1>Albums</h1>
-        <div className="header-controls">
-          <select
-            aria-label="Library"
-            value={libraryId}
-            onChange={(e) => {
-              setLibraryId(e.target.value);
-              setAlbums(null);
-              setAlbumId(null);
-              setAlbumFiles(null);
-              setPickerOpen(false);
-              setViewer(null);
-              setError(null);
-            }}
-          >
-            {libraries.map((lib) => (
-              <option key={lib.id} value={lib.id}>
-                {lib.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="button" onClick={() => void createAlbum()}>
-            New album
-          </button>
-        </div>
-      </header>
+      {header}
 
+      {library.status === 'offline' && <LibraryOfflineNotice library={library} />}
       {error && (
         <p className="error-text" role="alert">
           {error}
         </p>
       )}
+      {albums.error && <ErrorState message={albums.error} onRetry={albums.reload} />}
 
-      {albumId ? (
+      {activeAlbum ? (
         <section className="album-detail" data-testid="album-detail">
           <div className="album-detail-header">
-            <button type="button" className="button" onClick={() => setAlbumId(null)}>
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                setAlbumId(null);
+                ops.closeViewer();
+              }}
+            >
               ← Albums
             </button>
-            <h2>{activeAlbum?.name ?? 'Album'}</h2>
+            <h2>{activeAlbum.name}</h2>
             <div className="header-controls">
               <button
                 type="button"
                 className="button"
-                onClick={() => {
-                  setPickerOpen((v) => {
-                    if (v) {
-                      setSelected(new Set());
-                      setPickerResults([]);
-                    }
-                    return !v;
-                  });
-                }}
+                onClick={() => setAdding(true)}
+                data-testid="add-files-button"
               >
-                {pickerOpen ? 'Close picker' : 'Add files'}
+                Add files
               </button>
               <button
                 type="button"
                 className="button danger-button"
-                onClick={() => void deleteAlbum()}
+                onClick={() => setDeleting(activeAlbum)}
               >
                 Delete album
               </button>
             </div>
           </div>
 
-          {pickerOpen && (
-            <section className="album-picker" data-testid="album-picker">
-              <input
-                className="search-input"
-                type="search"
-                placeholder="Search library files…"
-                aria-label="Search files to add"
-                value={pickerQuery}
-                onChange={(e) => {
-                  setPickerQuery(e.target.value);
-                  if (e.target.value.trim() === '') setPickerResults([]);
-                }}
-              />
-              {pickerResults.length > 0 && (
-                <ul className="picker-results">
-                  {pickerResults.map((f) => {
-                    const inAlbum = albumFiles?.some((row) => row.id === f.id) ?? false;
-                    return (
-                      <li key={f.id} className="picker-row">
-                        <label className="picker-label">
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${f.name}`}
-                            checked={selected.has(f.id)}
-                            disabled={inAlbum}
-                            onChange={() => toggleSelected(f.id)}
-                          />
-                          {f.media_type === 'photo' ? (
-                            <img className="picker-thumb" src={thumbnailUrl(libraryId, f)} alt="" />
-                          ) : (
-                            <span className="picker-thumb picker-glyph" aria-hidden="true">
-                              {f.name.slice(0, 1).toUpperCase()}
-                            </span>
-                          )}
-                          <span className="picker-name" title={f.rel_path}>
-                            {f.name}
-                          </span>
-                        </label>
-                        {inAlbum && <span className="muted picker-note">in album</span>}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {pickerQuery.trim() !== '' && pickerResults.length === 0 && (
-                <p className="muted">No files match “{pickerQuery.trim()}”.</p>
-              )}
-              <button
-                type="button"
-                className="button"
-                onClick={() => void addSelected()}
-                disabled={selected.size === 0}
-              >
-                Add selected ({selected.size})
-              </button>
-              {pickerError && (
-                <p className="error-text" role="alert">
-                  {pickerError}
-                </p>
-              )}
-            </section>
+          {activeAlbum.description && <p className="muted">{activeAlbum.description}</p>}
+
+          {files.loading && <LoadingState />}
+          {files.error && <ErrorState message={files.error} onRetry={files.reload} />}
+
+          {files.data !== null && files.data.length === 0 && (
+            <EmptyState title="This album is empty" testId="album-empty">
+              <p className="muted">Use “Add files” to bring in media from anywhere in the library.</p>
+            </EmptyState>
           )}
 
-          {albumFiles === null && <p className="muted">Loading…</p>}
-
-          {albumFiles !== null && albumFiles.length === 0 && (
-            <div className="album-empty" data-testid="album-empty">
-              <p className="muted">This album is empty. Use “Add files” to bring in media.</p>
-            </div>
-          )}
-
-          {albumFiles !== null && albumFiles.length > 0 && (
+          {files.data !== null && files.data.length > 0 && (
             <FileGrid
-              libraryId={libraryId}
-              files={albumFiles}
-              onOpen={setViewer}
+              libraryId={gate.libraryId}
+              files={files.data}
+              onOpen={ops.openViewer}
               renderAction={(f) => (
                 <button
                   type="button"
                   className="file-card-action"
                   aria-label={`Remove ${f.name} from album`}
-                  onClick={() => void removeFromAlbum(f)}
+                  onClick={() => void run(() => removeAlbumFile(gate.libraryId, activeAlbum.id, f.id))}
                 >
                   ×
                 </button>
@@ -354,25 +365,22 @@ export default function AlbumsPage() {
         </section>
       ) : (
         <>
-          {albums === null && <p className="muted">Loading…</p>}
-          {albums !== null && albums.length === 0 && (
-            <div className="album-empty" data-testid="albums-empty">
-              <p className="muted">No albums yet. Create one to group your media.</p>
-            </div>
+          {albums.loading && <LoadingState />}
+          {albums.data !== null && albums.data.length === 0 && (
+            <EmptyState title="No albums yet" testId="albums-empty">
+              <p className="muted">Create an album to group photos from any folder.</p>
+            </EmptyState>
           )}
-          {albums !== null && albums.length > 0 && (
+          {albums.data !== null && albums.data.length > 0 && (
             <ul className="album-grid" data-testid="albums-grid" aria-label="Albums">
-              {albums.map((album) => (
+              {albums.data.map((album) => (
                 <li key={album.id}>
                   <button
                     type="button"
                     className="album-card"
                     onClick={() => {
                       setAlbumId(album.id);
-                      setAlbumFiles(null);
-                      setPickerOpen(false);
-                      setSelected(new Set());
-                      setPickerResults([]);
+                      ops.closeViewer();
                     }}
                   >
                     <span className="album-glyph" aria-hidden="true">
@@ -381,7 +389,9 @@ export default function AlbumsPage() {
                     <span className="album-name" title={album.name}>
                       {album.name}
                     </span>
-                    <span className="album-date">Updated {formatDate(album.updated_at)}</span>
+                    <span className="album-date">
+                      Updated {new Date(album.updated_at).toLocaleDateString()}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -390,14 +400,75 @@ export default function AlbumsPage() {
         </>
       )}
 
-      {viewer && (
+      {ops.viewer && (
         <ViewerModal
-          libraryId={libraryId}
-          file={viewer}
-          onClose={() => setViewer(null)}
-          onChanged={async () => reload()}
+          libraryId={gate.libraryId}
+          file={ops.viewer}
+          siblings={files.data ?? []}
+          onNavigate={ops.openViewer}
+          onChanged={() => {
+            files.reload();
+            albums.reload();
+          }}
+          onRequestAction={ops.requestAction}
+          onClose={ops.closeViewer}
         />
       )}
+      {ops.dialogs}
+
+      {adding && activeAlbum && (
+        <AddFilesDialog
+          libraryId={gate.libraryId}
+          album={activeAlbum}
+          alreadyIn={(files.data ?? []).map((f) => f.id)}
+          onClose={() => setAdding(false)}
+          onAdded={() => {
+            files.reload();
+            albums.reload();
+          }}
+        />
+      )}
+
+      <PromptDialog
+        open={creating}
+        title="New album"
+        label="Album name"
+        placeholder="Summer 2024"
+        busy={busy}
+        error={promptError}
+        onCancel={() => setCreating(false)}
+        onConfirm={(name) => {
+          setBusy(true);
+          setPromptError(null);
+          createAlbum(gate.libraryId, name)
+            .then(() => {
+              setCreating(false);
+              albums.reload();
+            })
+            .catch((e: unknown) => setPromptError(e instanceof Error ? e.message : String(e)))
+            .finally(() => setBusy(false));
+        }}
+        testId="new-album-dialog"
+      />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        title={`Delete album “${deleting?.name ?? ''}”?`}
+        destructive
+        confirmLabel="Delete album"
+        busy={busy}
+        error={error}
+        message={
+          <p>The album is removed. The files in it are not affected and stay exactly where they are.</p>
+        }
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (!deleting) return;
+          const target = deleting;
+          void run(() => deleteAlbum(gate.libraryId, target.id), () => setAlbumId(null));
+        }}
+        testId="delete-album-dialog"
+      />
     </main>
   );
 }

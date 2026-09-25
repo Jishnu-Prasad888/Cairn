@@ -1,0 +1,107 @@
+/* The memory editor's reference picker: kind tabs, a search box, and results. */
+
+.ref-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.ref-picker-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.ref-kind {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.ref-kind:hover {
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.ref-kind.active {
+  background: var(--accent-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.ref-picker-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ref-picker-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.ref-picker-input:focus-visible {
+  border-color: var(--primary);
+}
+
+.ref-picker-status,
+.ref-picker-empty {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.ref-picker-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ref-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ref-result:hover,
+.ref-result:focus-visible {
+  background: var(--border-subtle);
+}
+
+.ref-result-label {
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.ref-result-detail {
+  font-size: 0.78rem;
+}
