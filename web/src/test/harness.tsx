@@ -14,9 +14,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 import type { ReactElement } from 'react';
 
-import { LibrariesProvider } from '../api/libraries';
 import type { FileSummary, Library, User } from '../api/types';
-import AuthProvider from '../auth/AuthProvider';
+import Providers from './Providers';
 
 export const admin: User = {
   id: 'u1',
@@ -123,11 +122,7 @@ export function mockApi(
 }
 
 /** True when a recorded call matches a method and a URL substring. */
-export function called(
-  fn: ReturnType<typeof vi.fn>,
-  method: string,
-  urlPart: string,
-): boolean {
+export function called(fn: ReturnType<typeof vi.fn>, method: string, urlPart: string): boolean {
   return fn.mock.calls.some(([input, init]) => {
     const verb = (init as RequestInit | undefined)?.method ?? 'GET';
     return verb === method && String(input).includes(urlPart);
@@ -135,11 +130,7 @@ export function called(
 }
 
 /** The JSON body of the first recorded call matching a method and a substring. */
-export function bodyOf(
-  fn: ReturnType<typeof vi.fn>,
-  method: string,
-  urlPart: string,
-): unknown {
+export function bodyOf(fn: ReturnType<typeof vi.fn>, method: string, urlPart: string): unknown {
   const call = fn.mock.calls.find(([input, init]) => {
     const verb = (init as RequestInit | undefined)?.method ?? 'GET';
     return verb === method && String(input).includes(urlPart);
@@ -165,9 +156,7 @@ export function renderPage(ui: ReactElement, options: RenderPageOptions = {}): R
     <MemoryRouter initialEntries={[options.route ?? '/']}>{ui}</MemoryRouter>
   ) : (
     <MemoryRouter initialEntries={[options.route ?? '/']}>
-      <AuthProvider>
-        <LibrariesProvider>{ui}</LibrariesProvider>
-      </AuthProvider>
+      <Providers>{ui}</Providers>
     </MemoryRouter>
   );
   return render(tree);
