@@ -70,6 +70,9 @@ function renderPage(): ReturnType<typeof vi.fn> {
     if (url.includes('/favorites')) {
       return json({ files: [] });
     }
+    if (url.includes('/files/f1/favorite') || url.includes('/files/f2/favorite')) {
+      return empty(204);
+    }
     if (url.includes('/files/f1/metadata')) {
       return json({
         metadata: {
@@ -113,6 +116,10 @@ function err(status: number): Response {
     }),
     { status, headers: { 'Content-Type': 'application/json' } },
   );
+}
+
+function empty(status = 204): Response {
+  return new Response(null, { status });
 }
 
 describe('BrowserPage', () => {
@@ -289,6 +296,49 @@ describe('BrowserPage', () => {
         String(input).includes('/files/f1/favorite') && (init as RequestInit).method === 'DELETE',
     );
     expect(deleteCall).toBeTruthy();
+  });
+
+  it('selects media and batch-favorites it from the selection bar', async () => {
+    const fetchMock = renderPage();
+    render(
+      <MemoryRouter>
+        <BrowserPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('IMG_0001.png')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select clip.mp4' }));
+
+    const bar = await screen.findByTestId('selection-bar');
+    expect(screen.getByTestId('selection-count')).toHaveTextContent('2 selected');
+
+    fireEvent.click(within(bar).getByRole('button', { name: 'Favorite' }));
+
+    await waitFor(() => {
+      const f1 = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          String(input).endsWith('/files/f1/favorite') &&
+          (init as RequestInit).method === 'POST',
+      );
+      expect(f1).toBeTruthy();
+    });
+    await waitFor(() => {
+      const f2 = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          String(input).endsWith('/files/f2/favorite') &&
+          (init as RequestInit).method === 'POST',
+      );
+      expect(f2).toBeTruthy();
+    });
+
+    // The selection clears after the batch action completes.
+    await waitFor(() => {
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+    });
   });
 
   it('uploads a file as multipart to the current folder', async () => {

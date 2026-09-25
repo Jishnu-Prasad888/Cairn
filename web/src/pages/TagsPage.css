@@ -15,35 +15,12 @@
 }
 
 .tags-page {
-  max-width: 1200px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: var(--space-5) var(--space-4) var(--space-7);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.page-header h1 {
-  margin: 0;
-  font-size: 28px;
-  font-family: var(--font-brand);
-  font-weight: 400;
-  color: var(--primary);
-}
-
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
 }
 
 .tags-page select {
@@ -68,21 +45,28 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-1);
+  gap: var(--space-2);
   width: 100%;
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-primary);
   font: inherit;
   cursor: pointer;
   text-align: left;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .tag-card:hover {
   border-color: var(--accent);
-  background: var(--accent-soft);
+  box-shadow: var(--shadow-1);
+}
+
+.tag-card .tag-chip {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 4px 14px;
 }
 
 .tag-date {

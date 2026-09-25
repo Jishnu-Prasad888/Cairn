@@ -3,10 +3,10 @@
 .button {
   font: inherit;
   padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-primary);
   text-decoration: none;
   cursor: pointer;
 }
@@ -19,7 +19,7 @@
 .button.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--text-invert, var(--text));
+  color: var(--text-primary);
 }
 
 .button:disabled {
@@ -31,82 +31,154 @@
   color: var(--danger);
 }
 
-/* File grid */
+/* File grid — Google Photos–style masonry wall. Tiles keep their natural
+   aspect ratio, flow into responsive columns, and reveal a caption plus a
+   selection circle on hover (or permanently in selection mode). */
 .file-grid {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: var(--space-3);
+  column-width: 230px;
+  column-gap: var(--space-3);
 }
 
 .file-card {
-  min-width: 0;
   position: relative;
+  break-inside: avoid;
+  margin-bottom: var(--space-3);
 }
 
 .file-card-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  display: block;
   width: 100%;
-  padding: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
   font: inherit;
   cursor: pointer;
   text-align: left;
-}
-
-.file-card-main:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  position: relative;
 }
 
 .file-card-thumb {
+  display: block;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  border-radius: var(--radius-sm);
-  object-fit: cover;
-  background: var(--background);
+  height: auto;
+  border-radius: var(--radius-md);
+  background: var(--border-subtle);
+  transition: filter 140ms ease;
+}
+
+.file-card-main:hover .file-card-thumb,
+.file-card-main:focus-visible .file-card-thumb {
+  filter: brightness(0.9);
 }
 
 .file-card-glyph {
   display: flex;
   align-items: center;
   justify-content: center;
+  aspect-ratio: 4 / 3;
   font-size: 34px;
+  background: var(--accent-soft);
 }
 
-.file-card-name {
+/* Bottom caption overlay — readable over any photo. */
+.file-card-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  color: #fff;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Selection circle (top-left). Hidden until the tile is hovered/focused,
+   or whenever a selection is in progress. */
+.file-card-select {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(0, 0, 0, 0.35);
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.file-card-select svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.file-card-select.active {
+  background: #4285f4;
+  border-color: #4285f4;
+  color: #fff;
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .file-card:hover .file-card-select,
+  .file-card:focus-within .file-card-select {
+    opacity: 1;
+  }
+}
+
+.file-grid.selecting .file-card-select {
+  opacity: 1;
+}
+
+/* Per-card action (e.g. remove-from-album), top-right. */
 .file-card-action {
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 50%;
   background: var(--surface);
   color: var(--danger);
-  padding: 2px 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
+  line-height: 1;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-1);
 }
 
 .file-card-action:hover {
   background: var(--danger);
-  color: var(--text-invert, #fff);
+  color: var(--surface);
 }
 
 /* Viewer */
@@ -155,7 +227,7 @@
 .viewer-stage {
   flex: 0 0 auto;
   min-height: 240px;
-  background: var(--background);
+  background: var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -234,7 +306,7 @@
 
 .viewer-note-tab.active {
   background: var(--accent);
-  color: var(--text-invert, var(--text));
+  color: var(--text-primary);
 }
 
 .viewer-note-clear {
@@ -446,7 +518,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-primary);
   padding: var(--space-1) var(--space-2);
   min-width: 180px;
   flex: 1;
@@ -455,7 +527,7 @@
 .favorite-button.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--text-invert, var(--text));
+  color: var(--text-primary);
 }
 
 /* Extracted media metadata (dimensions, camera, taken, location). */

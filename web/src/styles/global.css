@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './pages.css';
 
 /* Handlee — branding. Bundled locally; no runtime network dependency. */
 @font-face {

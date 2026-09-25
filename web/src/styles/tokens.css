@@ -57,7 +57,7 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  --sidebar-width: 240px;
+  --sidebar-width: 248px;
 }
 
 :root[data-theme='dark'] {

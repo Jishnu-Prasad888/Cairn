@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 
 import { apiDelete, apiGet, apiPost } from '../api/client';
 import type {
@@ -200,7 +199,6 @@ export default function AlbumsPage() {
       <header className="page-header albums-header">
         <h1>Albums</h1>
         <div className="header-controls">
-          <Link to="/">Home</Link>
           <select
             aria-label="Library"
             value={libraryId}
