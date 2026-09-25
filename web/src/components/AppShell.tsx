@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 
+import { useAuth } from '../auth/authContext';
 import './AppShell.css';
 
 interface NavItem {
@@ -15,6 +16,13 @@ const iconPhoto = (
     <rect x="3" y="3" width="18" height="18" rx="2" />
     <circle cx="8.5" cy="8.5" r="1.5" />
     <path d="m21 15-5-5L5 21" />
+  </svg>
+);
+
+const iconMemories = (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
+    <path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" />
   </svg>
 );
 
@@ -47,6 +55,21 @@ const iconDuplicates = (
   </svg>
 );
 
+const iconSettings = (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="3.2" />
+    <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" />
+  </svg>
+);
+
+const iconLogout = (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
+    <path d="M10 8l-4 4 4 4" />
+    <path d="M6 12h9" />
+  </svg>
+);
+
 const iconSearch = (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <circle cx="11" cy="11" r="7" />
@@ -63,10 +86,12 @@ const iconPerson = (
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/browse', label: 'Photos', icon: iconPhoto },
+  { to: '/memories', label: 'Memories', icon: iconMemories },
   { to: '/people', label: 'People', icon: iconPeople },
   { to: '/albums', label: 'Albums', icon: iconAlbums },
   { to: '/tags', label: 'Tags', icon: iconTag },
   { to: '/duplicates', label: 'Duplicates', icon: iconDuplicates },
+  { to: '/settings', label: 'Settings', icon: iconSettings },
 ];
 
 /**
@@ -76,6 +101,7 @@ const NAV_ITEMS: NavItem[] = [
 export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   const urlQuery = new URLSearchParams(location.search).get('q') ?? '';
   const [query, setQuery] = useState(urlQuery);
@@ -108,15 +134,36 @@ export default function AppShell() {
             <NavLink
               key={item.to}
               to={item.to}
-              className={({ isActive }) =>
-                isActive ? 'app-nav-item active' : 'app-nav-item'
-              }
+              className={({ isActive }) => (isActive ? 'app-nav-item active' : 'app-nav-item')}
             >
               <span className="app-nav-icon">{item.icon}</span>
               <span className="app-nav-label">{item.label}</span>
             </NavLink>
           ))}
         </nav>
+
+        <div className="app-account">
+          <Link to="/settings" className="app-account-user" title="Account settings">
+            <span className="app-account-initial" aria-hidden="true">
+              {(user?.username ?? '?').slice(0, 1).toUpperCase()}
+            </span>
+            <span className="app-account-meta">
+              <span className="app-account-name">{user?.username}</span>
+              <span className="app-account-role">
+                {user?.role === 'admin' ? 'Administrator' : 'Member'}
+              </span>
+            </span>
+          </Link>
+          <button
+            type="button"
+            className="app-signout"
+            onClick={() => void logout()}
+            data-testid="sign-out"
+          >
+            <span className="app-signout-icon">{iconLogout}</span>
+            <span className="app-signout-label">Sign out</span>
+          </button>
+        </div>
       </aside>
 
       <div className="app-main">
@@ -131,9 +178,14 @@ export default function AppShell() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </form>
-          <span className="app-avatar" aria-hidden="true">
+          <Link
+            to="/settings"
+            className="app-avatar"
+            aria-label="Account settings"
+            title="Account settings"
+          >
             {iconPerson}
-          </span>
+          </Link>
         </header>
 
         <div className="app-content">

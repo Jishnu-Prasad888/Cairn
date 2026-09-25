@@ -1,12 +1,12 @@
 @import '../components/views.css';
 
+/* Google Photos keeps the photo wall edge-to-edge; the page stretches the
+   full width of the content area with only a small gutter. */
 .browser-page {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-7);
+  padding: var(--space-3) var(--space-3) var(--space-7);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .browser-page select {
@@ -109,8 +109,12 @@
   border-radius: 0;
 }
 
-/* Selection mode toolbar (Google Photos–style contextual actions). */
+/* Selection mode toolbar (Google Photos–style contextual actions). It sticks
+   under the top bar while scrolling through the wall. */
 .selection-bar {
+  position: sticky;
+  top: calc(64px + var(--space-1));
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -139,10 +143,10 @@
 .folder-grid {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--space-1) 0 var(--space-2);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-2);
 }
 
 .folder-card {
@@ -277,7 +281,7 @@
 
 @media (max-width: 640px) {
   .browser-page {
-    padding: var(--space-4) var(--space-3) var(--space-6);
+    padding: var(--space-3) var(--space-2) var(--space-6);
   }
 
   .browser-toolbar {

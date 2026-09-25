@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from './client';
+import {
+  ApiError,
+  FORBIDDEN_EVENT,
+  UNAUTHORIZED_EVENT,
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+} from './client';
 
 const originalFetch = globalThis.fetch;
 
@@ -58,6 +66,56 @@ describe('apiGet', () => {
     if (!(error instanceof ApiError)) throw new Error('unreachable');
     expect(error.code).toBe('UNKNOWN');
     expect(error.status).toBe(500);
+  });
+});
+
+describe('auth failure broadcasts', () => {
+  it('announces a 403 so the shell can show the access-denied page', async () => {
+    const events: Array<{ type: string; message: string | undefined }> = [];
+    const listener = (event: Event) => {
+      const custom = event as CustomEvent<{ message?: string }>;
+      events.push({ type: event.type, message: custom.detail?.message });
+    };
+    window.addEventListener(FORBIDDEN_EVENT, listener);
+    mockFetch(
+      jsonResponse(403, {
+        error: { code: 'FORBIDDEN', message: 'Not allowed.', request_id: 'abc' },
+      }),
+    );
+
+    await apiGet('/libraries').catch(() => undefined);
+    window.removeEventListener(FORBIDDEN_EVENT, listener);
+
+    expect(events).toEqual([{ type: FORBIDDEN_EVENT, message: 'Not allowed.' }]);
+  });
+
+  it('announces a 401 so an expired session can be re-checked', async () => {
+    const events: string[] = [];
+    const listener = (event: Event) => events.push(event.type);
+    window.addEventListener(UNAUTHORIZED_EVENT, listener);
+    mockFetch(
+      jsonResponse(401, {
+        error: { code: 'UNAUTHORIZED', message: 'Missing session.', request_id: 'abc' },
+      }),
+    );
+
+    await apiPost('/auth/login', { username: 'a', password: 'b' }).catch(() => undefined);
+    window.removeEventListener(UNAUTHORIZED_EVENT, listener);
+
+    expect(events).toEqual([UNAUTHORIZED_EVENT]);
+  });
+
+  it('stays quiet for other failures', async () => {
+    const listener = vi.fn();
+    window.addEventListener(FORBIDDEN_EVENT, listener);
+    window.addEventListener(UNAUTHORIZED_EVENT, listener);
+    mockFetch(new Response(null, { status: 500 }));
+
+    await apiGet('/x').catch(() => undefined);
+    window.removeEventListener(FORBIDDEN_EVENT, listener);
+    window.removeEventListener(UNAUTHORIZED_EVENT, listener);
+
+    expect(listener).not.toHaveBeenCalled();
   });
 });
 

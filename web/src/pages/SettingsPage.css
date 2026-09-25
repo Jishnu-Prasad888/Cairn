@@ -1,0 +1,241 @@
+@import '../components/views.css';
+
+/* Settings: stacked cards on the same surface/border tokens used elsewhere. */
+
+.settings-page {
+  max-width: 880px;
+  padding: var(--space-3) var(--space-3) var(--space-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.settings-card h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* ---- Account ---- */
+
+.settings-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.settings-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--primary);
+  font-size: 20px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.settings-account-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.settings-account .button {
+  margin-left: auto;
+}
+
+/* Role pill, reused for the account and the account list. */
+.settings-role {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 1px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  width: fit-content;
+}
+
+.settings-role[data-role='admin'] {
+  background: var(--accent-soft);
+  color: var(--primary);
+}
+
+/* ---- Appearance ---- */
+
+.settings-themes {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.settings-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.settings-theme:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.settings-theme.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.settings-theme input {
+  accent-color: var(--primary);
+  margin: 0;
+}
+
+/* ---- Accounts (admin) ---- */
+
+.settings-user-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.settings-user-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.settings-user-row:last-child {
+  border-bottom: none;
+}
+
+.settings-user-name {
+  flex: 1;
+  min-width: 120px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-user-date {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.settings-create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.settings-create-fields {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.settings-input {
+  font: inherit;
+  font-size: 14px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  min-width: 160px;
+  flex: 1;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-created {
+  margin: 0;
+  color: var(--success);
+  font-size: 13px;
+}
+
+.settings-footer {
+  text-align: center;
+  font-size: 13px;
+}
+
+.settings-footer p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .settings-page {
+    padding: var(--space-3) var(--space-2) var(--space-6);
+  }
+
+  .settings-card {
+    padding: var(--space-4);
+  }
+
+  .settings-account .button {
+    margin-left: 0;
+    flex: 1 1 auto;
+  }
+
+  .settings-input {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+}

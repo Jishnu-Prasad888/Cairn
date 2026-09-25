@@ -32,20 +32,21 @@
 }
 
 /* File grid — Google Photos–style masonry wall. Tiles keep their natural
-   aspect ratio, flow into responsive columns, and reveal a caption plus a
-   selection circle on hover (or permanently in selection mode). */
+   aspect ratio, flow into dense responsive columns with hairline gaps and
+   square corners, and reveal a caption plus a selection circle on hover
+   (or permanently in selection mode). */
 .file-grid {
   list-style: none;
   margin: 0;
   padding: 0;
-  column-width: 230px;
-  column-gap: var(--space-3);
+  column-width: 200px;
+  column-gap: var(--space-1);
 }
 
 .file-card {
   position: relative;
   break-inside: avoid;
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-1);
 }
 
 .file-card-main {
@@ -53,7 +54,7 @@
   width: 100%;
   padding: 0;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 0;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
@@ -66,7 +67,7 @@
   display: block;
   width: 100%;
   height: auto;
-  border-radius: var(--radius-md);
+  border-radius: 0;
   background: var(--border-subtle);
   transition: filter 140ms ease;
 }
@@ -85,14 +86,15 @@
   background: var(--accent-soft);
 }
 
-/* Bottom caption overlay — readable over any photo. */
+/* Bottom caption overlay — readable over any photo. Google Photos keeps the
+   wall clean, so the caption only fades in while the tile is hovered/focused
+   (it stays in the accessibility tree at all times). */
 .file-card-caption {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   padding: var(--space-3) var(--space-3) var(--space-2);
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
   background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
   color: #fff;
   font-size: 13px;
@@ -101,6 +103,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+@media (hover: hover) {
+  .file-card:hover .file-card-caption,
+  .file-card:focus-within .file-card-caption {
+    opacity: 1;
+  }
 }
 
 /* Selection circle (top-left). Hidden until the tile is hovered/focused,
@@ -197,10 +208,9 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md, var(--radius-sm));
-  /* The viewer occupies 60% of the screen width. */
-  width: 60vw;
-  min-width: 360px;
-  max-width: calc(100vw - var(--space-4) * 2);
+  /* Google Photos–style viewer: fill most of the viewport so the media is
+     the focus; details scroll below. */
+  width: min(1080px, calc(100vw - var(--space-4) * 2));
   max-height: 92vh;
   display: flex;
   flex-direction: column;
@@ -226,7 +236,7 @@
 
 .viewer-stage {
   flex: 0 0 auto;
-  min-height: 240px;
+  min-height: 280px;
   background: var(--border-subtle);
   display: flex;
   align-items: center;
@@ -236,7 +246,7 @@
 
 .viewer-media {
   max-width: 100%;
-  max-height: 56vh;
+  max-height: 64vh;
   object-fit: contain;
 }
 
@@ -570,13 +580,6 @@
 @media (max-width: 640px) {
   .viewer-actions .button {
     flex: 1 1 auto;
-  }
-
-  /* On small screens a fixed 60% leaves the viewer too narrow — go near-full
-     width while keeping the desktop 60vw behaviour. */
-  .viewer-modal {
-    width: min(60vw, calc(100vw - var(--space-4) * 2));
-    min-width: 0;
   }
 
   .viewer-note-header {

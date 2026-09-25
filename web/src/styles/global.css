@@ -80,6 +80,13 @@ button {
   font-family: var(--font-ui);
 }
 
+/* The <Brand> component marks every Cairn wordmark. Handlee stays reserved for
+   branding contexts; surrounding text keeps the UI font. */
+.brand {
+  font-family: var(--font-brand);
+  font-weight: 400;
+}
+
 :focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;

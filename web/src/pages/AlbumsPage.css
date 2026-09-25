@@ -15,9 +15,7 @@
 }
 
 .albums-page {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-7);
+  padding: var(--space-3) var(--space-3) var(--space-7);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -42,20 +40,22 @@
   min-width: 240px;
 }
 
+/* Google Photos–style album shelf: square covers with the title and date
+   underneath, no card chrome. */
 .album-grid {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--space-2) 0 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-4) var(--space-3);
 }
 
 .album-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--space-1);
   width: 100%;
   padding: 0;
   border: none;
@@ -67,22 +67,20 @@
 }
 
 .album-card:hover .album-glyph {
-  border-color: var(--accent);
   box-shadow: var(--shadow-2);
 }
 
 .album-glyph {
-  font-size: 30px;
+  font-size: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
+  aspect-ratio: 1;
+  border-radius: var(--radius-lg);
   background: var(--border-subtle);
   color: var(--text-muted);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: box-shadow 120ms ease;
 }
 
 .album-name {
@@ -201,7 +199,7 @@
 
 @media (max-width: 640px) {
   .albums-page {
-    padding: var(--space-4) var(--space-3) var(--space-6);
+    padding: var(--space-3) var(--space-2) var(--space-6);
   }
 
   .search-input {
