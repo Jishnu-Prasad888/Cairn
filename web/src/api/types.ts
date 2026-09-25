@@ -37,13 +37,81 @@ export interface VersionResponse {
   platform: string;
 }
 
+/** Connectivity of a library's backing storage. */
+export type LibraryStatus = 'online' | 'offline';
+
+/**
+ * A registered storage location. `root` is the last known absolute path and
+ * may be stale while the library is offline; identity always follows `id`.
+ */
 export interface Library {
   id: string;
   name: string;
-  path: string;
+  root: string;
+  status: LibraryStatus;
+  volume_id?: string;
+  schema_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LibraryListResponse {
+  libraries: Library[];
+}
+
+export interface LibraryEnvelope {
+  library: Library;
+}
+
+/** What a probe can learn about a candidate path before registering it. */
+export interface LibraryProbe {
+  path_exists: boolean;
+  is_directory: boolean;
+  is_writable: boolean;
+  has_metadata: boolean;
+  existing_id?: string;
+  existing_name?: string;
+  registered: boolean;
+  volume_id?: string;
+}
+
+export interface LibraryProbeResponse {
+  probe: LibraryProbe;
+}
+
+/** Whether a registration created fresh metadata or adopted an existing one. */
+export type LibraryAdoptMode = 'create' | 'adopt' | string;
+
+export interface LibraryCreateResponse {
+  library: Library;
+  mode: LibraryAdoptMode;
+}
+
+/** The persistent state of a library's last indexing pass. */
+export interface IndexStatus {
+  library_id?: string;
+  status?: string;
+  phase?: string;
+  indexed?: number;
+  total?: number;
+  errors?: number;
+  last_started_at?: string;
+  last_finished_at?: string;
+  message?: string;
+}
+
+/** POST /libraries/{id}/index — a scan was accepted for background execution. */
+export interface IndexTriggerResponse {
+  job_id?: string;
+  library_id?: string;
 }
 
 export type RefType = 'media' | 'memory' | 'album' | 'person' | 'tag';
+
+export interface MemoryRef {
+  type: RefType;
+  id: string;
+}
 
 export interface Memory {
   id: string;
@@ -55,12 +123,29 @@ export interface Memory {
   updated_at: string;
 }
 
+export interface MemoryListResponse {
+  memories: Memory[];
+  next_cursor?: string;
+}
+
 export interface MemoryVersion {
   memory_id: string;
   version: number;
   title: string;
   body: string;
   saved_at: string;
+}
+
+/** Optional local-ML capability status for a library. */
+export interface MLStatus {
+  enabled: boolean;
+  provider?: string;
+  provider_version?: number;
+  indexed?: number;
+  signed?: number;
+  pending?: number;
+  last_pass_at?: string;
+  error?: string;
 }
 
 export interface FaceStatus {
@@ -80,6 +165,15 @@ export interface Person {
   face_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface PersonEnvelope {
+  person: Person;
+}
+
+/** `GET /people/{id}` returns the person with its faces alongside it. */
+export interface PersonDetail extends PersonEnvelope {
+  faces: FaceSummary[];
 }
 
 export interface FaceSummary {
@@ -107,6 +201,29 @@ export interface FileSummary {
   content_hash?: string;
 }
 
+export interface FileEnvelope {
+  file: FileSummary;
+}
+
+export interface FileListResponse {
+  files: FileSummary[];
+  next_cursor?: string;
+  total: number;
+}
+
+/** A nearest match from perceptual-hash similarity, when ML is enabled. */
+export interface SimilarFile {
+  file_id: string;
+  file_path: string;
+  distance: number;
+  similarity: number;
+  file?: FileSummary;
+}
+
+export interface SimilarFilesResponse {
+  similar: SimilarFile[];
+}
+
 export interface DuplicateGroup {
   content_hash: string;
   size_bytes: number;
@@ -132,12 +249,6 @@ export interface FolderListResponse {
   folders: Folder[];
 }
 
-export interface FileListResponse {
-  files: FileSummary[];
-  next_cursor?: string;
-  total: number;
-}
-
 export interface Album {
   id: string;
   name: string;
@@ -149,6 +260,10 @@ export interface Album {
 
 export interface AlbumListResponse {
   albums: Album[];
+}
+
+export interface AlbumEnvelope {
+  album: Album;
 }
 
 export interface Tag {
@@ -192,6 +307,129 @@ export interface FileMetadata {
   longitude?: number;
   has_thumbnail: boolean;
   updated_at?: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * Authorization
+ * ------------------------------------------------------------------ */
+
+/** The closed capability set from ADR-0005. */
+export type Capability =
+  | 'read'
+  | 'download'
+  | 'create'
+  | 'edit'
+  | 'move'
+  | 'delete'
+  | 'share'
+  | 'manage';
+
+export const ALL_CAPABILITIES: Capability[] = [
+  'read',
+  'download',
+  'create',
+  'edit',
+  'move',
+  'delete',
+  'share',
+  'manage',
+];
+
+export const CAPABILITY_LABEL: Record<Capability, string> = {
+  read: 'View',
+  download: 'Download',
+  create: 'Add',
+  edit: 'Edit',
+  move: 'Move',
+  delete: 'Delete',
+  share: 'Share',
+  manage: 'Manage',
+};
+
+export type GrantEffect = 'allow' | 'deny';
+
+export interface PermissionGrant {
+  id: string;
+  user_id: string;
+  resource_key: string;
+  capabilities: Capability[];
+  effect: GrantEffect;
+  created_at: string;
+}
+
+export interface GrantListResponse {
+  grants: PermissionGrant[];
+}
+
+export interface GrantEnvelope {
+  grant: PermissionGrant;
+}
+
+/* ------------------------------------------------------------------ *
+ * Sharing
+ * ------------------------------------------------------------------ */
+
+export interface Share {
+  id: string;
+  resource_key: string;
+  capabilities: Capability[];
+  has_password: boolean;
+  expires_at?: string;
+  revoked_at?: string;
+  created_at: string;
+}
+
+/** Creating a share returns the raw token exactly once. */
+export interface ShareCreateResponse {
+  share: Share;
+  token: string;
+}
+
+export interface ShareListResponse {
+  shares: Share[];
+}
+
+/**
+ * What an anonymous visitor to a share link may learn before unlocking it.
+ * `library` is the library's *name*, not an object — the public route leaks no
+ * ids, only the scope and the label a visitor would see.
+ */
+export interface PublicShareInfo {
+  resource_key: string;
+  library?: string;
+  has_password: boolean;
+  expires_at?: string;
+}
+
+export interface PublicShareInfoResponse {
+  share: PublicShareInfo;
+}
+
+/* ------------------------------------------------------------------ *
+ * Backups
+ * ------------------------------------------------------------------ */
+
+export type BackupStatus = 'running' | 'ok' | 'failed' | string;
+
+export interface BackupRecord {
+  id: string;
+  status: BackupStatus;
+  destination: string;
+  /** The server always sets this; a record without it is not a record. */
+  started_at: string;
+  finished_at?: string;
+  libraries: number;
+  files: number;
+  files_skipped: number;
+  bytes: number;
+  stored_bytes: number;
+  encrypted: boolean;
+  same_device: boolean;
+  verify_status?: string;
+  verify_checked?: number;
+  verify_errors?: number;
+  error_msg?: string;
+  created_at: string;
 }
 
 export function formatBytes(bytes: number): string {
