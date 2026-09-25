@@ -125,9 +125,11 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md, var(--radius-sm));
-  max-width: min(960px, 94vw);
+  /* The viewer occupies 60% of the screen width. */
+  width: 60vw;
+  min-width: 360px;
+  max-width: calc(100vw - var(--space-4) * 2);
   max-height: 92vh;
-  width: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -151,7 +153,8 @@
 }
 
 .viewer-stage {
-  min-height: 280px;
+  flex: 0 0 auto;
+  min-height: 240px;
   background: var(--background);
   display: flex;
   align-items: center;
@@ -161,8 +164,182 @@
 
 .viewer-media {
   max-width: 100%;
-  max-height: 62vh;
+  max-height: 56vh;
   object-fit: contain;
+}
+
+/* Below the image: the Markdown note, then the file info/actions. This region
+   scrolls when the note is long while the image stays in place. */
+.viewer-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+/* Markdown note (caption) shown directly under the image. */
+.viewer-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.viewer-note-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.viewer-note-header h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.viewer-note-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.viewer-note-tabs {
+  display: flex;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.viewer-note-tab {
+  font: inherit;
+  font-size: 12px;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.viewer-note-tab:hover {
+  background: var(--border-subtle);
+}
+
+.viewer-note-tab.active {
+  background: var(--accent);
+  color: var(--text-invert, var(--text));
+}
+
+.viewer-note-clear {
+  font: inherit;
+  font-size: 12px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.viewer-note-clear:hover {
+  border-color: var(--danger);
+}
+
+.note-status {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.note-status-saving {
+  color: var(--text-muted);
+}
+
+.note-status-saved {
+  color: var(--success);
+}
+
+.note-status-error {
+  color: var(--danger);
+}
+
+.viewer-note-input {
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  padding: var(--space-2) var(--space-3);
+}
+
+.viewer-note-input::placeholder {
+  color: var(--text-muted);
+}
+
+.viewer-note-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.viewer-note-preview {
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.viewer-note-preview h1,
+.viewer-note-preview h2,
+.viewer-note-preview h3 {
+  margin: var(--space-2) 0 var(--space-2);
+  line-height: 1.3;
+}
+
+.viewer-note-preview p {
+  margin: 0 0 var(--space-2);
+}
+
+.viewer-note-preview pre {
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+}
+
+.viewer-note-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.viewer-note-preview blockquote {
+  margin: var(--space-2) 0;
+  padding-left: var(--space-4);
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+}
+
+.viewer-note-preview hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: var(--space-3) 0;
+}
+
+.viewer-note-empty {
+  margin: 0;
+  font-size: 13px;
 }
 
 .viewer-generic {
@@ -275,8 +452,63 @@
   flex: 1;
 }
 
+.favorite-button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-invert, var(--text));
+}
+
+/* Extracted media metadata (dimensions, camera, taken, location). */
+.viewer-details {
+  flex-basis: 100%;
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.viewer-details h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.viewer-details dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  font-size: 13px;
+}
+
+.viewer-details dt {
+  color: var(--text-muted);
+}
+
+.viewer-details dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.viewer-details a {
+  color: var(--accent);
+}
+
 @media (max-width: 640px) {
   .viewer-actions .button {
     flex: 1 1 auto;
+  }
+
+  /* On small screens a fixed 60% leaves the viewer too narrow — go near-full
+     width while keeping the desktop 60vw behaviour. */
+  .viewer-modal {
+    width: min(60vw, calc(100vw - var(--space-4) * 2));
+    min-width: 0;
+  }
+
+  .viewer-note-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

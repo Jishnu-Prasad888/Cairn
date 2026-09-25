@@ -1,8 +1,15 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useState } from 'react';
 
 import { apiDelete, apiGet, apiPost, apiRequest } from '../api/client';
-import type { FileSummary, Tag, TagEnvelope, TagListResponse } from '../api/types';
+import type {
+  FileMetadata,
+  FileSummary,
+  Tag,
+  TagEnvelope,
+  TagListResponse,
+} from '../api/types';
 import { formatBytes } from '../api/types';
+import { FileNote } from './FileNote';
 import { MEDIA_LABEL, downloadUrl, mediaGlyph, thumbnailUrl } from './media';
 import './views.css';
 
@@ -22,6 +29,8 @@ export function ViewerModal({ libraryId, file, onClose, onChanged }: ViewerModal
   const [libraryTags, setLibraryTags] = useState<Tag[]>([]);
   const [fileTags, setFileTags] = useState<Tag[]>([]);
   const [tagInput, setTagInput] = useState('');
+  const [favorite, setFavorite] = useState<boolean | null>(null);
+  const [metadata, setMetadata] = useState<FileMetadata | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -45,6 +54,33 @@ export function ViewerModal({ libraryId, file, onClose, onChanged }: ViewerModal
       })
       .catch((e: Error) => {
         if (!cancelled) setError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryId, file.id]);
+
+  // Favorite state and extracted metadata are best-effort; failures simply
+  // hide the corresponding control/details rather than blocking the viewer.
+  useEffect(() => {
+    let cancelled = false;
+    setFavorite(null);
+    setMetadata(null);
+    void apiGet<{ files: FileSummary[] }>(`/libraries/${libraryId}/favorites`)
+      .then((resp) => {
+        if (!cancelled) setFavorite(resp.files?.some((f) => f.id === file.id) ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setFavorite(false);
+      });
+    void apiGet<{ metadata: FileMetadata }>(
+      `/libraries/${libraryId}/files/${file.id}/metadata`,
+    )
+      .then((resp) => {
+        if (!cancelled) setMetadata(resp.metadata ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMetadata(null);
       });
     return () => {
       cancelled = true;
@@ -107,6 +143,24 @@ export function ViewerModal({ libraryId, file, onClose, onChanged }: ViewerModal
         body: JSON.stringify({ path: file.rel_path }),
       }),
     );
+  };
+
+  const toggleFavorite = async () => {
+    if (favorite === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (favorite) {
+        await apiDelete(`/libraries/${libraryId}/files/${file.id}/favorite`);
+      } else {
+        await apiPost(`/libraries/${libraryId}/files/${file.id}/favorite`, undefined);
+      }
+      setFavorite(!favorite);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const refreshFileTags = async () => {
@@ -192,7 +246,9 @@ export function ViewerModal({ libraryId, file, onClose, onChanged }: ViewerModal
             </div>
           )}
         </div>
-        <div className="viewer-info">
+        <div className="viewer-scroll">
+          <FileNote libraryId={libraryId} fileId={file.id} />
+          <div className="viewer-info">
           <div className="viewer-meta">
             <h2 title={file.rel_path}>{file.name}</h2>
             <p className="muted">
@@ -209,6 +265,15 @@ export function ViewerModal({ libraryId, file, onClose, onChanged }: ViewerModal
             >
               Download
             </a>
+            <button
+              type="button"
+              className={favorite ? 'button favorite-button active' : 'button favorite-button'}
+              onClick={() => void toggleFavorite()}
+              disabled={favorite === null || busy}
+              aria-pressed={favorite === true}
+            >
+              {favorite ? '★ Favorited' : '☆ Favorite'}
+            </button>
             <button type="button" className="button" onClick={rename} disabled={busy}>
               Rename
             </button>
@@ -264,13 +329,67 @@ export function ViewerModal({ libraryId, file, onClose, onChanged }: ViewerModal
               </button>
             </form>
           </div>
+          {metadata && <FileDetails metadata={metadata} />}
           {error && (
             <p className="error-text" role="alert">
               {error}
             </p>
           )}
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Compact metadata details panel (dimensions, camera, taken, location).
+ * Renders nothing when the backend extracted no useful fields. */
+function FileDetails({ metadata }: { metadata: FileMetadata }) {
+  const rows: Array<[string, ReactNode]> = [];
+
+  if (metadata.width && metadata.height) {
+    rows.push(['Dimensions', `${metadata.width} × ${metadata.height}px`]);
+  }
+  if (metadata.duration_secs != null && metadata.duration_secs > 0) {
+    const total = Math.round(metadata.duration_secs);
+    const mm = Math.floor(total / 60);
+    const ss = String(total % 60).padStart(2, '0');
+    rows.push(['Duration', `${mm}:${ss}`]);
+  }
+  const camera = [metadata.camera_make, metadata.camera_model].filter(Boolean).join(' ');
+  if (camera) rows.push(['Camera', camera]);
+  if (metadata.taken_at) {
+    const taken = new Date(metadata.taken_at);
+    rows.push([
+      'Taken',
+      Number.isNaN(taken.getTime()) ? metadata.taken_at : taken.toLocaleString(),
+    ]);
+  }
+  if (metadata.latitude != null && metadata.longitude != null) {
+    const lat = metadata.latitude.toFixed(5);
+    const lon = metadata.longitude.toFixed(5);
+    const href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}`;
+    rows.push([
+      'Location',
+      <a key="location" href={href} target="_blank" rel="noreferrer">
+        {lat}, {lon}
+      </a>,
+    ]);
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="viewer-details" data-testid="viewer-details">
+      <h3>Details</h3>
+      <dl>
+        {rows.map(([term, desc]) => (
+          <div key={term} className="viewer-detail-row">
+            <dt>{term}</dt>
+            <dd>{desc}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
