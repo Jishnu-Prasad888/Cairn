@@ -16,6 +16,7 @@ import type { ReactElement } from 'react';
 import { copyFile, deleteForever, moveFile, renameFile, softDeleteFile } from '../api/queries';
 import type { FileSummary } from '../api/types';
 import { ConfirmDialog, PromptDialog } from './Dialog';
+import { FolderPicker } from './FolderPicker';
 import type { ViewerAction } from './ViewerModal';
 
 export type FileDialogKind = ViewerAction | 'permanent';
@@ -155,8 +156,18 @@ export function useFileOperations(
         title="Move file"
         label="Destination folder"
         initialValue={pending?.kind === 'move' ? pending.file.folder_path : ''}
-        placeholder="2024/vacation"
         hint="A path relative to the library root. Leave empty to move to the top level."
+        control={(field) => (
+          <FolderPicker
+            libraryId={libraryId}
+            value={field.value}
+            onChange={field.setValue}
+            label="Destination folder"
+            placeholder="2024/vacation"
+            unavailableNote="Some folders are not listed; type the path to reach one anyway."
+            testId="move-destination"
+          />
+        )}
         busy={busy}
         error={error}
         onCancel={closeDialog}
@@ -173,8 +184,18 @@ export function useFileOperations(
         title="Copy file"
         label="Destination folder"
         initialValue={pending?.kind === 'copy' ? pending.file.folder_path : ''}
-        placeholder="archive"
         hint="A copy is created on disk; the original stays where it is."
+        control={(field) => (
+          <FolderPicker
+            libraryId={libraryId}
+            value={field.value}
+            onChange={field.setValue}
+            label="Destination folder"
+            placeholder="archive"
+            unavailableNote="Some folders are not listed; type the path to reach one anyway."
+            testId="copy-destination"
+          />
+        )}
         busy={busy}
         error={error}
         onCancel={closeDialog}
