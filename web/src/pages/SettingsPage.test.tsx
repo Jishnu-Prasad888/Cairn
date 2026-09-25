@@ -136,11 +136,36 @@ describe('SettingsPage', () => {
       within(aliceRow as HTMLElement).getByRole('button', { name: 'Revoke sessions' }),
     );
 
+    // The click only opens the confirmation — the request waits for it, so a
+    // stray click cannot sign somebody out.
+    const dialog = await screen.findByTestId('revoke-sessions-dialog');
+    expect(fn.mock.calls.some(([url]) => String(url).includes('/sessions/revoke'))).toBe(false);
+    expect(within(dialog as HTMLElement).getByText('alice')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog as HTMLElement).getByRole('button', { name: 'Revoke sessions' }));
+
     await waitFor(() => {
       expect(
         fn.mock.calls.some(([url]) => String(url).includes('/api/v1/users/u2/sessions/revoke')),
       ).toBe(true);
     });
+  });
+
+  it('leaves the account signed in when revoking is cancelled', async () => {
+    const fn = mockFetch();
+    setup();
+
+    await screen.findByTestId('settings-user-list');
+    const aliceRow = screen.getByText('alice').closest('li') as HTMLElement;
+    fireEvent.click(within(aliceRow).getByRole('button', { name: 'Revoke sessions' }));
+
+    const dialog = await screen.findByTestId('revoke-sessions-dialog');
+    fireEvent.click(within(dialog as HTMLElement).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('revoke-sessions-dialog')).not.toBeInTheDocument();
+    });
+    expect(fn.mock.calls.some(([url]) => String(url).includes('/sessions/revoke'))).toBe(false);
   });
 
   it('creates a new account for administrators', async () => {

@@ -1,12 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { called, json, mockApi, originalFetch, renderPage } from '../test/harness';
 import PeoplePage from './PeoplePage';
-
-const libraries = {
-  libraries: [{ id: 'lib1', name: 'Photos', path: '/media' }],
-};
 
 const status = {
   enabled: true,
@@ -24,10 +20,9 @@ const people = {
   ],
 };
 
-const faces = {
+const unassigned = {
   faces: [
-    { id: 'f3', file_id: 'file3', x: 0, y: 0, width: 24, height: 24, confidence: 0.9 },
-    { id: 'f4', file_id: 'file4', x: 0, y: 0, width: 24, height: 24, confidence: 0.7 },
+    { id: 'u1', file_id: 'file9', x: 0, y: 0, width: 24, height: 24, confidence: 0.9 },
   ],
 };
 
@@ -39,124 +34,306 @@ const personDetail = {
   ],
 };
 
-function jsonResponse(status: number, body: unknown) {
-  if (status === 204) {
-    return new Response(null, { status });
-  }
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
+interface Options {
+  /** The `/ml/faces` status endpoint's response. */
+  faceStatus?: unknown;
+  faceStatusCode?: number;
+  peopleList?: unknown;
+  unassignedFaces?: unknown;
+  versions?: unknown;
 }
 
-function mockApi({ disabled = false } = {}) {
-  const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-    const url = String(input);
-    const method = init?.method ?? 'GET';
-
-    if (url.endsWith('/libraries')) {
-      return jsonResponse(200, libraries);
-    }
-    if (/\/libraries\/lib1\/ml\/faces$/.test(url)) {
-      return jsonResponse(200, status);
-    }
-    if (/\/libraries\/lib1\/people$/.test(url) && method === 'GET' && disabled) {
-      return jsonResponse(503, {
-        error: { code: 'SERVICE_UNAVAILABLE', message: 'disabled', request_id: '1' },
-      });
-    }
-    if (/\/libraries\/lib1\/people$/.test(url) && method === 'GET') {
-      return jsonResponse(200, people);
-    }
-    if (/\/libraries\/lib1\/people\/p1$/.test(url)) {
-      return jsonResponse(200, personDetail);
-    }
-    if (/\/libraries\/lib1\/people\/p1\/rename$/.test(url)) {
-      return jsonResponse(200, { renamed: true });
-    }
-    if (/\/libraries\/lib1\/people\/p1$/.test(url) && method === 'DELETE') {
-      return jsonResponse(204, null);
-    }
-    if (/\/libraries\/lib1\/people\/p2\/faces\/f3$/.test(url)) {
-      return jsonResponse(200, { assigned: true });
-    }
-    if (/\/libraries\/lib1\/faces$/.test(url)) {
-      return jsonResponse(200, faces);
-    }
-    if (/\/libraries\/lib1\/ml\/faces\/pass$/.test(url)) {
-      return jsonResponse(202, { status: 'started' });
-    }
-    if (/\/libraries\/lib1\/ml\/faces\/cluster$/.test(url)) {
-      return jsonResponse(202, { status: 'started' });
-    }
-    if (/\/libraries\/lib1\/ml\/faces\/purge$/.test(url)) {
-      return jsonResponse(200, { faces_removed: 4 });
-    }
-    if (/\/libraries\/lib1\/faces\/f[0-9]\/image$/.test(url)) {
-      return jsonResponse(200, new Uint8Array());
-    }
-    return jsonResponse(404, { error: { code: 'X', message: 'missing', request_id: '1' } });
-  });
-
-  globalThis.fetch = fetchMock as unknown as typeof fetch;
-  return fetchMock;
+function setup(options: Options = {}) {
+  const fn = mockApi([
+    (url) =>
+      /\/libraries\/lib1\/ml\/faces$/.test(url)
+        ? json(
+            options.faceStatus ?? status,
+            options.faceStatusCode ?? 200,
+          )
+        : undefined,
+    (url) => (/\/libraries\/lib1\/ml\/faces\/pass$/.test(url) ? json({ status: 'started' }, 202) : undefined),
+    (url) =>
+      /\/libraries\/lib1\/ml\/faces\/cluster$/.test(url) ? json({ status: 'started' }, 202) : undefined,
+    (url, init) =>
+      /\/libraries\/lib1\/ml\/faces\/purge$/.test(url) && init?.method === 'POST'
+        ? json({ library_id: 'lib1', faces_removed: 4 })
+        : undefined,
+    (url) => (/\/libraries\/lib1\/people$/.test(url) ? json(options.peopleList ?? people) : undefined),
+    (url) => (/\/libraries\/lib1\/faces$/.test(url) ? json(options.unassignedFaces ?? unassigned) : undefined),
+    (url) => (/\/libraries\/lib1\/people\/p1$/.test(url) ? json(personDetail) : undefined),
+    (url) => (/\/people\/p1\/rename$/.test(url) ? json({ renamed: true }) : undefined),
+    (url, init) =>
+      /\/people\/p1\/cover$/.test(url) && init?.method === 'POST'
+        ? json({ cover_set: true })
+        : undefined,
+    (url, init) =>
+      /\/people\/p2\/merge$/.test(url) && init?.method === 'POST' ? json({ merged: true }) : undefined,
+    (url) => (/\/people\/p1\/faces\/f\d$/.test(url) ? json({ assigned: true }) : undefined),
+    (url, init) =>
+      /\/people\/p1$/.test(url) && init?.method === 'DELETE'
+        ? json({ deleted: true })
+        : undefined,
+  ]);
+  renderPage(<PeoplePage />);
+  return fn;
 }
-
-function renderPage() {
-  return render(
-    <MemoryRouter>
-      <PeoplePage />
-    </MemoryRouter>,
-  );
-}
-
-beforeEach(() => {
-  mockApi();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('PeoplePage', () => {
-  it('renders people grid and stats', async () => {
-    renderPage();
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('renders the people grid and the server stats', async () => {
+    setup();
+
+    expect(await screen.findByTestId('people-grid')).toBeInTheDocument();
+    expect(screen.getByTestId('people-stats')).toHaveTextContent('4 faces · 2 people · 2 unassigned');
+    expect(within(screen.getByTestId('person-p1')).getByText('Mom')).toBeInTheDocument();
+  });
+
+  it('offers the library picker', async () => {
+    setup();
+
+    await screen.findByTestId('people-grid');
+    expect(screen.getByLabelText('Library')).toBeInTheDocument();
+  });
+
+  it('lists the unassigned pool and assigns a face from it', async () => {
+    const fetchMock = setup();
+
+    const pool = await screen.findByTestId('unassigned-faces');
+    expect(pool).toBeInTheDocument();
+
+    const select = screen.getAllByLabelText('Assign face to person')[0] as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'p1' } });
+
     await waitFor(() => {
-      expect(screen.getAllByText('Mom').length).toBeGreaterThan(0);
-    });
-    expect(screen.getAllByText('Person 2').length).toBeGreaterThan(0);
-    expect(screen.getByText(/4 faces · 2 people · 2 unassigned/)).toBeInTheDocument();
-    // Unassigned pool is listed.
-    waitFor(() => {
-      expect(screen.getByLabelText('Unassigned faces')).toBeInTheDocument();
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p1/faces/u1')).toBe(true);
     });
   });
 
-  it('expands a person to show their faces', async () => {
-    renderPage();
+  it('expands a person to show their faces, fetched on demand', async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    // The face list is a sibling of `person` in the detail response, so it is a
+    // separate request that must not happen until the card is opened.
+    expect(called(fetchMock, 'GET', '/api/v1/libraries/lib1/people/p1')).toBe(false);
+
+    const card = screen.getByTestId('person-p1');
+    fireEvent.click(within(card).getByRole('button', { name: 'Faces' }));
+
+    const faces = await screen.findByTestId('person-faces-p1');
+    expect(within(faces).getAllByRole('figure')).toHaveLength(2);
+    expect(within(faces).getByRole('button', { name: 'Cover' })).toBeDisabled();
+    expect(within(faces).getByRole('button', { name: 'Set cover' })).toBeEnabled();
+  });
+
+  it('collapses the card again', async () => {
+    setup();
+    await screen.findByTestId('people-grid');
+
+    const card = screen.getByTestId('person-p1');
+    fireEvent.click(within(card).getByRole('button', { name: 'Faces' }));
+    await screen.findByTestId('person-faces-p1');
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Hide' }));
+    expect(screen.queryByTestId('person-faces-p1')).not.toBeInTheDocument();
+  });
+
+  it('renames a person through the dialog', async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    fireEvent.click(within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Rename' }));
+    const dialog = await screen.findByTestId('rename-person-dialog');
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Mum' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
+
     await waitFor(() => {
-      expect(screen.getAllByText('Mom').length).toBeGreaterThan(0);
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p1/rename')).toBe(true);
     });
-    const expand = screen.getAllByRole('button', { name: 'Faces' })[0]!;
-    fireEvent.click(expand);
+  });
+
+  it('merges into a person chosen from a list, never a typed id', async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    fireEvent.click(within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Merge' }));
+    const dialog = await screen.findByTestId('merge-person-dialog');
+
+    const select = within(dialog).getByLabelText('Keep') as HTMLSelectElement;
+    // The person being merged away is not offered as their own destination.
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Choose a person…',
+      'Person 2',
+    ]);
+
+    const confirm = within(dialog).getByRole('button', { name: 'Merge' });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(select, { target: { value: 'p2' } });
+    fireEvent.click(confirm);
+
     await waitFor(() => {
-      expect(screen.getByLabelText('Person faces')).toBeInTheDocument();
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p2/merge')).toBe(true);
+    });
+  });
+
+  it('says so when there is nobody to merge into', async () => {
+    mockApi([
+      (url) => (/\/libraries\/lib1\/ml\/faces$/.test(url) ? json(status) : undefined),
+      (url) =>
+        /\/libraries\/lib1\/people$/.test(url)
+          ? json({ people: [people.people[0]] })
+          : undefined,
+      (url) => (/\/libraries\/lib1\/faces$/.test(url) ? json(unassigned) : undefined),
+    ]);
+    renderPage(<PeoplePage />);
+    await screen.findByTestId('people-grid');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
+    const dialog = await screen.findByTestId('merge-person-dialog');
+    expect(within(dialog).getByText('You need at least two people to merge.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Merge' })).toBeDisabled();
+  });
+
+  it('deletes a person after confirming the dialog', async () => {
+    const fetchMock = setup();
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    await screen.findByTestId('people-grid');
+
+    fireEvent.click(within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByTestId('delete-person-dialog');
+    expect(within(dialog).getByText('Mom')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/people/p1')).toBe(true);
+    });
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('purges every detected face after confirming, and reports how many', async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    fireEvent.click(screen.getByTestId('purge-faces'));
+    const dialog = await screen.findByTestId('purge-faces-dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Purge' }));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/faces/purge')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Removed 4 faces.');
     });
   });
 
   it('starts a detection pass', async () => {
-    const fetchMock = mockApi();
-    renderPage();
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    fireEvent.click(screen.getByTestId('detect-faces'));
+
     await waitFor(() => {
-      expect(screen.getAllByText('Mom').length).toBeGreaterThan(0);
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/faces/pass')).toBe(true);
     });
-    const detect = await screen.findByRole('button', { name: 'Detect faces' });
-    fireEvent.click(detect);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Detection pass started. It runs in the background.',
+    );
+  });
+
+  it('starts a clustering pass', async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    fireEvent.click(screen.getByTestId('cluster-faces'));
+
     await waitFor(() => {
-      const calls = fetchMock.mock.calls
-        .map((c) => String(c[0]))
-        .filter((u) => /\/ml\/faces\/pass$/.test(u));
-      expect(calls.length).toBeGreaterThan(0);
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/faces/cluster')).toBe(true);
     });
+  });
+
+  it('distinguishes "faces are off" from "this build has no face support"', async () => {
+    mockApi([
+      (url) =>
+        /\/libraries\/lib1\/ml\/faces$/.test(url)
+          ? json(
+              { error: { code: 'SERVICE_UNAVAILABLE', message: 'ML is disabled', request_id: '1' } },
+              503,
+            )
+          : undefined,
+    ]);
+    renderPage(<PeoplePage />);
+
+    expect(await screen.findByTestId('faces-disabled')).toBeInTheDocument();
+    expect(screen.queryByTestId('faces-unsupported')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('detect-faces')).not.toBeInTheDocument();
+  });
+
+  it('explains an unsupported build without pretending faces are merely empty', async () => {
+    mockApi([
+      (url) =>
+        /\/libraries\/lib1\/ml\/faces$/.test(url)
+          ? json({ error: { code: 'NOT_FOUND', message: 'no such route', request_id: '1' } }, 404)
+          : undefined,
+    ]);
+    renderPage(<PeoplePage />);
+
+    expect(await screen.findByTestId('faces-unsupported')).toBeInTheDocument();
+    expect(screen.queryByTestId('faces-disabled')).not.toBeInTheDocument();
+  });
+
+  it('follows a ?person= deep link straight to that card', async () => {
+    mockApi([
+      (url) => (/\/libraries\/lib1\/ml\/faces$/.test(url) ? json(status) : undefined),
+      (url) => (/\/libraries\/lib1\/people$/.test(url) ? json(people) : undefined),
+      (url) => (/\/libraries\/lib1\/faces$/.test(url) ? json(unassigned) : undefined),
+      (url) => (/\/libraries\/lib1\/people\/p1$/.test(url) ? json(personDetail) : undefined),
+    ]);
+    renderPage(<PeoplePage />, { route: '/people?person=p1' });
+
+    // The card is already open on the first paint, so its faces load too.
+    expect(await screen.findByTestId('person-faces-p1')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Hide' }),
+    ).toBeInTheDocument();
+  });
+
+  it('explains a failed face listing with a retry', async () => {
+    mockApi([
+      (url) =>
+        /\/libraries\/lib1\/ml\/faces$/.test(url)
+          ? json({ error: { code: 'INTERNAL', message: 'Face index is corrupt.', request_id: '1' } }, 500)
+          : undefined,
+    ]);
+    renderPage(<PeoplePage />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Face index is corrupt.');
+    expect(within(alert).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('offers no route out when the library list is empty', async () => {
+    mockApi([], { libraries: [] });
+    renderPage(<PeoplePage />, { libraries: [] });
+
+    expect(await screen.findByTestId('no-libraries')).toBeInTheDocument();
+    expect(screen.queryByTestId('detect-faces')).not.toBeInTheDocument();
+  });
+
+  it('does not fetch faces until a card is opened', async () => {
+    const fetchMock = mockApi([
+      (url) => (/\/libraries\/lib1\/ml\/faces$/.test(url) ? json(status) : undefined),
+      (url) => (/\/libraries\/lib1\/people$/.test(url) ? json(people) : undefined),
+      (url) => (/\/libraries\/lib1\/faces$/.test(url) ? json(unassigned) : undefined),
+      (url) => (/\/libraries\/lib1\/people\/p1$/.test(url) ? json(personDetail) : undefined),
+    ]);
+    renderPage(<PeoplePage />);
+    await screen.findByTestId('people-grid');
+
+    expect(called(fetchMock, 'GET', '/api/v1/libraries/lib1/people/p1')).toBe(false);
   });
 });
