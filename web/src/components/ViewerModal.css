@@ -100,8 +100,9 @@
   background: #000;
 }
 
+/* Zoomed, the media is laid out larger than the stage and the stage scrolls
+   to it, so the top-left is the origin rather than the centre. */
 .viewer-stage[data-zoomed='true'] {
-  cursor: grab;
   align-items: flex-start;
   justify-content: flex-start;
 }

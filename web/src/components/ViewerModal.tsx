@@ -14,7 +14,15 @@
  * F fullscreen, S slideshow, T details, Esc close.
  */
 
-import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   addFavorite,
@@ -35,6 +43,7 @@ import {
 } from '../api/queries';
 import type { FileMetadata, FileSummary, Memory, Person, SimilarFile, Tag } from '../api/types';
 import { formatBytes } from '../api/types';
+import { useFocusTrap } from '../lib/focusTrap';
 import { FileNote } from './FileNote';
 import { downloadUrl, mediaGlyph, thumbnailUrl } from './media';
 import './views.css';
@@ -129,7 +138,9 @@ export function ViewerModal({
     setError(null);
   }
 
-  // Focus the dialog on open and give focus back to the tile on unmount.
+  // Focus the dialog on open and give focus back to the tile on unmount. The
+  // dialog is `aria-modal`, so Tab has to stay inside it — this one listens on
+  // `window` because its arrow keys and Escape are global.
   useEffect(() => {
     restoreRef.current = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
@@ -137,6 +148,8 @@ export function ViewerModal({
       restoreRef.current?.focus?.();
     };
   }, []);
+
+  useFocusTrap(dialogRef);
 
   const toggleFullscreen = useCallback(() => {
     const el = stageRef.current;
@@ -284,6 +297,16 @@ export function ViewerModal({
   };
 
   const previewable = file.media_type === 'photo' || file.media_type === 'video';
+
+  // A CSS `transform` does not change the layout box: a scaled image overflows
+  // a scroll container that does not know it has got bigger, so the edges of a
+  // zoomed photo are drawn but can never be scrolled to. Size the element
+  // itself once zoomed, and let the stage do the scrolling.
+  const mediaStyle: CSSProperties =
+    zoom > 1
+      ? { width: `${zoom * 100}%`, maxWidth: 'none', height: 'auto', objectFit: 'contain' }
+      : {};
+
   const stage = (
     <div
       className="viewer-stage"
@@ -297,14 +320,14 @@ export function ViewerModal({
           className="viewer-media"
           src={thumbnailUrl(libraryId, file)}
           alt={file.name}
-          style={{ transform: `scale(${zoom})` }}
+          style={mediaStyle}
         />
       ) : file.media_type === 'video' ? (
         <video
           className="viewer-media"
           src={downloadUrl(libraryId, file)}
           controls
-          style={{ transform: `scale(${zoom})` }}
+          style={mediaStyle}
         />
       ) : (
         <div className="viewer-generic">

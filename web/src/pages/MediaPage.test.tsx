@@ -15,6 +15,7 @@ import {
   renderPage,
 } from '../test/harness';
 import type { RouteHandler } from '../test/harness';
+import { FOCUSABLE } from '../lib/focusTrap';
 import MediaPage from './MediaPage';
 import type { MediaPageConfig } from './MediaPage';
 
@@ -434,6 +435,60 @@ describe('MediaPage', () => {
       expect(within(dialog).getByRole('button', { name: 'Zoom out' })).toBeDisabled();
     });
     expect(stage).toHaveAttribute('data-zoomed', 'false');
+  });
+
+  it('grows the media itself when zoomed, so the stage can scroll to its edges', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+    const dialog = within(viewer).getByRole('dialog');
+    const image = within(dialog).getByAltText('IMG_0001.png') as HTMLElement;
+
+    // Unzoomed the image fits the stage, so it takes no explicit width.
+    expect(image.style.width).toBe('');
+
+    // Zooming must change the layout box, not just paint a `transform` over it:
+    // a transform does not enlarge the scrollable area, so the corners of a
+    // scaled image would be drawn but unreachable.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => {
+      expect(within(viewer).getByTestId('viewer-stage')).toHaveAttribute('data-zoomed', 'true');
+    });
+    expect(image.style.width).toBe('150%');
+    expect(image.style.transform).toBe('');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => {
+      expect(image.style.width).toBe('200%');
+    });
+  });
+
+  it('keeps Tab inside the viewer while it is open', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+    const dialog = within(viewer).getByRole('dialog');
+
+    // `aria-modal` promises the page behind is unreachable, so focus has to
+    // wrap at both ends of the dialog rather than escaping to the grid.
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+    expect(focusable.length).toBeGreaterThan(1);
+    // The first stop is the close button, and the last is the last control in
+    // the panel — whatever the panel happens to end with.
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    expect(first).toHaveAccessibleName('Close viewer');
+
+    last.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(first).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
   });
 
   it('hides and restores the details panel', async () => {

@@ -12,11 +12,8 @@
 import { useCallback, useEffect, useId, useRef } from 'react';
 import type { ReactNode } from 'react';
 
+import { FOCUSABLE, trapTab } from '../lib/focusTrap';
 import './Dialog.css';
-
-/** Selector for everything that can hold focus inside a dialog. */
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export interface DialogProps {
   open: boolean;
@@ -70,27 +67,7 @@ export function Dialog({
         onClose();
         return;
       }
-      if (event.key !== 'Tab') return;
-      // Keep Tab inside the dialog: wrap from last to first and back.
-      const panel = panelRef.current;
-      if (!panel) return;
-      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-        (el) => el.offsetParent !== null || el === document.activeElement,
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        panel.focus();
-        return;
-      }
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      trapTab(panelRef.current, event);
     },
     [dismissible, onClose],
   );
