@@ -57,10 +57,34 @@ function renderPage(): ReturnType<typeof vi.fn> {
     if (url.includes('/api/v1/libraries/lib1/trash')) {
       return json({ files: [] });
     }
+    if (url.includes('/files/f1/note') || url.includes('/files/f2/note')) {
+      const fileID = url.includes('/files/f1/note') ? 'f1' : 'f2';
+      return json({ note: { file_id: fileID, body: '', updated_at: '' } });
+    }
     if (url.includes('/search?q=')) {
       const q = url.split('q=')[1]?.split('&')[0] ?? '';
       return json({
         files: q === 'sunset' ? [files.files[0]] : [],
+      });
+    }
+    if (url.includes('/favorites')) {
+      return json({ files: [] });
+    }
+    if (url.includes('/files/f1/metadata')) {
+      return json({
+        metadata: {
+          file_id: 'f1',
+          media_type: 'photo',
+          mime_type: 'image/png',
+          width: 4032,
+          height: 3024,
+          camera_make: 'Apple',
+          camera_model: 'iPhone 15',
+          taken_at: '2026-06-01T12:00:00Z',
+          latitude: 51.5074,
+          longitude: -0.1278,
+          has_thumbnail: true,
+        },
       });
     }
     if (url.includes('/folders')) {
@@ -174,6 +198,97 @@ describe('BrowserPage', () => {
     expect(video).not.toBeNull();
     expect(video).toHaveAttribute('controls');
     expect(video).toHaveAttribute('src', '/api/v1/libraries/lib1/files/f2/download');
+  });
+
+  it('edits a Markdown note under the image and autosaves it', async () => {
+    const fetchMock = renderPage();
+    render(
+      <MemoryRouter>
+        <BrowserPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('IMG_0001.png')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+
+    const viewer = await screen.findByTestId('viewer');
+    const note = within(viewer).getByTestId('viewer-note');
+
+    // The note section sits below the image and starts in write mode.
+    const textarea = within(note).getByLabelText('Markdown note');
+    expect(textarea).toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: '# Beach day\n\nSunset over the **dunes**.' } });
+
+    // Preview renders the Markdown under the image.
+    fireEvent.click(within(note).getByRole('button', { name: 'Preview' }));
+    expect(within(note).getByRole('heading', { name: 'Beach day' })).toBeInTheDocument();
+    expect(within(note).getByText('dunes')).toBeInTheDocument();
+
+    // The debounced autosave PUTs the note to the server.
+    await waitFor(
+      () => {
+        const putCall = fetchMock.mock.calls.find(
+          ([input, init]) =>
+            String(input).includes('/files/f1/note') && (init as RequestInit).method === 'PUT',
+        );
+        expect(putCall).toBeTruthy();
+        const init = putCall?.[1] as RequestInit;
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          body: '# Beach day\n\nSunset over the **dunes**.',
+        });
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  it('toggles the favorite state and shows extracted metadata details', async () => {
+    const fetchMock = renderPage();
+    render(
+      <MemoryRouter>
+        <BrowserPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('IMG_0001.png')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+
+    const viewer = await screen.findByTestId('viewer');
+    const dialog = within(viewer).getByRole('dialog');
+
+    // Details panel renders extracted metadata (dimensions, camera, map link).
+    await within(dialog).findByTestId('viewer-details');
+    expect(within(dialog).getByText('4032 × 3024px')).toBeInTheDocument();
+    expect(within(dialog).getByText('Apple iPhone 15')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: '51.50740, -0.12780' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('openstreetmap.org'),
+    );
+    expect(within(dialog).getByText('Camera')).toBeInTheDocument();
+
+    // Favorites start empty, so the button reads "☆ Favorite".
+    const favorite = within(dialog).getByRole('button', { name: '☆ Favorite' });
+    expect(favorite).toBeEnabled();
+
+    fireEvent.click(favorite);
+    await within(dialog).findByRole('button', { name: '★ Favorited' });
+    const postCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        String(input).includes('/files/f1/favorite') && (init as RequestInit).method === 'POST',
+    );
+    expect(postCall).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '★ Favorited' }));
+    await within(dialog).findByRole('button', { name: '☆ Favorite' });
+    const deleteCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        String(input).includes('/files/f1/favorite') && (init as RequestInit).method === 'DELETE',
+    );
+    expect(deleteCall).toBeTruthy();
   });
 
   it('uploads a file as multipart to the current folder', async () => {
