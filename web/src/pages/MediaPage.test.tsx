@@ -185,9 +185,14 @@ describe('MediaPage', () => {
       expect(called(fetchMock, 'GET', 'from=2026-01-01')).toBe(true);
     });
 
-    // Clearing puts the filters back to their defaults.
+    // Clearing puts the filters back to their defaults, and the listing reloads
+    // without them.
     fireEvent.click(within(filters).getByRole('button', { name: 'Clear filters' }));
     expect(within(filters).getByLabelText('Min size (MB)')).toHaveValue(null);
+    await waitFor(() => {
+      expect(called(fetchMock, 'GET', 'min_size=2')).toBe(true);
+      expect(screen.getByText('IMG_0001.png')).toBeInTheDocument();
+    });
   });
 
   it('appends the next page of results on "Load more"', async () => {
