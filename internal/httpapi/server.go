@@ -147,11 +147,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/users", s.withAuth(allowAdmin, s.handleCreateUser))
 	mux.Handle("POST /api/v1/users/{id}/sessions/revoke", s.withAuth(allowAdmin, s.handleRevokeUserSessions))
 
-	// Library surface (admin). Server-level management is gated like user
-	// management; resource-based authorization governs access to content
-	// within a library.
+	// Library surface. Listing is open to any session and filtered by the
+	// caller's read capability, so a member can find the libraries it was
+	// granted; registering, probing, refreshing, and unregistering are
+	// server-level administration and stay admin-only. Resource-based
+	// authorization governs access to content within a library.
 	if s.libraries != nil {
-		mux.Handle("GET /api/v1/libraries", s.withAuth(allowAdmin, s.handleListLibraries))
+		mux.Handle("GET /api/v1/libraries", s.withAuth(allowAny, s.handleListLibraries))
 		mux.Handle("POST /api/v1/libraries", s.withAuth(allowAdmin, s.handleCreateLibrary))
 		mux.Handle("POST /api/v1/libraries/probe", s.withAuth(allowAdmin, s.handleProbeLibrary))
 		mux.Handle("GET /api/v1/libraries/{id}", s.withAuth(allowAny, s.handleGetLibrary))
