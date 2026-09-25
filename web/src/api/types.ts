@@ -5,6 +5,30 @@ export interface HealthResponse {
   database: 'ok' | 'error';
 }
 
+export type UserRole = 'admin' | 'user';
+
+export interface User {
+  id: string;
+  username: string;
+  role: UserRole;
+  created_at: string;
+}
+
+export interface UserEnvelope {
+  user: User;
+}
+
+export interface UserListResponse {
+  users: User[];
+}
+
+/** GET /auth/status — public bootstrap + authentication state. */
+export interface AuthStatusResponse {
+  bootstrap_required: boolean;
+  authenticated: boolean;
+  user?: User;
+}
+
 export interface VersionResponse {
   version: string;
   commit: string;

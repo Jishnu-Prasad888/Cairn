@@ -48,12 +48,13 @@
   gap: 2px;
 }
 
+/* Google Photos sidebar entries are full pills. */
 .app-nav-item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
   color: var(--text-primary);
   text-decoration: none;
   font-weight: 500;
@@ -92,6 +93,104 @@
   stroke-linejoin: round;
 }
 
+/* ---- Account block (sidebar footer) ---- */
+.app-account {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.app-account-user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.app-account-user:hover {
+  background: var(--border-subtle);
+}
+
+.app-account-initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.app-account-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.app-account-name {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-account-role {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.app-signout {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-signout:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.app-signout-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.app-signout-icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ---- Main column: top bar + content ---- */
 .app-main {
   margin-left: var(--sidebar-width);
@@ -123,7 +222,9 @@
   padding: var(--space-2) var(--space-4);
   background: var(--border-subtle);
   border-radius: var(--radius-pill);
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .app-search:focus-within {
@@ -172,6 +273,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.app-avatar:hover {
+  background: var(--accent);
 }
 
 .app-avatar svg {
@@ -220,6 +327,18 @@
   }
 
   .app-nav-label {
+    display: none;
+  }
+
+  /* Collapsed rail: avatar and sign-out become icon-only buttons. */
+  .app-account-user,
+  .app-signout {
+    justify-content: center;
+    padding: var(--space-2);
+  }
+
+  .app-account-meta,
+  .app-signout-label {
     display: none;
   }
 }

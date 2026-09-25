@@ -1,7 +1,5 @@
 .people-page {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-7);
+  padding: var(--space-3) var(--space-3) var(--space-7);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -26,7 +24,9 @@
   color: var(--text-primary);
 }
 
-.people-page button:not(.link-button):not(.danger-button) {
+/* The circular person cover is a button too — exclude it so the filled
+   button style (and its padding) never leaks onto the avatar. */
+.people-page button:not(.link-button):not(.danger-button):not(.person-cover) {
   padding: var(--space-2) var(--space-4);
   background: var(--primary);
   border: 1px solid transparent;
@@ -34,7 +34,7 @@
   cursor: pointer;
 }
 
-.people-page button:hover {
+.people-page button:not(.link-button):not(.danger-button):not(.person-cover):hover {
   background: var(--primary-hover);
 }
 
@@ -93,30 +93,39 @@
   font-size: 14px;
 }
 
+/* Google Photos–style people view: circular face avatars with the name
+   centered underneath and no card chrome. */
 .people-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: var(--space-4) var(--space-3);
+  padding-top: var(--space-2);
 }
 
 .person-card {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
-  padding: var(--space-3);
+  text-align: center;
 }
 
-.person-cover {
-  height: 150px;
+/* Scoped under .people-page so the avatar's shape/padding/background win
+   over the page-level button rules above. */
+.people-page .person-cover {
+  width: 100%;
+  aspect-ratio: 1;
   padding: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  background: var(--border-subtle);
+  border: none;
+  border-radius: 50%;
   overflow: hidden;
   cursor: pointer;
+  transition: box-shadow 120ms ease;
+}
+
+.people-page .person-cover:hover {
+  box-shadow: var(--shadow-2);
 }
 
 .person-cover img {
@@ -140,7 +149,8 @@
 .person-meta {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  gap: 2px;
 }
 
 .person-count {
@@ -151,12 +161,13 @@
 .person-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  justify-content: center;
+  gap: var(--space-1);
 }
 
 .person-actions button {
   font-size: 13px;
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2);
 }
 
 .person-detail {
@@ -174,7 +185,7 @@
 
 .face-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: var(--space-3);
 }
 
@@ -182,15 +193,18 @@
   margin: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
 }
 
+/* Faces are circular, matching the people avatars above. */
 .face-tile img {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  border-radius: 50%;
+  border: none;
+  background: var(--border-subtle);
 }
 
 .face-tile figcaption {

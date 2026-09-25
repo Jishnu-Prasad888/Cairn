@@ -10,6 +10,8 @@ fails. All pages share the same design tokens, the `page-header` /
 
 | Route        | Page                                      | Source                               |
 | ------------ | ----------------------------------------- | ------------------------------------ |
+| `/setup`    | First run: create the first (admin) account | `web/src/pages/SetupPage.tsx`       |
+| `/login`    | Sign in                                   | `web/src/pages/LoginPage.tsx`        |
 | `/`          | Home — section links                      | `web/src/pages/HomePage.tsx`         |
 | `/memories`  | Search and autosave notes                 | `web/src/pages/MemoriesPage.tsx`     |
 | `/people`    | Face people: list, rename, merge          | `web/src/pages/PeoplePage.tsx`       |
@@ -17,6 +19,56 @@ fails. All pages share the same design tokens, the `page-header` /
 | `/browse`    | File browser: folders, grid/list, upload, download, photo/video viewer, trash, rename/move/copy | `web/src/pages/BrowserPage.tsx` |
 | `/albums`    | Albums: create, delete, add/remove files  | `web/src/pages/AlbumsPage.tsx`       |
 | `/tags`      | Tags: create, delete, browse by tag       | `web/src/pages/TagsPage.tsx`         |
+| `/settings`  | Account, appearance, accounts (admin)    | `web/src/pages/SettingsPage.tsx`     |
+| `/403`       | Access denied                             | `web/src/pages/ForbiddenPage.tsx`    |
+
+## Authentication and sessions
+
+The web UI is session-based: the browser holds only the opaque `cairn_session`
+cookie and every request relies on it. `AuthProvider` (`web/src/auth/`) reads
+the public `GET /auth/status` on load, so the app can decide between the app
+itself, the sign-in page, and first-run setup before rendering anything.
+
+- **First run (`/setup`, also reachable as `/signup`)** — Cairn has no accounts
+  until somebody creates one, and the first account is always the
+  administrator. The page posts to `/auth/bootstrap` and says so plainly, since
+  this is the one time the account being created gets full rights (libraries,
+  other accounts, backups). It validates the same rules the server enforces —
+  `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$` for the username, 8–1024 bytes for the
+  password — and asks for the password twice. The form is only offered while
+  the server reports `bootstrap_required`; once an account exists the same page
+  says that an administrator creates accounts and offers a link back to
+  `/login`, so it can never be used to add accounts behind the administrator's
+  back.
+- **Sign in (`/login`)** — username/password form posting to `/auth/login`, and
+  a failed attempt shows the server's error text verbatim. A **Create an
+  account** button sits under the form on every visit, linking to `/setup`, so
+  the route is always discoverable. The line above it is first-run copy ("First
+  time on this server?") while `bootstrap_required` is set, and the normal
+  "Need an account?" afterwards. An anonymous visitor lands here by default; a
+  visitor to a server with no accounts who opens an app URL is sent straight to
+  `/setup` by the gate.
+- **Gate (`RequireAuth`)** — every other route sits behind the gate: a splash
+  while the session is being resolved, then either the app or a redirect to
+  `/setup`/`/login` that remembers the requested path.
+- **Sign out** — available from the sidebar footer and from Settings. It posts
+  to `/auth/logout` and drops the local principal even if the request fails.
+- **401 vs 403** — the API client broadcasts both failures on `window`
+  (`cairn:unauthorized`, `cairn:forbidden`) so no page has to special-case them.
+  A 401 re-reads the auth state, which returns the visitor to `/login`; a 403
+  routes to `/403`, carrying the server's own reason. The access-denied page
+  renders on its own (no sidebar) because several endpoints — notably
+  `GET /libraries` — are administrator-only, so a member account legitimately
+  meets 403 while browsing and a rail of dead links would only confuse.
+- **Settings (`/settings`)** — account summary and sign-out, appearance
+  (system/light/dark, persisted in `localStorage` and applied to
+  `<html data-theme>` using the palettes already defined in `tokens.css`), and
+  for administrators the account list with create-user and session-revocation
+  controls from `/users`.
+
+The gate, client, and pages are covered by `RequireAuth.test.tsx`,
+`SetupPage.test.tsx`, `LoginPage.test.tsx`, `SettingsPage.test.tsx`,
+`ForbiddenPage.test.tsx`, and `App.test.tsx` (routing).
 
 ## File browser (`/browse`)
 
@@ -34,10 +86,10 @@ files from the web UI.
 - **Upload** — multipart `POST .../files/upload` with the file and its computed
   destination path (current folder + filename). Shows an "Uploading…" state and
   reloads the listing on success.
-- **Photo / video viewer** — modal opened by clicking a file; the modal occupies
-  60% of the screen width (near-full-width below 640px). Photos use the
-  thumbnail endpoint, videos stream from the `{download}` endpoint with inline
-  controls. Escape or backdrop click closes.
+- **Photo / video viewer** — modal opened by clicking a file; it is centered and
+  capped at 1080px (the viewport width minus the page gutters on small screens).
+  Photos use the thumbnail endpoint, videos stream from the `{download}` endpoint
+  with inline controls. Escape or backdrop click closes.
 - **Markdown note** — a note editor sits directly under the image/video with
   Write/Preview tabs, rendered Markdown, and debounced autosave (via the
   per-file `note` endpoints). The note persists server-side per library.

@@ -20,6 +20,17 @@ interface ApiErrorEnvelope {
   error: ApiErrorBody;
 }
 
+/** Name of the window event the API layer fires when the server rejects a
+ * request with 403. The app shell listens for it and routes to the
+ * access-denied page, so permission failures anywhere in the UI surface
+ * consistently without every page handling the status itself. */
+export const FORBIDDEN_EVENT = 'cairn:forbidden';
+
+/** Name of the window event fired when the server rejects a request with 401,
+ * which for Cairn means the session is missing or has expired. The app shell
+ * re-reads the auth state and returns the visitor to the sign-in page. */
+export const UNAUTHORIZED_EVENT = 'cairn:unauthorized';
+
 /** Thrown for any non-2xx API response. */
 export class ApiError extends Error {
   readonly status: number;
@@ -54,6 +65,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 
   if (!response.ok) {
     const body = await readErrorEnvelope(response);
+    notifyAuthFailure(response.status, body);
     throw new ApiError(body, response.status);
   }
 
@@ -61,6 +73,21 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+/**
+ * Broadcast the auth/permission failures the shell reacts to globally. Kept
+ * out of the React tree because the API client is deliberately framework-free;
+ * every request (JSON or upload) funnels through here so a 401 or 403 anywhere
+ * has the same effect on the session.
+ */
+function notifyAuthFailure(status: number, body: ApiErrorBody) {
+  if (typeof window === 'undefined') return;
+  const name = status === 403 ? FORBIDDEN_EVENT : status === 401 ? UNAUTHORIZED_EVENT : null;
+  if (!name) return;
+  window.dispatchEvent(
+    new CustomEvent(name, { detail: { code: body.code, message: body.message } }),
+  );
 }
 
 async function readErrorEnvelope(response: Response): Promise<ApiErrorBody> {
@@ -109,6 +136,7 @@ export async function apiUpload<T>(endpoint: string, file: File, path?: string):
 
   if (!response.ok) {
     const body = await readErrorEnvelope(response);
+    notifyAuthFailure(response.status, body);
     throw new ApiError(body, response.status);
   }
   if (response.status === 204) {
