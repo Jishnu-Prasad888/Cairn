@@ -1,0 +1,117 @@
+/* Shared page states: headers, badges, empty/error/offline blocks. */
+
+.page-header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.page-header-subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.status-badge-online {
+  color: #3f5a35;
+  background: color-mix(in srgb, var(--green) 26%, var(--surface));
+}
+
+.status-badge-offline {
+  color: #7c3a34;
+  background: color-mix(in srgb, var(--danger) 22%, var(--surface));
+}
+
+:root[data-theme='dark'] .status-badge-online {
+  color: var(--green);
+}
+
+:root[data-theme='dark'] .status-badge-offline {
+  color: var(--danger);
+}
+
+.type-badge {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  background: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
+  border-radius: var(--radius-md);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 460px;
+  margin: var(--space-7) auto;
+  padding: var(--space-6) var(--space-5);
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.empty-state h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.empty-state-body {
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.empty-state-body p {
+  margin: 0 0 var(--space-2);
+}
+
+.empty-state-body p:last-child {
+  margin-bottom: 0;
+}
+
+.offline-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--border));
+  border-radius: var(--radius-md);
+}
+
+.offline-notice code {
+  padding: 1px 5px;
+  font-size: 0.82em;
+  background: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+}

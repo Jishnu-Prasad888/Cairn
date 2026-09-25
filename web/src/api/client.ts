@@ -117,7 +117,26 @@ export const apiPatch = <T>(path: string, body?: unknown) =>
   apiRequest<T>(path, withJsonBody('PATCH', body));
 export const apiPut = <T>(path: string, body?: unknown) =>
   apiRequest<T>(path, withJsonBody('PUT', body));
-export const apiDelete = <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' });
+
+/**
+ * Some deletes need a body. The file soft-delete is one: it acts on the
+ * `path` in the payload rather than the id in the URL (the id path segment is
+ * still supplied for symmetry with the rest of the file routes), because the
+ * server resolves and re-authorizes the resource from the path.
+ */
+export const apiDelete = <T>(path: string, body?: unknown) =>
+  apiRequest<T>(path, withJsonBody('DELETE', body));
+
+/** Build a query string from defined values, skipping empties. */
+export function query(params: Record<string, string | number | boolean | undefined | null>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+    search.set(key, String(value));
+  }
+  const encoded = search.toString();
+  return encoded ? `?${encoded}` : '';
+}
 
 /** Multipart upload. The browser sets the multipart boundary, so no
  * Content-Type header is sent here. `path` is the destination relative path
