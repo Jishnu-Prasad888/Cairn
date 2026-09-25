@@ -13,7 +13,7 @@
  * is rendered as an explanation rather than an error.
  */
 
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
 import { ApiError } from '../api/client';
@@ -43,11 +43,36 @@ import './MLPage.css';
 /** A pass is background work: the response says it started, nothing more. */
 type JobState = { message: string; error: string | null } | null;
 
-function unavailable(e: unknown): boolean {
-  return e instanceof ApiError && (e.status === 404 || e.status === 503);
+/**
+ * A 404 means the build has no such route; a 503 means the provider is
+ * switched off. Neither is a failure to report, so it is turned into *data*
+ * here rather than thrown — the resource hook only keeps the message, so a
+ * check that needs the status has to happen at the fetch boundary.
+ */
+type Section<T> = { available: true; status: T } | { available: false };
+
+function asSection<T>(load: (libraryId: string) => Promise<T>) {
+  return async (libraryId: string): Promise<Section<T>> => {
+    try {
+      return { available: true, status: await load(libraryId) };
+    } catch (e: unknown) {
+      if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
+        return { available: false };
+      }
+      throw e;
+    }
+  };
 }
 
-function StatTile({ label, value, hint }: { label: string; value: string; hint?: string | undefined }) {
+function StatTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string | undefined;
+}) {
   return (
     <div className="ml-stat">
       <span className="ml-stat-value">{value}</span>
@@ -65,15 +90,17 @@ export default function MLPage() {
   const [job, setJob] = useState<JobState>(null);
   const [purging, setPurging] = useState<'similarity' | 'faces' | null>(null);
 
-  const status = useLibraryResource<MLStatus>(
-    useCallback((libraryId: string) => getMLStatus(libraryId), []),
-  );
-  const faces = useLibraryResource<FaceStatus>(
-    useCallback((libraryId: string) => getFaceStatus(libraryId), []),
-  );
+  // The loaders are inline: `useLibraryResource` reads them through a ref, so a
+  // fresh arrow on every render is free and this stays lint-clean.
+  const status = useLibraryResource<Section<MLStatus>>((id) => asSection(getMLStatus)(id));
+  const faces = useLibraryResource<Section<FaceStatus>>((id) => asSection(getFaceStatus)(id));
 
-  const facesAvailable = faces.error === null || !unavailable(faces.error);
-  const similarityAvailable = status.error === null || !unavailable(status.error);
+  // `null` means "still loading", which is available enough not to flash the
+  // "not available" explanation before the answer arrives.
+  const similarityAvailable = status.data === null || status.data.available;
+  const facesAvailable = faces.data === null || faces.data.available;
+  const ml = status.data?.available ? status.data.status : null;
+  const face = faces.data?.available ? faces.data.status : null;
 
   const run = (key: string, action: (libraryId: string) => Promise<unknown>, message: string) => {
     if (gate.kind !== 'ready') return;
@@ -128,8 +155,6 @@ export default function MLPage() {
   }
 
   const offline = gate.library.status === 'offline';
-  const ml = status.data;
-  const face = faces.data;
 
   return (
     <main className="ml-page">
@@ -247,11 +272,7 @@ export default function MLPage() {
                 <StatTile
                   label="Unassigned"
                   value={String(face.unassigned)}
-                  hint={
-                    face.unassigned
-                      ? 'Name these on the People page'
-                      : 'Every face has a name'
-                  }
+                  hint={face.unassigned ? 'Name these on the People page' : 'Every face has a name'}
                 />
               </div>
             )}
