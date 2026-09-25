@@ -16,11 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 
 import { ApiError } from '../api/client';
-import {
-  downloadPublicShareFile,
-  getPublicShare,
-  listPublicShareFiles,
-} from '../api/queries';
+import { downloadPublicShareFile, getPublicShare, listPublicShareFiles } from '../api/queries';
 import type { FileSummary, PublicShareInfo } from '../api/types';
 import { formatBytes } from '../api/types';
 import { mediaGlyph } from '../components/media';
@@ -59,7 +55,8 @@ export default function PublicSharePage() {
     let cancelled = false;
     getPublicShare(token, unlocked ? password : undefined)
       .then((resp) => {
-        if (!cancelled) setSettledShare({ key: shareKey, value: { kind: 'unlocked', share: resp.share } });
+        if (!cancelled)
+          setSettledShare({ key: shareKey, value: { kind: 'unlocked', share: resp.share } });
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -93,10 +90,14 @@ export default function PublicSharePage() {
 
   // The first page is derived from the fetch; "load more" appends to `extra`.
   const filesKey = state.kind === 'unlocked' ? `${shareKey}|${folder}` : null;
-  const [settledFiles, setSettledFiles] = useState<{
-    key: string;
-    value: { files: FileSummary[]; next?: string | undefined };
-  } | { key: string; error: string } | null>(null);
+  const [settledFiles, setSettledFiles] = useState<
+    | {
+        key: string;
+        value: { files: FileSummary[]; next?: string | undefined };
+      }
+    | { key: string; error: string }
+    | null
+  >(null);
   const [extra, setExtra] = useState<FileSummary[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -107,7 +108,10 @@ export default function PublicSharePage() {
     listPublicShareFiles(token, unlocked ? password : undefined, { folder, limit: 200 })
       .then((page) => {
         if (cancelled) return;
-        setSettledFiles({ key: filesKey, value: { files: page.files ?? [], next: page.next_cursor } });
+        setSettledFiles({
+          key: filesKey,
+          value: { files: page.files ?? [], next: page.next_cursor },
+        });
         setExtra([]);
         setCursor(page.next_cursor);
       })
@@ -190,19 +194,15 @@ export default function PublicSharePage() {
                   autoComplete="off"
                   data-testid="share-password-input"
                 />
-                <button
-                  type="submit"
-                  className="button primary-button"
-                  data-testid="share-unlock"
-                >
+                <button type="submit" className="button primary-button" data-testid="share-unlock">
                   Open
                 </button>
               </div>
             </form>
           )}
           <p className="muted share-gate-note">
-            Shares are capabilities, not accounts. If this link should not be working, ask the person
-            who shared it to make a new one — a lost token cannot be recovered.
+            Shares are capabilities, not accounts. If this link should not be working, ask the
+            person who shared it to make a new one — a lost token cannot be recovered.
           </p>
         </section>
       )}
@@ -237,30 +237,34 @@ export default function PublicSharePage() {
             </EmptyState>
           )}
 
-          <ul className="share-file-list" data-testid="share-file-list">
-            {files.map((file) => (
-              <li key={file.id} className="share-file">
-                <span className="share-file-glyph" aria-hidden="true">
-                  {mediaGlyph(file)}
-                </span>
-                <div className="share-file-meta">
-                  <span className="share-file-name">{file.name}</span>
-                  <span className="muted">
-                    {file.media_type} · {formatBytes(file.size_bytes)}
+          {/* Only rendered once there is something in it: an empty list is
+              announced as a section with nothing in it. */}
+          {files.length > 0 && (
+            <ul className="share-file-list" data-testid="share-file-list">
+              {files.map((file) => (
+                <li key={file.id} className="share-file">
+                  <span className="share-file-glyph" aria-hidden="true">
+                    {mediaGlyph(file)}
                   </span>
-                </div>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => void download(file)}
-                  disabled={downloading === file.id}
-                  data-testid={`download-${file.id}`}
-                >
-                  {downloading === file.id ? 'Downloading…' : 'Download'}
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div className="share-file-meta">
+                    <span className="share-file-name">{file.name}</span>
+                    <span className="muted">
+                      {file.media_type} · {formatBytes(file.size_bytes)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => void download(file)}
+                    disabled={downloading === file.id}
+                    data-testid={`download-${file.id}`}
+                  >
+                    {downloading === file.id ? 'Downloading…' : 'Download'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {cursor && (
             <div className="share-pagination">
