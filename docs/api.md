@@ -206,6 +206,9 @@ authenticated user, `admin` = admin role, `cap` = capability-checked
 | POST   | `/libraries/{libraryID}/files/{fileID}/restore`             | Restore from trash               | cap  |
 | DELETE | `/libraries/{libraryID}/files/{fileID}/permanent`           | Permanent delete                 | cap  |
 | GET    | `/libraries/{libraryID}/files/{fileID}/metadata`            | EXIF/GPS/dimensions metadata     | cap  |
+| GET    | `/libraries/{libraryID}/files/{fileID}/note`                | Markdown note (caption)          | cap  |
+| PUT    | `/libraries/{libraryID}/files/{fileID}/note`                | Set/replace the note (256 KiB)   | cap  |
+| DELETE | `/libraries/{libraryID}/files/{fileID}/note`                | Clear the note (204)             | cap  |
 | GET    | `/libraries/{libraryID}/files/{fileID}/thumbnail`           | JPEG thumbnail                   | cap  |
 | GET    | `/libraries/{libraryID}/folders`                            | Child folders                    | cap  |
 | GET    | `/libraries/{libraryID}/trash`                              | Trashed files                    | cap  |
