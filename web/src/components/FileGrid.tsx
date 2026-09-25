@@ -17,8 +17,10 @@ interface FileGridProps {
 }
 
 /**
- * Google Photos–style media wall: a masonry of tiles that keep their natural
- * aspect ratio, showing a caption and a hover-visible selection circle.
+ * A uniform tile wall: every tile is a square, so a portrait photo is
+ * centre-cropped rather than making its row twice as tall as the one above it.
+ * A caption and a selection circle fade in on hover, or stay visible for the
+ * whole grid while a selection is in progress.
  */
 export function FileGrid({
   libraryId,

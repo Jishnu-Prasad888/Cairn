@@ -566,6 +566,93 @@ describe('MediaPage', () => {
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
+  it('moves a file into a folder picked from the dropdown', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'POST' && url.includes('/api/v1/libraries/lib1/files/f1/move')
+          ? json({ file: photo })
+          : undefined,
+      // The picker walks the tree a level at a time: the root, then the
+      // children of the one folder it found.
+      (url) =>
+        url.includes('/api/v1/libraries/lib1/folders?parent=2024')
+          ? json({ folders: [] })
+          : undefined,
+    ]);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+    fireEvent.click(
+      within(within(viewer).getByRole('dialog')).getByRole('button', { name: 'Move' }),
+    );
+
+    const dialog = await screen.findByTestId('move-dialog');
+    const menu = await within(dialog).findByLabelText('Pick an existing folder');
+    // The indexed folder is offered, so nobody has to remember its path.
+    expect(menu).toHaveValue('');
+
+    fireEvent.change(menu, { target: { value: '2024' } });
+    // The menu and the text field are one value, so picking from the menu has
+    // to update the field the request is built from.
+    const field = within(dialog).getByLabelText('Destination folder');
+    expect(field).toHaveValue('2024');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/files/f1/move')).toBe(true);
+    });
+    expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/files/f1/move')).toMatchObject({
+      new_path: '2024/IMG_0001.png',
+    });
+  });
+
+  it('still accepts a destination folder that the index has never seen', async () => {
+    // The browser asks for folders once on load to draw its own folder grid;
+    // the picker asks again when the move dialog opens. Fail everything after
+    // that first call, which is exactly the library that cannot list folders.
+    let folderCalls = 0;
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'POST' && url.includes('/api/v1/libraries/lib1/files/f1/move')
+          ? json({ file: photo })
+          : undefined,
+      (url) =>
+        url.includes('/api/v1/libraries/lib1/folders')
+          ? folderCalls++ === 0
+            ? json(folders)
+            : apiError(500, 'INTERNAL', 'folder listing unavailable')
+          : undefined,
+    ]);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+    fireEvent.click(
+      within(within(viewer).getByRole('dialog')).getByRole('button', { name: 'Move' }),
+    );
+
+    const dialog = await screen.findByTestId('move-dialog');
+    // The menu is hidden rather than shown offering only the root, and the
+    // field is still there to type into.
+    await waitFor(() => {
+      expect(within(dialog).queryByLabelText('Pick an existing folder')).not.toBeInTheDocument();
+    });
+    expect(within(dialog).getByText(/type the path/)).toBeInTheDocument();
+
+    const field = within(dialog).getByLabelText('Destination folder');
+    fireEvent.change(field, { target: { value: 'brand/new/folder' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/files/f1/move')).toBe(true);
+    });
+    expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/files/f1/move')).toMatchObject({
+      new_path: 'brand/new/folder/IMG_0001.png',
+    });
+  });
+
   it('trashes a file from the viewer and closes the viewer', async () => {
     const fetchMock = setup([
       (url, init) =>

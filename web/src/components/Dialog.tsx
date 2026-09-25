@@ -9,7 +9,7 @@
  * closes on an intentional click.
  */
 
-import { useCallback, useEffect, useId, useRef } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { FOCUSABLE, trapTab } from '../lib/focusTrap';
@@ -186,6 +186,14 @@ export interface PromptDialogProps {
   confirmLabel?: string | undefined;
   /** Renders a textarea instead of a single-line input. */
   multiline?: boolean | undefined;
+  /**
+   * Replaces the plain field with richer controls that edit the same value —
+   * the folder dropdown in the move and copy dialogs, which offers the
+   * library's real folders and writes back through `setValue`. Without this
+   * the dialog would show a menu and a text box that disagree, because only
+   * one of them would know the value.
+   */
+  control?: ((state: PromptControl) => ReactNode) | undefined;
   onConfirm: (value: string) => void;
   onCancel: () => void;
   busy?: boolean | undefined;
@@ -193,9 +201,29 @@ export interface PromptDialogProps {
   testId?: string | undefined;
 }
 
-/** A single-field dialog replacing `window.prompt`. */
-export function PromptDialog({
-  open,
+/** The live value of a {@link PromptDialog}'s field, for `control`. */
+export interface PromptControl {
+  value: string;
+  setValue: (next: string) => void;
+}
+
+/**
+ * A single-field dialog replacing `window.prompt`.
+ *
+ * The stateful form lives in a child component so that it is unmounted along
+ * with the dialog: callers pass `initialValue` derived from whatever they are
+ * acting on, and reopening for a different file has to reset the field instead
+ * of showing whatever was last typed.
+ */
+export function PromptDialog({ open, initialValue = '', ...rest }: PromptDialogProps) {
+  if (!open) return null;
+  return <PromptForm {...rest} initialValue={initialValue} />;
+}
+
+/** {@link PromptDialogProps} without the `open` flag the wrapper consumes. */
+type PromptFormProps = Omit<PromptDialogProps, 'open'>;
+
+function PromptForm({
   title,
   label,
   initialValue = '',
@@ -203,15 +231,18 @@ export function PromptDialog({
   hint,
   confirmLabel = 'Save',
   multiline,
+  control,
   onConfirm,
   onCancel,
   busy,
   error,
   testId,
-}: PromptDialogProps) {
+}: PromptFormProps) {
+  const [value, setValue] = useState(initialValue);
+
   return (
     <Dialog
-      open={open}
+      open
       title={title}
       onClose={onCancel}
       dismissible={!busy}
@@ -237,36 +268,41 @@ export function PromptDialog({
         className="dialog-form"
         onSubmit={(event) => {
           event.preventDefault();
-          const field = event.currentTarget.elements.namedItem('value') as
-            HTMLInputElement | HTMLTextAreaElement | null;
-          if (!field) return;
-          const value = field.value.trim();
-          if (value) onConfirm(value);
+          const next = value.trim();
+          if (next) onConfirm(next);
         }}
       >
-        <label className="dialog-label" htmlFor={`${promptFormId}-field`}>
-          {label}
-        </label>
-        {multiline ? (
-          <textarea
-            id={`${promptFormId}-field`}
-            name="value"
-            className="dialog-input"
-            rows={4}
-            defaultValue={initialValue}
-            placeholder={placeholder}
-            disabled={busy}
-          />
+        {control ? (
+          control({ value, setValue })
         ) : (
-          <input
-            id={`${promptFormId}-field`}
-            name="value"
-            type="text"
-            className="dialog-input"
-            defaultValue={initialValue}
-            placeholder={placeholder}
-            disabled={busy}
-          />
+          <>
+            <label className="dialog-label" htmlFor={`${promptFormId}-field`}>
+              {label}
+            </label>
+            {multiline ? (
+              <textarea
+                id={`${promptFormId}-field`}
+                name="value"
+                className="dialog-input"
+                rows={4}
+                value={value}
+                placeholder={placeholder}
+                disabled={busy}
+                onChange={(e) => setValue(e.target.value)}
+              />
+            ) : (
+              <input
+                id={`${promptFormId}-field`}
+                name="value"
+                type="text"
+                className="dialog-input"
+                value={value}
+                placeholder={placeholder}
+                disabled={busy}
+                onChange={(e) => setValue(e.target.value)}
+              />
+            )}
+          </>
         )}
         {hint && <p className="dialog-hint">{hint}</p>}
         {error && (

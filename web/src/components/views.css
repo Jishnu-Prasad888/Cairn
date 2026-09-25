@@ -31,22 +31,25 @@
   color: var(--danger);
 }
 
-/* File grid — Google Photos–style masonry wall. Tiles keep their natural
-   aspect ratio, flow into dense responsive columns with hairline gaps and
-   square corners, and reveal a caption plus a selection circle on hover
-   (or permanently in selection mode). */
+/* File grid — a uniform tile wall.
+   Every tile is the same size, which is what makes a wall scannable: a
+   masonry keeps each photo's aspect ratio, so a portrait is twice the height
+   of a landscape and the eye has to re-find the next row every time. Squares
+   are what people expect from a photo grid, and `cover` means a portrait is
+   centre-cropped rather than letterboxed. The caption and selection circle
+   are revealed on hover, or permanently in selection mode. */
 .file-grid {
   list-style: none;
   margin: 0;
   padding: 0;
-  column-width: 200px;
-  column-gap: var(--space-1);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-1);
 }
 
 .file-card {
   position: relative;
-  break-inside: avoid;
-  margin-bottom: var(--space-1);
+  margin: 0;
 }
 
 .file-card-main {
@@ -66,7 +69,8 @@
 .file-card-thumb {
   display: block;
   width: 100%;
-  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
   border-radius: 0;
   background: var(--border-subtle);
   transition: filter 140ms ease;
@@ -81,7 +85,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 1 / 1;
   font-size: 34px;
   background: var(--accent-soft);
 }
