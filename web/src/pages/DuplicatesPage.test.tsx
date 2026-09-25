@@ -24,9 +24,7 @@ const duplicatesResponse = { groups: [group], next_cursor: '', total: 1 };
 
 function setup(overrides: { duplicates?: unknown } = {}) {
   const payload = overrides.duplicates ?? duplicatesResponse;
-  const fn = mockApi([
-    (url) => (url.includes('/files/duplicates') ? json(payload) : undefined),
-  ]);
+  const fn = mockApi([(url) => (url.includes('/files/duplicates') ? json(payload) : undefined)]);
   renderPage(<DuplicatesPage />);
   return fn;
 }
@@ -59,7 +57,11 @@ describe('DuplicatesPage', () => {
     await screen.findByText('IMG_0001.png');
     // The first copy is the one Cairn suggests keeping, so it is not listed as
     // a removal candidate.
-    expect(screen.getByText('Removable copies — pick one to open it, then delete or move it in the viewer.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Removable copies — pick one to open it, then delete or move it in the viewer.',
+      ),
+    ).toBeInTheDocument();
     const keep = document.querySelector('.dup-members:not(.dup-members-removable)') as HTMLElement;
     expect(within(keep).getByText('IMG_0001.png')).toBeInTheDocument();
     expect(within(keep).queryByText('IMG_0001_copy.png')).not.toBeInTheDocument();
@@ -85,14 +87,16 @@ describe('DuplicatesPage', () => {
     const fetchMock = setup();
 
     await screen.findByText('IMG_0001.png');
-    const before = fetchMock.mock.calls.filter(([url]) => String(url).includes('/files/duplicates'))
-      .length;
+    const before = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/files/duplicates'),
+    ).length;
 
     fireEvent.click(screen.getByRole('button', { name: 'Rescan' }));
 
     await waitFor(() => {
-      const after = fetchMock.mock.calls.filter(([url]) => String(url).includes('/files/duplicates'))
-        .length;
+      const after = fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('/files/duplicates'),
+      ).length;
       expect(after).toBeGreaterThan(before);
     });
   });
@@ -103,7 +107,11 @@ describe('DuplicatesPage', () => {
     const fn = mockApi([
       (url) =>
         url.includes('/files/duplicates') && url.includes('limit=100')
-          ? json({ groups: [group, { ...group, content_hash: 'sha256-second' }], next_cursor: '', total: 2 })
+          ? json({
+              groups: [group, { ...group, content_hash: 'sha256-second' }],
+              next_cursor: '',
+              total: 2,
+            })
           : undefined,
       (url) =>
         url.includes('/files/duplicates')

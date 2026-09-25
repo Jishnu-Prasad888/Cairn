@@ -135,7 +135,9 @@
   padding: 0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   opacity: 0;
-  transition: opacity 120ms ease, background 120ms ease;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease;
 }
 
 .file-card-select svg {

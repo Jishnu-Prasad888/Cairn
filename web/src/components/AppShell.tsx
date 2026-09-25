@@ -274,7 +274,9 @@ export default function AppShell() {
         data-testid="nav-toggle"
       >
         <span className="app-menu-icon">{iconMenu}</span>
-        <span className="visually-hidden">{drawerOpen ? 'Close navigation' : 'Open navigation'}</span>
+        <span className="visually-hidden">
+          {drawerOpen ? 'Close navigation' : 'Open navigation'}
+        </span>
       </button>
 
       {drawerOpen && (

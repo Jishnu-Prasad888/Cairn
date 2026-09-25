@@ -51,14 +51,16 @@ export function LibrarySelect({
   includeOffline?: boolean;
 }) {
   const { libraries } = useLibraries();
-  const visible = includeOffline
-    ? libraries
-    : libraries.filter((lib) => lib.status !== 'offline');
+  const visible = includeOffline ? libraries : libraries.filter((lib) => lib.status !== 'offline');
 
   if (visible.length === 0) return null;
 
   return (
-    <select aria-label={label} value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
+    <select
+      aria-label={label}
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+    >
       {visible.map((lib) => (
         <option key={lib.id} value={lib.id}>
           {lib.name}

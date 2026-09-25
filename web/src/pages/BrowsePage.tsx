@@ -13,7 +13,8 @@ const CONFIG: MediaPageConfig = {
   showFolders: false,
   subtitle: 'Everything in the library, filtered by the search above.',
   emptyTitle: 'Nothing matched',
-  emptyBody: 'No file in this library matches that search. Try a shorter word or a different spelling.',
+  emptyBody:
+    'No file in this library matches that search. Try a shorter word or a different spelling.',
 };
 
 export default function BrowsePage() {

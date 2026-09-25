@@ -85,7 +85,9 @@ export function LibrariesProvider({ children }: { children: ReactNode }) {
   // derived during render instead of being toggled around the fetch. This is
   // also what makes a refresh show the spinner again instead of silently
   // keeping the stale list on screen.
-  const [settled, setSettled] = useState<{ key: number; libraries: Library[] } | { key: number; message: string } | null>(null);
+  const [settled, setSettled] = useState<
+    { key: number; libraries: Library[] } | { key: number; message: string } | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,9 +109,13 @@ export function LibrariesProvider({ children }: { children: ReactNode }) {
   }, [reloadKey]);
 
   const loading = settled === null || settled.key !== reloadKey;
-  const error = settled !== null && settled.key === reloadKey && 'message' in settled ? settled.message : null;
+  const error =
+    settled !== null && settled.key === reloadKey && 'message' in settled ? settled.message : null;
   const libraries = useMemo(
-    () => (settled !== null && settled.key === reloadKey && 'libraries' in settled ? settled.libraries : []),
+    () =>
+      settled !== null && settled.key === reloadKey && 'libraries' in settled
+        ? settled.libraries
+        : [],
     [settled, reloadKey],
   );
 
@@ -188,7 +194,13 @@ export type LibraryGate =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'empty' }
-  | { kind: 'ready'; library: Library; libraryId: string; libraries: Library[]; selectLibrary: (id: string) => void };
+  | {
+      kind: 'ready';
+      library: Library;
+      libraryId: string;
+      libraries: Library[];
+      selectLibrary: (id: string) => void;
+    };
 
 export function useLibraryGate(): LibraryGate {
   const state = useLibraries();

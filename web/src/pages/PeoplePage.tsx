@@ -673,11 +673,7 @@ export default function PeoplePage() {
       />
 
       {selected && (
-        <button
-          type="button"
-          className="visually-hidden"
-          onClick={() => setSearchParams({})}
-        >
+        <button type="button" className="visually-hidden" onClick={() => setSearchParams({})}>
           Clear person filter
         </button>
       )}

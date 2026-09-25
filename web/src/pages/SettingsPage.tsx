@@ -298,7 +298,9 @@ export default function SettingsPage() {
                 <Link className="button" to="/libraries">
                   Libraries
                 </Link>
-                <span className="muted">Register, reconnect, re-index, and unregister storage.</span>
+                <span className="muted">
+                  Register, reconnect, re-index, and unregister storage.
+                </span>
               </li>
               <li>
                 <Link className="button" to="/permissions">

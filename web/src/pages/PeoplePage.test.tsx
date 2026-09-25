@@ -21,9 +21,7 @@ const people = {
 };
 
 const unassigned = {
-  faces: [
-    { id: 'u1', file_id: 'file9', x: 0, y: 0, width: 24, height: 24, confidence: 0.9 },
-  ],
+  faces: [{ id: 'u1', file_id: 'file9', x: 0, y: 0, width: 24, height: 24, confidence: 0.9 }],
 };
 
 const personDetail = {
@@ -47,20 +45,26 @@ function setup(options: Options = {}) {
   const fn = mockApi([
     (url) =>
       /\/libraries\/lib1\/ml\/faces$/.test(url)
-        ? json(
-            options.faceStatus ?? status,
-            options.faceStatusCode ?? 200,
-          )
+        ? json(options.faceStatus ?? status, options.faceStatusCode ?? 200)
         : undefined,
-    (url) => (/\/libraries\/lib1\/ml\/faces\/pass$/.test(url) ? json({ status: 'started' }, 202) : undefined),
     (url) =>
-      /\/libraries\/lib1\/ml\/faces\/cluster$/.test(url) ? json({ status: 'started' }, 202) : undefined,
+      /\/libraries\/lib1\/ml\/faces\/pass$/.test(url)
+        ? json({ status: 'started' }, 202)
+        : undefined,
+    (url) =>
+      /\/libraries\/lib1\/ml\/faces\/cluster$/.test(url)
+        ? json({ status: 'started' }, 202)
+        : undefined,
     (url, init) =>
       /\/libraries\/lib1\/ml\/faces\/purge$/.test(url) && init?.method === 'POST'
         ? json({ library_id: 'lib1', faces_removed: 4 })
         : undefined,
-    (url) => (/\/libraries\/lib1\/people$/.test(url) ? json(options.peopleList ?? people) : undefined),
-    (url) => (/\/libraries\/lib1\/faces$/.test(url) ? json(options.unassignedFaces ?? unassigned) : undefined),
+    (url) =>
+      /\/libraries\/lib1\/people$/.test(url) ? json(options.peopleList ?? people) : undefined,
+    (url) =>
+      /\/libraries\/lib1\/faces$/.test(url)
+        ? json(options.unassignedFaces ?? unassigned)
+        : undefined,
     (url) => (/\/libraries\/lib1\/people\/p1$/.test(url) ? json(personDetail) : undefined),
     (url) => (/\/people\/p1\/rename$/.test(url) ? json({ renamed: true }) : undefined),
     (url, init) =>
@@ -68,12 +72,12 @@ function setup(options: Options = {}) {
         ? json({ cover_set: true })
         : undefined,
     (url, init) =>
-      /\/people\/p2\/merge$/.test(url) && init?.method === 'POST' ? json({ merged: true }) : undefined,
+      /\/people\/p2\/merge$/.test(url) && init?.method === 'POST'
+        ? json({ merged: true })
+        : undefined,
     (url) => (/\/people\/p1\/faces\/f\d$/.test(url) ? json({ assigned: true }) : undefined),
     (url, init) =>
-      /\/people\/p1$/.test(url) && init?.method === 'DELETE'
-        ? json({ deleted: true })
-        : undefined,
+      /\/people\/p1$/.test(url) && init?.method === 'DELETE' ? json({ deleted: true }) : undefined,
   ]);
   renderPage(<PeoplePage />);
   return fn;
@@ -89,7 +93,9 @@ describe('PeoplePage', () => {
     setup();
 
     expect(await screen.findByTestId('people-grid')).toBeInTheDocument();
-    expect(screen.getByTestId('people-stats')).toHaveTextContent('4 faces · 2 people · 2 unassigned');
+    expect(screen.getByTestId('people-stats')).toHaveTextContent(
+      '4 faces · 2 people · 2 unassigned',
+    );
     expect(within(screen.getByTestId('person-p1')).getByText('Mom')).toBeInTheDocument();
   });
 
@@ -147,7 +153,9 @@ describe('PeoplePage', () => {
     const fetchMock = setup();
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Rename' }));
+    fireEvent.click(
+      within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Rename' }),
+    );
     const dialog = await screen.findByTestId('rename-person-dialog');
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Mum' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
@@ -166,10 +174,11 @@ describe('PeoplePage', () => {
 
     const select = within(dialog).getByLabelText('Keep') as HTMLSelectElement;
     // The person being merged away is not offered as their own destination.
-    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'Choose a person…',
-      'Person 2',
-    ]);
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Choose a person…', 'Person 2']);
 
     const confirm = within(dialog).getByRole('button', { name: 'Merge' });
     expect(confirm).toBeDisabled();
@@ -185,9 +194,7 @@ describe('PeoplePage', () => {
     mockApi([
       (url) => (/\/libraries\/lib1\/ml\/faces$/.test(url) ? json(status) : undefined),
       (url) =>
-        /\/libraries\/lib1\/people$/.test(url)
-          ? json({ people: [people.people[0]] })
-          : undefined,
+        /\/libraries\/lib1\/people$/.test(url) ? json({ people: [people.people[0]] }) : undefined,
       (url) => (/\/libraries\/lib1\/faces$/.test(url) ? json(unassigned) : undefined),
     ]);
     renderPage(<PeoplePage />);
@@ -204,7 +211,9 @@ describe('PeoplePage', () => {
     const confirmSpy = vi.spyOn(window, 'confirm');
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(
+      within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Delete' }),
+    );
     const dialog = await screen.findByTestId('delete-person-dialog');
     expect(within(dialog).getByText('Mom')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
@@ -261,7 +270,9 @@ describe('PeoplePage', () => {
       (url) =>
         /\/libraries\/lib1\/ml\/faces$/.test(url)
           ? json(
-              { error: { code: 'SERVICE_UNAVAILABLE', message: 'ML is disabled', request_id: '1' } },
+              {
+                error: { code: 'SERVICE_UNAVAILABLE', message: 'ML is disabled', request_id: '1' },
+              },
               503,
             )
           : undefined,
@@ -306,7 +317,10 @@ describe('PeoplePage', () => {
     mockApi([
       (url) =>
         /\/libraries\/lib1\/ml\/faces$/.test(url)
-          ? json({ error: { code: 'INTERNAL', message: 'Face index is corrupt.', request_id: '1' } }, 500)
+          ? json(
+              { error: { code: 'INTERNAL', message: 'Face index is corrupt.', request_id: '1' } },
+              500,
+            )
           : undefined,
     ]);
     renderPage(<PeoplePage />);

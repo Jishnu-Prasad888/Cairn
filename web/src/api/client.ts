@@ -128,7 +128,9 @@ export const apiDelete = <T>(path: string, body?: unknown) =>
   apiRequest<T>(path, withJsonBody('DELETE', body));
 
 /** Build a query string from defined values, skipping empties. */
-export function query(params: Record<string, string | number | boolean | undefined | null>): string {
+export function query(
+  params: Record<string, string | number | boolean | undefined | null>,
+): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;

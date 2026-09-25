@@ -163,9 +163,7 @@ export default function TagsPage() {
 
           {files.data !== null && files.data.length === 0 && (
             <EmptyState title="Nothing tagged yet" testId="tag-files-empty">
-              <p className="muted">
-                No files carry this tag. Add it from the file viewer.
-              </p>
+              <p className="muted">No files carry this tag. Add it from the file viewer.</p>
             </EmptyState>
           )}
 
@@ -179,9 +177,7 @@ export default function TagsPage() {
                   type="button"
                   className="file-card-action"
                   aria-label={`Remove tag ${activeTag.name} from ${f.name}`}
-                  onClick={() =>
-                    void run(() => removeFileTag(gate.libraryId, f.id, activeTag.id))
-                  }
+                  onClick={() => void run(() => removeFileTag(gate.libraryId, f.id, activeTag.id))}
                 >
                   ×
                 </button>
@@ -221,7 +217,10 @@ export default function TagsPage() {
               {tags.data.map((tag) => (
                 <li key={tag.id}>
                   <button type="button" className="tag-card" onClick={() => setActiveTag(tag)}>
-                    <span className="tag-chip" style={tag.color ? { background: tag.color } : undefined}>
+                    <span
+                      className="tag-chip"
+                      style={tag.color ? { background: tag.color } : undefined}
+                    >
                       {tag.name}
                     </span>
                     <span className="tag-date">
@@ -252,9 +251,7 @@ export default function TagsPage() {
               setCreating(false);
               tags.reload();
             })
-            .catch((e: unknown) =>
-              setPromptError(e instanceof Error ? e.message : String(e)),
-            )
+            .catch((e: unknown) => setPromptError(e instanceof Error ? e.message : String(e)))
             .finally(() => setBusy(false));
         }}
         testId="new-tag-dialog"
@@ -277,7 +274,10 @@ export default function TagsPage() {
         onConfirm={() => {
           if (!deleting) return;
           const target = deleting;
-          void run(() => deleteTag(gate.libraryId, target.id), () => setActiveTag(null));
+          void run(
+            () => deleteTag(gate.libraryId, target.id),
+            () => setActiveTag(null),
+          );
         }}
         testId="delete-tag-dialog"
       />

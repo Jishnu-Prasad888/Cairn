@@ -255,7 +255,11 @@ export default function PermissionsPage() {
   // Listing users is admin-only, so a non-admin manager cannot read it. The
   // grant form falls back to a typed user id rather than an empty picker.
   const isAdmin = user?.role === 'admin';
-  const users = useResource(useCallback(() => listUsers(), []), [], isAdmin);
+  const users = useResource(
+    useCallback(() => listUsers(), []),
+    [],
+    isAdmin,
+  );
   const userNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const u of users.data?.users ?? []) map.set(u.id, u.username);
