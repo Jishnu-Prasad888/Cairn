@@ -1,5 +1,5 @@
 .people-page {
-  max-width: 1100px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: var(--space-5) var(--space-4) var(--space-7);
   display: flex;
@@ -11,27 +11,6 @@
   padding: var(--space-6);
   color: var(--text-muted);
   text-align: center;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.page-header h1 {
-  margin: 0;
-  font-size: 28px;
-  font-family: var(--font-brand);
-  font-weight: 400;
-  color: var(--primary);
-}
-
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
 }
 
 .people-page select,
@@ -155,7 +134,7 @@
   height: 100%;
   font-size: 40px;
   color: var(--text-muted);
-  background: var(--primary-faint, #f0f0f0);
+  background: var(--border-subtle);
 }
 
 .person-meta {
@@ -188,10 +167,9 @@
 
 .person-detail h2 {
   margin: 0;
-  font-size: 20px;
-  font-family: var(--font-brand);
-  font-weight: 400;
-  color: var(--primary);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .face-grid {

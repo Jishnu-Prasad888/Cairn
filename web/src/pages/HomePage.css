@@ -1,26 +1,27 @@
 .home {
-  min-height: 100vh;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4) var(--space-7);
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: var(--space-6);
-  padding: var(--space-6) var(--space-5);
   text-align: center;
 }
 
 .home-header {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
 }
 
 .home-header h1 {
   margin: 0;
-  font-size: 64px;
-  color: var(--primary);
+  font-size: 44px;
   font-family: var(--font-brand);
   font-weight: 400;
+  color: var(--primary);
 }
 
 .tagline {
@@ -28,28 +29,9 @@
   color: var(--text-secondary);
 }
 
-.home-nav {
-  margin-top: var(--space-3);
-}
-
-.home-nav a {
-  display: inline-block;
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--primary);
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.home-nav a:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
 .home-status {
   min-height: 140px;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -123,4 +105,10 @@
 .home-footer p {
   margin: 0;
   font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .home {
+    padding: var(--space-5) var(--space-3) var(--space-6);
+  }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
-import { apiGet, apiPost, apiUpload } from '../api/client';
+import { apiGet, apiPost, apiRequest, apiDelete, apiUpload } from '../api/client';
 import type {
   FileListResponse,
   FileSummary,
@@ -27,14 +27,16 @@ function crumbSegments(folderPath: string): Array<{ label: string; path: string 
   return crumbs;
 }
 
-interface FileGridProps {
+interface FileEntriesProps {
   libraryId: string;
   files: FileSummary[];
   view: 'grid' | 'list';
   onOpen: (file: FileSummary) => void;
+  selected: ReadonlySet<string>;
+  onToggleSelect: (file: FileSummary) => void;
 }
 
-function FileEntries({ libraryId, files, view, onOpen }: FileGridProps) {
+function FileEntries({ libraryId, files, view, onOpen, selected, onToggleSelect }: FileEntriesProps) {
   if (view === 'list') {
     return (
       <ul className="file-list" data-testid="file-list">
@@ -72,15 +74,24 @@ function FileEntries({ libraryId, files, view, onOpen }: FileGridProps) {
     );
   }
 
-  return <FileGrid libraryId={libraryId} files={files} onOpen={onOpen} />;
+  return (
+    <FileGrid
+      libraryId={libraryId}
+      files={files}
+      onOpen={onOpen}
+      selectedIds={selected}
+      onToggleSelect={onToggleSelect}
+    />
+  );
 }
 
 export default function BrowserPage() {
+  const [searchParams] = useSearchParams();
   const [libraries, setLibraries] = useState<Library[] | null>(null);
   const [libraryId, setLibraryId] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
   const [folders, setFolders] = useState<Folder[]>([]);
   const [files, setFiles] = useState<FileSummary[]>([]);
   const [trash, setTrash] = useState<FileSummary[]>([]);
@@ -91,6 +102,84 @@ export default function BrowserPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [viewer, setViewer] = useState<FileSummary | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+
+  const toggleSelect = (f: FileSummary) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(f.id)) {
+        next.delete(f.id);
+      } else {
+        next.add(f.id);
+      }
+      return next;
+    });
+  };
+
+  // Leave selection mode with Escape, like Google Photos.
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelected(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected.size]);
+
+  // A changed folder/search/library invalidates the current selection.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [folderPath, search, libraryId]);
+
+  // Batch-action the selected files against the per-file endpoints. Favorites
+  // are toggled relative to the current favorites list to avoid CONFLICTs.
+  const runBatchFavorite = async () => {
+    if (!libraryId || selected.size === 0) return;
+    setError(null);
+    try {
+      const resp = await apiGet<{ files: FileSummary[] }>(`/libraries/${libraryId}/favorites`);
+      const favIds = new Set((resp.files ?? []).map((f) => f.id));
+      const targets = files.filter((f) => selected.has(f.id));
+      const ops = [
+        ...targets
+          .filter((f) => !favIds.has(f.id))
+          .map((f) => apiPost(`/libraries/${libraryId}/files/${f.id}/favorite`, undefined)),
+        ...targets
+          .filter((f) => favIds.has(f.id))
+          .map((f) => apiDelete(`/libraries/${libraryId}/files/${f.id}/favorite`)),
+      ];
+      if (ops.length === 0) return;
+      await Promise.all(ops);
+      setSelected(new Set());
+      reload();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const runBatchTrash = async () => {
+    if (!libraryId) return;
+    const targets = files.filter((f) => selected.has(f.id));
+    if (targets.length === 0) return;
+    if (!window.confirm(`Move ${targets.length} ${targets.length === 1 ? 'file' : 'files'} to the trash?`)) {
+      return;
+    }
+    setError(null);
+    try {
+      await Promise.all(
+        targets.map((f) =>
+          apiRequest<undefined>(`/libraries/${libraryId}/files/${f.id}`, {
+            method: 'DELETE',
+            body: JSON.stringify({ path: f.rel_path }),
+          }),
+        ),
+      );
+      setSelected(new Set());
+      reload();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   // Load the library list; default to the first one.
   useEffect(() => {
@@ -113,6 +202,15 @@ export default function BrowserPage() {
   }, []);
 
   const reload = () => setReloadKey((k) => k + 1);
+
+  // Sync the search box with the address bar (the top-bar search in the shell).
+  // Adjust state during render (React-recommended) to avoid an effect round-trip.
+  const urlQuery = searchParams.get('q') ?? '';
+  const [prevUrlQuery, setPrevUrlQuery] = useState(urlQuery);
+  if (prevUrlQuery !== urlQuery) {
+    setPrevUrlQuery(urlQuery);
+    setSearch(urlQuery);
+  }
 
   // Load the current folder (folders + files) or search results.
   useEffect(() => {
@@ -223,7 +321,6 @@ export default function BrowserPage() {
       <header className="page-header browser-header">
         <h1>Files</h1>
         <div className="header-controls">
-          <Link to="/">Home</Link>
           <select
             aria-label="Library"
             value={libraryId ?? ''}
@@ -289,7 +386,38 @@ export default function BrowserPage() {
 
       {!trashOpen && (
         <>
-          <div className="browser-toolbar">
+          {selected.size > 0 ? (
+            <div
+              className="selection-bar"
+              data-testid="selection-bar"
+              role="toolbar"
+              aria-label="Actions for selected media"
+            >
+              <span className="selection-count" data-testid="selection-count">
+                {selected.size} selected
+              </span>
+              <div className="selection-actions">
+                <button type="button" className="button" onClick={() => void runBatchFavorite()}>
+                  Favorite
+                </button>
+                <button
+                  type="button"
+                  className="button danger-button"
+                  onClick={() => void runBatchTrash()}
+                >
+                  Move to trash
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setSelected(new Set())}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="browser-toolbar">
             <nav className="breadcrumbs" aria-label="Folders">
               <button
                 type="button"
@@ -348,6 +476,7 @@ export default function BrowserPage() {
               </div>
             </div>
           </div>
+          )}
 
           {uploadError && (
             <p className="error-text" role="alert">
@@ -395,7 +524,14 @@ export default function BrowserPage() {
           )}
 
           {!loading && files.length > 0 && (
-            <FileEntries libraryId={libraryId} files={files} view={view} onOpen={setViewer} />
+            <FileEntries
+              libraryId={libraryId}
+              files={files}
+              view={view}
+              onOpen={setViewer}
+              selected={selected}
+              onToggleSelect={toggleSelect}
+            />
           )}
         </>
       )}

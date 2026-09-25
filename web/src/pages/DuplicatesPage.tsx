@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 
 import { API_BASE, apiGet } from '../api/client';
 import type { DuplicateGroup, DuplicatesResponse, Library } from '../api/types';
@@ -168,7 +167,6 @@ export default function DuplicatesPage() {
       <header className="page-header">
         <h1>Duplicates</h1>
         <div className="header-controls">
-          <Link to="/">Home</Link>
           <select
             aria-label="Library"
             value={libraryId ?? ''}

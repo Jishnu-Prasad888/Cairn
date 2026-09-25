@@ -1,0 +1,231 @@
+/* Google Photos–style application frame: fixed sidebar + top bar + content. */
+
+.app-shell {
+  min-height: 100vh;
+}
+
+/* ---- Left navigation sidebar ---- */
+.app-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--sidebar-width);
+  background: var(--surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  overflow-y: auto;
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2) var(--space-3);
+  text-decoration: none;
+}
+
+.app-brand-text {
+  font-family: var(--font-brand);
+  font-size: 24px;
+  line-height: 1;
+  color: var(--primary);
+}
+
+.app-sidebar-caption {
+  margin: var(--space-3) 0 var(--space-1);
+  padding: 0 var(--space-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 15px;
+}
+
+.app-nav-item:hover {
+  background: var(--border-subtle);
+}
+
+.app-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--primary);
+}
+
+.app-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-secondary);
+}
+
+.app-nav-item.active .app-nav-icon {
+  color: var(--primary);
+}
+
+.app-nav-icon svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- Main column: top bar + content ---- */
+.app-main {
+  margin-left: var(--sidebar-width);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.app-search {
+  flex: 1;
+  max-width: 560px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--border-subtle);
+  border-radius: var(--radius-pill);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.app-search:focus-within {
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.app-search-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.app-search-icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.app-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.app-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-avatar svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Hide the in-page search when the shell provides the top-bar search. */
+.app-shell .browser-toolbar .search-input {
+  display: none;
+}
+
+@media (max-width: 920px) {
+  .app-sidebar {
+    width: 72px;
+    padding: var(--space-4) var(--space-2);
+  }
+
+  .app-main {
+    margin-left: 72px;
+  }
+
+  .app-brand {
+    justify-content: center;
+    padding: var(--space-2) 0;
+  }
+
+  .app-brand-text,
+  .app-sidebar-caption {
+    display: none;
+  }
+
+  .app-nav-item {
+    justify-content: center;
+    padding: var(--space-2);
+  }
+
+  .app-nav-label {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-search {
+    transition: none;
+  }
+}

@@ -39,28 +39,6 @@ export interface MemoryVersion {
   saved_at: string;
 }
 
-export interface MemoryRef {
-  type: RefType;
-  id: string;
-}
-
-export interface MemoryListResponse {
-  memories: Memory[];
-  next_cursor?: string;
-}
-
-export interface MemoryCreateRequest {
-  title: string;
-  body: string;
-  memory_date?: string;
-}
-
-export interface MemoryUpdateRequest {
-  title: string;
-  body: string;
-  memory_date?: string;
-}
-
 export interface FaceStatus {
   enabled: boolean;
   provider: string;

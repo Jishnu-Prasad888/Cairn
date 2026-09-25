@@ -9,14 +9,14 @@
 export const API_BASE = '/api/v1';
 
 /** Error envelope returned by the server. */
-export interface ApiErrorBody {
+interface ApiErrorBody {
   code: string;
   message: string;
   details?: Record<string, unknown>;
   request_id: string;
 }
 
-export interface ApiErrorEnvelope {
+interface ApiErrorEnvelope {
   error: ApiErrorBody;
 }
 

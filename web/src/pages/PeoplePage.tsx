@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 
 import { API_BASE, apiGet, apiPost, apiDelete } from '../api/client';
 import type { FaceStatus, FaceSummary, Library, Person } from '../api/types';
@@ -209,7 +208,6 @@ export default function PeoplePage({ initialLibraryId }: PeoplePageProps) {
       <header className="page-header">
         <h1>People</h1>
         <div className="header-controls">
-          <Link to="/">Home</Link>
           <select
             aria-label="Library"
             value={libraryId ?? ''}

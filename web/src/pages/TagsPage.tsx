@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 
 import { apiDelete, apiGet, apiPost } from '../api/client';
 import type { FileSummary, Library, Tag, TagListResponse } from '../api/types';
@@ -143,7 +142,6 @@ export default function TagsPage() {
       <header className="page-header tags-header">
         <h1>Tags</h1>
         <div className="header-controls">
-          <Link to="/">Home</Link>
           <select
             aria-label="Library"
             value={libraryId}
