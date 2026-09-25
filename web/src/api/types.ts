@@ -168,6 +168,30 @@ export interface FileCollectionResponse {
   files: FileSummary[];
 }
 
+/** A per-file Markdown note (caption / description) shown under the media. */
+export interface FileNote {
+  file_id: string;
+  body: string;
+  updated_at?: string;
+}
+
+/** Extracted media metadata (dimensions, camera, GPS) for a file. */
+export interface FileMetadata {
+  file_id: string;
+  media_type?: string;
+  mime_type?: string;
+  width?: number;
+  height?: number;
+  duration_secs?: number;
+  taken_at?: string;
+  camera_make?: string;
+  camera_model?: string;
+  latitude?: number;
+  longitude?: number;
+  has_thumbnail: boolean;
+  updated_at?: string;
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
