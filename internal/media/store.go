@@ -55,6 +55,15 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 		conditions = append(conditions, "rel_path NOT LIKE '%/%'")
 	}
 
+	// Media type filter. The type is stored on the row by the indexer rather
+	// than read from media_metadata, because only the photo extractor ever
+	// writes to that table: filtering on it returned nothing for videos and
+	// everything for photos, so the Videos page showed the photo library.
+	if opts.Type != "" {
+		conditions = append(conditions, "media_type = ?")
+		args = append(args, string(opts.Type))
+	}
+
 	// Cursor: rel_path > cursor for forward pagination.
 	if opts.Cursor != "" {
 		switch opts.Sort {
@@ -89,7 +98,7 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, rel_path, size_bytes, mod_time, content_hash, status,
+		SELECT id, rel_path, size_bytes, mod_time, content_hash, media_type, status,
 		       first_seen_at, last_seen_at
 		FROM indexed_files
 		%s
@@ -149,6 +158,12 @@ func (s *FileStore) countFiles(ctx context.Context, opts ListOptions) (int, erro
 	} else if !opts.Recursive {
 		conditions = append(conditions, "rel_path NOT LIKE '%/%'")
 	}
+	// The type filter has to be applied here too, or the count promises a page
+	// of photos the query will never return.
+	if opts.Type != "" {
+		conditions = append(conditions, "media_type = ?")
+		args = append(args, string(opts.Type))
+	}
 	where := "WHERE " + strings.Join(conditions, " AND ")
 	var n int
 	err := s.db.QueryRowContext(ctx,
@@ -159,7 +174,7 @@ func (s *FileStore) countFiles(ctx context.Context, opts ListOptions) (int, erro
 // GetByID returns a single file by its ID.
 func (s *FileStore) GetByID(ctx context.Context, id string) (*File, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, rel_path, size_bytes, mod_time, content_hash, status,
+		`SELECT id, rel_path, size_bytes, mod_time, content_hash, media_type, status,
 		        first_seen_at, last_seen_at
 		 FROM indexed_files WHERE id = ?`, id)
 	f, err := s.scanFile(row)
@@ -175,7 +190,7 @@ func (s *FileStore) GetByID(ctx context.Context, id string) (*File, error) {
 // GetByRelPath returns a single file by its relative path.
 func (s *FileStore) GetByRelPath(ctx context.Context, relPath string) (*File, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, rel_path, size_bytes, mod_time, content_hash, status,
+		`SELECT id, rel_path, size_bytes, mod_time, content_hash, media_type, status,
 		        first_seen_at, last_seen_at
 		 FROM indexed_files WHERE rel_path = ?`, relPath)
 	f, err := s.scanFile(row)
@@ -195,17 +210,18 @@ func (s *FileStore) UpsertFromPath(ctx context.Context, relPath string, sizeByte
 	now := rfc3339(time.Now().UTC())
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO indexed_files
-			(id, rel_path, size_bytes, mod_time, content_hash, status,
+			(id, rel_path, size_bytes, mod_time, content_hash, media_type, status,
 			 first_seen_at, last_seen_at, indexed_at)
-		VALUES (?, ?, ?, ?, NULL, 'present', ?, ?, ?)
+		VALUES (?, ?, ?, ?, NULL, ?, 'present', ?, ?, ?)
 		ON CONFLICT(rel_path) DO UPDATE SET
 			size_bytes   = excluded.size_bytes,
 			mod_time     = excluded.mod_time,
 			content_hash = NULL,
+			media_type   = excluded.media_type,
 			status       = 'present',
 			last_seen_at = excluded.last_seen_at,
 			indexed_at   = excluded.indexed_at`,
-		newID(), relPath, sizeBytes, rfc3339(modTime), now, now, now)
+		newID(), relPath, sizeBytes, rfc3339(modTime), string(DetectMediaType(relPath)), now, now, now)
 	return err
 }
 
@@ -229,17 +245,20 @@ func (s *FileStore) MarkPresent(ctx context.Context, id, relPath string) error {
 	now := rfc3339(time.Now().UTC())
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE indexed_files
-		 SET status = 'present', rel_path = ?, last_seen_at = ?, indexed_at = ?
-		 WHERE id = ?`, relPath, now, now, id)
+		 SET status = 'present', rel_path = ?, media_type = ?, last_seen_at = ?, indexed_at = ?
+		 WHERE id = ?`, relPath, string(DetectMediaType(relPath)), now, now, id)
 	return err
 }
 
 // UpdateRelPath updates the relative path of a file (rename/move operation).
+//
+// media_type is re-derived because a rename can change the extension: moving
+// holiday.jpg to holiday.mp4 has to change which pages the file appears on.
 func (s *FileStore) UpdateRelPath(ctx context.Context, id, newRelPath string) error {
 	now := rfc3339(time.Now().UTC())
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE indexed_files SET rel_path = ?, last_seen_at = ?, indexed_at = ?
-		 WHERE id = ?`, newRelPath, now, now, id)
+		`UPDATE indexed_files SET rel_path = ?, media_type = ?, last_seen_at = ?, indexed_at = ?
+		 WHERE id = ?`, newRelPath, string(DetectMediaType(newRelPath)), now, now, id)
 	return err
 }
 
@@ -286,7 +305,7 @@ func (s *FileStore) RemoveTrashEntry(ctx context.Context, fileID string) error {
 // ListTrash returns all files currently in trash.
 func (s *FileStore) ListTrash(ctx context.Context) ([]*File, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT f.id, f.rel_path, f.size_bytes, f.mod_time, f.content_hash, f.status,
+		`SELECT f.id, f.rel_path, f.size_bytes, f.mod_time, f.content_hash, f.media_type, f.status,
 		        f.first_seen_at, f.last_seen_at
 		 FROM indexed_files f
 		 JOIN trash t ON t.file_id = f.id
@@ -431,7 +450,7 @@ func (s *FileStore) ListDuplicates(ctx context.Context, opts DuplicateOptions) (
 // canonical column list, returning scanned files.
 func (s *FileStore) queryFiles(ctx context.Context, whereTail string, args ...any) ([]*File, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, rel_path, size_bytes, mod_time, content_hash, status,
+		`SELECT id, rel_path, size_bytes, mod_time, content_hash, media_type, status,
 		        first_seen_at, last_seen_at
 		 FROM indexed_files `+whereTail, args...)
 	if err != nil {
@@ -449,14 +468,15 @@ type rowScanner interface {
 
 func (s *FileStore) scanFile(row rowScanner) (*File, error) {
 	var (
-		f        File
-		modStr   string
-		firstStr string
-		lastStr  string
-		hash     sql.NullString
-		status   string
+		f         File
+		modStr    string
+		firstStr  string
+		lastStr   string
+		hash      sql.NullString
+		mediaType string
+		status    string
 	)
-	err := row.Scan(&f.ID, &f.RelPath, &f.SizeBytes, &modStr, &hash, &status, &firstStr, &lastStr)
+	err := row.Scan(&f.ID, &f.RelPath, &f.SizeBytes, &modStr, &hash, &mediaType, &status, &firstStr, &lastStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -471,7 +491,7 @@ func (s *FileStore) scanFile(row rowScanner) (*File, error) {
 	if f.FolderPath == "." {
 		f.FolderPath = ""
 	}
-	f.MediaType = DetectMediaType(f.RelPath)
+	f.MediaType = MediaType(mediaType)
 	f.MIMEType = DetectMIME(f.RelPath)
 	if err := parseTime(modStr, &f.ModTime); err != nil {
 		return nil, err

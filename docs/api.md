@@ -220,6 +220,12 @@ forbidden, so its existence is not disclosed.
 | GET    | `/libraries/{libraryID}/folders`                            | Child folders                    | cap  |
 | GET    | `/libraries/{libraryID}/trash`                              | Trashed files                    | cap  |
 
+`GET /files` and `GET /search` both take `type=` (`photo`, `video`, `audio`,
+`document`, `other`) and both filter on the same value: the media type the
+indexer stored on the row, derived from the file extension. The type is
+re-derived whenever a file is renamed or moved, so changing an extension moves
+the file between the typed pages.
+
 ### Favorites, tags, and albums
 
 | Method | Path                                                        | Purpose                          | Auth |
