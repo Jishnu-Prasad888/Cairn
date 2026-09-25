@@ -27,5 +27,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Comfortably above the 5s `asyncUtilTimeout` the setup file configures, so
+    // a genuinely missing element is reported by the assertion that wanted it
+    // rather than by a bare test timeout.
+    testTimeout: 15_000,
   },
 });
