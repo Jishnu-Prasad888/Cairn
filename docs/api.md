@@ -197,6 +197,14 @@ member account can find the libraries it was granted instead of receiving 403.
 A library the caller cannot read is omitted entirely rather than reported as
 forbidden, so its existence is not disclosed.
 
+`POST /libraries` queues the library's **first** index scan as part of
+registering it and reports `indexing: true` when it did. A library is registered
+so its files can be seen, and an unscanned library has no rows in the index, so
+every page came up empty until someone found `POST /libraries/{id}/index`. The
+scan runs in the background — registration does not wait for it — and
+`indexing: false` means the server has no indexer configured, in which case the
+library has to be scanned by hand.
+
 ### Media, files, and folders
 
 | Method | Path                                                        | Purpose                          | Auth |

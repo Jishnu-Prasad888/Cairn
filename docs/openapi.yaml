@@ -3713,6 +3713,13 @@ components:
           description: >
             `created` means fresh metadata was written; `adopted` means an
             existing `.cairn` metadata directory was bound and reused.
+        indexing:
+          type: boolean
+          description: >
+            Whether the first index scan was queued. Registration always queues
+            one, so a new library starts filling itself without a second manual
+            step; `false` means the server has no indexer configured, and the
+            library has to be scanned with `POST /libraries/{id}/index`.
     LibraryProbeRequest:
       type: object
       required: [path]

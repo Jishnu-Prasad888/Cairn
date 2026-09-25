@@ -79,6 +79,13 @@ func (s *Server) handleProbeLibrary(w http.ResponseWriter, r *http.Request, u *a
 
 // handleCreateLibrary registers a library, creating fresh metadata or adopting
 // an existing one. Admin only.
+//
+// Registering a library also queues its first scan. A library is registered
+// precisely so its files can be seen, and a library that has never been scanned
+// has no rows in indexed_files, so every page came up empty until an
+// administrator noticed and clicked Re-index. The scan is queued in the
+// background: the response does not wait for it, and a library whose scan fails
+// to queue is still registered and can be re-triggered.
 func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	var body libraryRequest
 	if err := readJSON(w, r, &body); err != nil {
@@ -90,9 +97,20 @@ func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request, u *
 		s.writeLibraryError(w, r, err)
 		return
 	}
+
+	indexing := false
+	if s.indexer != nil {
+		if _, err := s.indexer.TriggerScan(actorCtx(r, u).Context(), lib.ID, lib.Root); err != nil {
+			s.logger.Error("trigger initial index", "library_id", lib.ID, "error", err)
+		} else {
+			indexing = true
+		}
+	}
+
 	writeJSON(w, s.logger, http.StatusCreated, map[string]any{
-		"library": toLibraryResponse(lib),
-		"mode":    mode,
+		"library":  toLibraryResponse(lib),
+		"mode":     mode,
+		"indexing": indexing,
 	})
 }
 
