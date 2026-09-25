@@ -96,8 +96,14 @@ func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request, u *
 	})
 }
 
-// handleListLibraries returns all registered libraries. Admin only.
-func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+// handleListLibraries returns the registered libraries the caller may use.
+//
+// Administrators see every library. Everyone else sees only the libraries
+// where they hold the read capability, so a member account can discover the
+// libraries it has been granted instead of hitting 403 on every content route.
+// This is the same resource-based decision every other handler makes through
+// requireCap; it never leaks the existence of a library the caller cannot read.
+func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	libs, err := s.libraries.List(r.Context())
 	if err != nil {
 		s.logger.Error("list libraries", "error", err)
@@ -105,11 +111,32 @@ func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request, _ *
 			CodeInternal, "Internal server error.")
 		return
 	}
+	isAdmin := u != nil && u.Role == auth.RoleAdmin
 	resp := make([]libraryResponse, 0, len(libs))
 	for i := range libs {
+		if !isAdmin && !s.canReadLibrary(r, u, libs[i].ID) {
+			continue
+		}
 		resp = append(resp, toLibraryResponse(&libs[i]))
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"libraries": resp})
+}
+
+// canReadLibrary reports whether the principal holds read on the library scope.
+// A failing authorization subsystem is treated as "not readable" here so a
+// database error narrows the listing instead of widening it; the individual
+// content endpoints remain the authority and will surface the real error.
+func (s *Server) canReadLibrary(r *http.Request, u *auth.User, libID string) bool {
+	if s.authz == nil {
+		// No authorization service wired: fall back to the pre-Phase-9 gate.
+		return u != nil && u.Role == auth.RoleAdmin
+	}
+	ok, err := s.authz.Can(r.Context(), principalFrom(u), authz.LibraryKey(libID), authz.CapRead)
+	if err != nil {
+		s.logger.Error("list libraries", "library", libID, "error", err)
+		return false
+	}
+	return ok
 }
 
 // handleGetLibrary returns a single library. Requires read on the library
