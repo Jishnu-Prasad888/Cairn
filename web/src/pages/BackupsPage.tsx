@@ -208,7 +208,13 @@ export default function BackupsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
-  const backups = useResource(useCallback(() => listBackups(), []), [], true);
+  // `isAdmin` gates the load, not just the render: a member must not fire a
+  // request that can only come back 403.
+  const backups = useResource(
+    useCallback(() => listBackups(), []),
+    [],
+    isAdmin,
+  );
   const [detailId, setDetailId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [confirmRun, setConfirmRun] = useState(false);
@@ -244,6 +250,8 @@ export default function BackupsPage() {
     setNotice(null);
     runBackup()
       .then((rec) => {
+        setConfirmRun(false);
+        setRunning(false);
         setNotice(
           rec.status === 'ok'
             ? `Backed up ${rec.files} files (${formatBytes(rec.stored_bytes)}) to ${rec.destination}.`
@@ -251,12 +259,12 @@ export default function BackupsPage() {
         );
         backups.reload();
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => {
-        setBusy(false);
-        setConfirmRun(false);
-        setRunning(false);
-      });
+      .catch((e: unknown) => {
+        // The dialog stays open on failure, with the reason inside it, so the
+        // run can be retried without re-confirming.
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => setBusy(false));
   };
 
   const detailRecord = detail.data;
@@ -283,7 +291,9 @@ export default function BackupsPage() {
         }
       />
 
-      {error && (
+      {/* While the confirm dialog is open it owns the error, so a screen reader
+          is not told about the same failure twice. */}
+      {error && !confirmRun && (
         <p className="error-text" role="alert">
           {error}
         </p>
@@ -308,8 +318,8 @@ export default function BackupsPage() {
       {backups.data !== null && backups.data.length === 0 && (
         <EmptyState title="No backups yet" testId="backups-empty">
           <p className="muted">
-            Nothing has been backed up. A first run copies every indexed file; later runs skip what is
-            already present, so they are quick.
+            Nothing has been backed up. A first run copies every indexed file; later runs skip what
+            is already present, so they are quick.
           </p>
         </EmptyState>
       )}
