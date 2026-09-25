@@ -1,0 +1,173 @@
+/* Permissions: the grant form and the table of who-can-do-what. */
+
+.permissions-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* -------------------------------- form -------------------------------- */
+
+.grant-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.grant-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.grant-field > span {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.grant-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.grant-input:focus-visible {
+  border-color: var(--primary);
+}
+
+.grant-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.grant-key {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  border-radius: var(--radius-md);
+  background: var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+
+.grant-key code {
+  font-size: 0.9em;
+}
+
+.grant-caps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.grant-caps legend {
+  padding: 0 var(--space-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.grant-cap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.9rem;
+}
+
+.grant-cap input {
+  accent-color: var(--primary);
+}
+
+.grant-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* -------------------------------- table ------------------------------- */
+
+.grant-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.grant-table th,
+.grant-table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.grant-table thead th {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.grant-person {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.grant-user-id {
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+
+.grant-key {
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+  font-weight: 400;
+}
+
+.grant-key code {
+  font-size: 0.85rem;
+}
+
+.grant-caps-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+@media (max-width: 720px) {
+  .grant-table thead {
+    display: none;
+  }
+
+  .grant-table tbody tr {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .grant-table td,
+  .grant-table th {
+    border: 0;
+    padding: 0;
+  }
+
+  .grant-key {
+    max-width: none;
+  }
+}
