@@ -35,13 +35,10 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
   // The last body persisted on the server; the timer skips unchanged drafts.
   const lastSavedRef = useRef('');
 
-  // Load the stored note when the file changes.
+  // Load the stored note. The parent keys this component by file id, so
+  // changing file remounts it with clean state rather than needing a reset here.
   useEffect(() => {
     let cancelled = false;
-    setLoaded(false);
-    setDraft('');
-    setStatus('idle');
-    setError(null);
     apiGet<{ note: FileNoteData }>(`/libraries/${libraryId}/files/${fileId}/note`)
       .then((resp) => {
         if (cancelled) return;
