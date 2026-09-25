@@ -1,176 +1,144 @@
-import { useEffect, useState } from 'react';
+/**
+ * Tags — the library's tag vocabulary and the files that carry each tag.
+ *
+ * Tags are a flat, colourable vocabulary; the interesting part is the second
+ * screen, where you see everything carrying a tag and can strip it from
+ * individual files. Both screens use the shared library gate, the shared
+ * dialogs, and the shared viewer, so nothing here reimplements them.
+ */
 
-import { apiDelete, apiGet, apiPost } from '../api/client';
-import type { FileSummary, Library, Tag, TagListResponse } from '../api/types';
+import { useCallback, useState } from 'react';
+
+import { useAuth } from '../auth/authContext';
+import { useLibraryGate } from '../api/libraries';
+import { useLibraryResource } from '../api/resources';
+import { createTag, deleteTag, listTags, removeFileTag, searchFiles } from '../api/queries';
+import type { FileSummary, Tag } from '../api/types';
+import { ConfirmDialog, PromptDialog } from '../components/Dialog';
 import { FileGrid } from '../components/FileGrid';
+import { useFileOperations } from '../components/FileOperations';
+import LibraryPicker from '../components/LibraryPicker';
+import {
+  EmptyState,
+  ErrorState,
+  LibraryOfflineNotice,
+  LoadingState,
+  NoLibrariesState,
+  PageHeader,
+} from '../components/States';
 import { ViewerModal } from '../components/ViewerModal';
 import './TagsPage.css';
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
-}
-
 export default function TagsPage() {
-  const [libraries, setLibraries] = useState<Library[] | null>(null);
-  const [libraryId, setLibraryId] = useState<string | null>(null);
-  const [tags, setTags] = useState<Tag[] | null>(null);
+  const gate = useLibraryGate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [activeTag, setActiveTag] = useState<Tag | null>(null);
-  const [tagFiles, setTagFiles] = useState<FileSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [viewer, setViewer] = useState<FileSummary | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<Tag | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiGet<{ libraries: Library[] }>('/libraries')
-      .then((resp) => {
-        if (cancelled) return;
-        const libs = resp.libraries ?? [];
-        setLibraries(libs);
-        if (libs.length > 0) setLibraryId((prev) => prev ?? libs[0]!.id);
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setLibraries([]);
-        setError(e.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const tags = useLibraryResource(
+    useCallback(async (libraryId: string) => (await listTags(libraryId)).tags ?? [], []),
+  );
 
-  const reload = () => setReloadKey((k) => k + 1);
+  const files = useLibraryResource(
+    useCallback(
+      (libraryId) =>
+        searchFiles(libraryId, { tag: activeTag?.name, limit: 200 }).then((r) => r.files ?? []),
+      [activeTag?.name],
+    ),
+    [activeTag?.name],
+    activeTag !== null,
+  );
 
-  useEffect(() => {
-    if (!libraryId) return;
-    let cancelled = false;
-    void apiGet<TagListResponse>(`/libraries/${libraryId}/tags`)
-      .then((resp) => {
-        if (!cancelled) setTags(resp.tags ?? []);
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setTags([]);
-        setError(e.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, reloadKey]);
+  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', tags.reload);
 
-  useEffect(() => {
-    if (!libraryId || !activeTag) return;
-    let cancelled = false;
-    void apiGet<{ files: FileSummary[] }>(
-      `/libraries/${libraryId}/search?tag=${encodeURIComponent(activeTag.name)}&limit=200`,
-    )
-      .then((resp) => {
-        if (!cancelled) setTagFiles(resp.files ?? []);
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setTagFiles([]);
-        setError(e.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, activeTag, reloadKey]);
+  const run = useCallback(
+    async (action: () => Promise<unknown>, after?: () => void) => {
+      setBusy(true);
+      setActionError(null);
+      try {
+        await action();
+        after?.();
+        tags.reload();
+        files.reload();
+      } catch (e: unknown) {
+        setActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [files, tags],
+  );
 
-  const createTag = async () => {
-    if (!libraryId) return;
-    const name = window.prompt('Tag name');
-    if (!name || !name.trim()) return;
-    try {
-      await apiPost(`/libraries/${libraryId}/tags`, { name: name.trim() });
-      reload();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const removeTagFromFile = async (file: FileSummary) => {
-    if (!libraryId || !activeTag) return;
-    try {
-      await apiDelete(`/libraries/${libraryId}/files/${file.id}/tags/${activeTag.id}`);
-      setTagFiles((rows) => (rows ? rows.filter((f) => f.id !== file.id) : rows));
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const deleteTag = async () => {
-    if (!libraryId || !activeTag) return;
-    if (!window.confirm(`Delete tag "${activeTag.name}"? It is removed from every file.`)) return;
-    try {
-      await apiDelete(`/libraries/${libraryId}/tags/${activeTag.id}`);
-      setActiveTag(null);
-      setTagFiles(null);
-      reload();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  if (libraries === null) {
+  if (gate.kind === 'loading') {
     return (
       <main className="tags-page">
-        <p className="muted">Loading libraries…</p>
+        <LoadingState label="Loading libraries…" />
       </main>
     );
   }
 
-  if (libraries.length === 0) {
-    return (
-      <div className="page-muted">
-        No libraries yet. Add a library from the server to organize media.
-      </div>
-    );
-  }
+  const header = (
+    <PageHeader
+      title="Tags"
+      subtitle="A flat vocabulary you apply to any file, from the viewer or in bulk."
+      controls={
+        <>
+          <LibraryPicker />
+          <button
+            type="button"
+            className="button primary-button"
+            onClick={() => {
+              setPromptError(null);
+              setCreating(true);
+            }}
+            disabled={gate.kind !== 'ready'}
+            data-testid="new-tag-button"
+          >
+            New tag
+          </button>
+        </>
+      }
+    />
+  );
 
-  if (!libraryId) {
+  if (gate.kind === 'error') {
     return (
       <main className="tags-page">
-        <p className="muted">Loading…</p>
+        {header}
+        <ErrorState message={gate.message} onRetry={tags.reload} />
       </main>
     );
   }
+
+  if (gate.kind === 'empty') {
+    return (
+      <main className="tags-page">
+        {header}
+        <NoLibrariesState isAdmin={isAdmin} />
+      </main>
+    );
+  }
+
+  const library = gate.library;
+  const offline = library.status === 'offline';
 
   return (
     <main className="tags-page">
-      <header className="page-header tags-header">
-        <h1>Tags</h1>
-        <div className="header-controls">
-          <select
-            aria-label="Library"
-            value={libraryId}
-            onChange={(e) => {
-              setLibraryId(e.target.value);
-              setTags(null);
-              setActiveTag(null);
-              setTagFiles(null);
-              setViewer(null);
-              setError(null);
-            }}
-          >
-            {libraries.map((lib) => (
-              <option key={lib.id} value={lib.id}>
-                {lib.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="button" onClick={() => void createTag()}>
-            New tag
-          </button>
-        </div>
-      </header>
+      {header}
 
-      {error && (
+      {offline && <LibraryOfflineNotice library={library} />}
+      {actionError && (
         <p className="error-text" role="alert">
-          {error}
+          {actionError}
         </p>
       )}
+
+      {tags.error && <ErrorState message={tags.error} onRetry={tags.reload} />}
 
       {activeTag ? (
         <section className="tag-detail" data-testid="tag-detail">
@@ -181,52 +149,84 @@ export default function TagsPage() {
             <h2>
               <span className="tag-chip">{activeTag.name}</span>
             </h2>
-            <button type="button" className="button danger-button" onClick={() => void deleteTag()}>
+            <button
+              type="button"
+              className="button danger-button"
+              onClick={() => setDeleting(activeTag)}
+            >
               Delete tag
             </button>
           </div>
 
-          {tagFiles === null && <p className="muted">Loading…</p>}
+          {files.loading && <LoadingState />}
+          {files.error && <ErrorState message={files.error} onRetry={files.reload} />}
 
-          {tagFiles !== null && tagFiles.length === 0 && (
-            <div className="tag-empty" data-testid="tag-files-empty">
-              <p className="muted">No files carry this tag yet.</p>
-            </div>
+          {files.data !== null && files.data.length === 0 && (
+            <EmptyState title="Nothing tagged yet" testId="tag-files-empty">
+              <p className="muted">
+                No files carry this tag. Add it from the file viewer.
+              </p>
+            </EmptyState>
           )}
 
-          {tagFiles !== null && tagFiles.length > 0 && (
+          {files.data !== null && files.data.length > 0 && (
             <FileGrid
-              libraryId={libraryId}
-              files={tagFiles}
-              onOpen={setViewer}
-              renderAction={(f) => (
+              libraryId={gate.libraryId}
+              files={files.data}
+              onOpen={ops.openViewer}
+              renderAction={(f: FileSummary) => (
                 <button
                   type="button"
                   className="file-card-action"
                   aria-label={`Remove tag ${activeTag.name} from ${f.name}`}
-                  onClick={() => void removeTagFromFile(f)}
+                  onClick={() =>
+                    void run(() => removeFileTag(gate.libraryId, f.id, activeTag.id))
+                  }
                 >
                   ×
                 </button>
               )}
             />
           )}
+
+          {ops.viewer && (
+            <ViewerModal
+              libraryId={gate.libraryId}
+              file={ops.viewer}
+              siblings={files.data ?? []}
+              onNavigate={ops.openViewer}
+              onChanged={() => {
+                files.reload();
+                tags.reload();
+              }}
+              onRequestAction={ops.requestAction}
+              onClose={ops.closeViewer}
+            />
+          )}
+          {ops.dialogs}
         </section>
       ) : (
         <>
-          {tags === null && <p className="muted">Loading…</p>}
-          {tags !== null && tags.length === 0 && (
-            <div className="tag-empty" data-testid="tags-empty">
-              <p className="muted">No tags yet. Tag media from the file browser to organize it.</p>
-            </div>
+          {tags.loading && <LoadingState />}
+          {tags.data !== null && tags.data.length === 0 && (
+            <EmptyState title="No tags yet" testId="tags-empty">
+              <p className="muted">
+                Tags are how you label media across folders. Create one, then apply it from the
+                viewer.
+              </p>
+            </EmptyState>
           )}
-          {tags !== null && tags.length > 0 && (
+          {tags.data !== null && tags.data.length > 0 && (
             <ul className="tag-grid" data-testid="tags-grid" aria-label="Tags">
-              {tags.map((tag) => (
+              {tags.data.map((tag) => (
                 <li key={tag.id}>
                   <button type="button" className="tag-card" onClick={() => setActiveTag(tag)}>
-                    <span className="tag-chip">{tag.name}</span>
-                    <span className="tag-date">Created {formatDate(tag.created_at)}</span>
+                    <span className="tag-chip" style={tag.color ? { background: tag.color } : undefined}>
+                      {tag.name}
+                    </span>
+                    <span className="tag-date">
+                      Created {new Date(tag.created_at).toLocaleDateString()}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -235,14 +235,52 @@ export default function TagsPage() {
         </>
       )}
 
-      {viewer && (
-        <ViewerModal
-          libraryId={libraryId}
-          file={viewer}
-          onClose={() => setViewer(null)}
-          onChanged={async () => reload()}
-        />
-      )}
+      <PromptDialog
+        open={creating}
+        title="New tag"
+        label="Tag name"
+        placeholder="family"
+        hint="Tags are per-library. Typing an existing name in the viewer reuses it."
+        busy={busy}
+        error={promptError}
+        onCancel={() => setCreating(false)}
+        onConfirm={(name) => {
+          setBusy(true);
+          setPromptError(null);
+          createTag(gate.libraryId, name)
+            .then(() => {
+              setCreating(false);
+              tags.reload();
+            })
+            .catch((e: unknown) =>
+              setPromptError(e instanceof Error ? e.message : String(e)),
+            )
+            .finally(() => setBusy(false));
+        }}
+        testId="new-tag-dialog"
+      />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        title={`Delete tag “${deleting?.name ?? ''}”?`}
+        destructive
+        confirmLabel="Delete tag"
+        busy={busy}
+        error={actionError}
+        message={
+          <p>
+            The tag is removed from every file that carries it. The files themselves are not
+            affected.
+          </p>
+        }
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (!deleting) return;
+          const target = deleting;
+          void run(() => deleteTag(gate.libraryId, target.id), () => setActiveTag(null));
+        }}
+        testId="delete-tag-dialog"
+      />
     </main>
   );
 }

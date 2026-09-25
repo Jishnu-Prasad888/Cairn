@@ -45,7 +45,7 @@
   flex-wrap: wrap;
 }
 
-.dup-group-header h2 {
+.dup-group-header h3 {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
@@ -134,4 +134,22 @@
 .dup-member-action:hover {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+.dup-group-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+.dup-members-removable .dup-member {
+  background: var(--surface);
+}
+
+.duplicates-more {
+  display: flex;
+  justify-content: center;
+}
+
+.duplicates-footnote {
+  font-size: 13px;
 }

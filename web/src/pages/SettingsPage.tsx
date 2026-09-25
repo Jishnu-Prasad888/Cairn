@@ -1,9 +1,26 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+/**
+ * Settings — account, appearance, and the administrator's corner.
+ *
+ * The previous version confirmed session revocation with `window.confirm`,
+ * which a screen reader announces as a bare question with no context and which
+ * cannot be styled. It is a {@link ConfirmDialog} now.
+ *
+ * The admin section also used to be the only place accounts were manageable
+ * from, with no route to the other upkeep surfaces. Those are linked here so
+ * the settings page is the place someone lands when they want "the admin
+ * things", even though each has its own page.
+ */
 
-import { apiGet, apiPost } from '../api/client';
-import type { User, UserListResponse, UserRole } from '../api/types';
+import { type FormEvent, useCallback, useState } from 'react';
+import { Link } from 'react-router-dom';
+
 import { useAuth } from '../auth/authContext';
+import { useResource } from '../api/resources';
+import { createUser, listUsers, revokeUserSessions } from '../api/queries';
+import type { User, UserRole } from '../api/types';
 import Brand from '../components/Brand';
+import { ConfirmDialog } from '../components/Dialog';
+import { PageHeader } from '../components/States';
 import { type ThemePreference, readStoredTheme, storeTheme } from '../lib/theme';
 import './SettingsPage.css';
 
@@ -18,15 +35,25 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 }
 
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function SettingsPage() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
 
   const [theme, setTheme] = useState<ThemePreference>(() => readStoredTheme());
 
-  const [users, setUsers] = useState<User[] | null>(null);
-  const [usersError, setUsersError] = useState<string | null>(null);
-  const [revokeBusy, setRevokeBusy] = useState<string | null>(null);
+  const users = useResource<User[]>(
+    useCallback(async () => (await listUsers()).users ?? [], []),
+    [],
+    isAdmin,
+  );
+
+  const [revoking, setRevoking] = useState<User | null>(null);
+  const [revokeBusy, setRevokeBusy] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -35,39 +62,25 @@ export default function SettingsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
 
-  const loadUsers = useCallback(() => {
-    apiGet<UserListResponse>('/users')
-      .then((resp) => {
-        setUsers(resp.users ?? []);
-        setUsersError(null);
-      })
-      .catch((e: Error) => setUsersError(e.message));
-  }, []);
-
-  useEffect(() => {
-    if (isAdmin) loadUsers();
-  }, [isAdmin, loadUsers]);
-
   const onThemeChange = (next: ThemePreference) => {
     setTheme(next);
     storeTheme(next);
   };
 
-  const revokeSessions = async (target: User) => {
-    if (!window.confirm(`Sign ${target.username} out of all devices?`)) return;
-    setRevokeBusy(target.id);
-    setUsersError(null);
-    try {
-      await apiPost(`/users/${target.id}/sessions/revoke`);
-      loadUsers();
-    } catch (e: unknown) {
-      setUsersError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRevokeBusy(null);
-    }
+  const confirmRevoke = () => {
+    if (!revoking) return;
+    setRevokeBusy(true);
+    setRevokeError(null);
+    revokeUserSessions(revoking.id)
+      .then(() => {
+        setRevoking(null);
+        users.reload();
+      })
+      .catch((e: unknown) => setRevokeError(message(e)))
+      .finally(() => setRevokeBusy(false));
   };
 
-  const createUser = async (event: FormEvent) => {
+  const create = (event: FormEvent) => {
     event.preventDefault();
     const name = newUsername.trim();
     if (name === '' || newPassword === '') {
@@ -77,29 +90,24 @@ export default function SettingsPage() {
     setCreateBusy(true);
     setCreateError(null);
     setCreated(null);
-    try {
-      const resp = await apiPost<{ user: User }>('/users', {
-        username: name,
-        password: newPassword,
-        role: newRole,
-      });
-      setCreated(`Created ${resp.user.username}.`);
-      setNewUsername('');
-      setNewPassword('');
-      setNewRole('user');
-      loadUsers();
-    } catch (e: unknown) {
-      setCreateError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreateBusy(false);
-    }
+    createUser({ username: name, password: newPassword, role: newRole })
+      .then((resp) => {
+        setCreated(`Created ${resp.user.username}.`);
+        setNewUsername('');
+        setNewPassword('');
+        setNewRole('user');
+        users.reload();
+      })
+      .catch((e: unknown) => setCreateError(message(e)))
+      .finally(() => setCreateBusy(false));
   };
 
   return (
     <main className="settings-page">
-      <header className="page-header">
-        <h1>Settings</h1>
-      </header>
+      <PageHeader
+        title="Settings"
+        subtitle="Your account, how Cairn looks, and the upkeep tasks you have access to."
+      />
 
       <section className="settings-card" aria-labelledby="settings-account">
         <h2 id="settings-account">Account</h2>
@@ -145,92 +153,175 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {isAdmin && (
-        <section className="settings-card" aria-labelledby="settings-accounts">
-          <h2 id="settings-accounts">Accounts</h2>
-          {usersError && (
-            <p className="error-text" role="alert">
-              {usersError}
-            </p>
-          )}
-          {users === null && !usersError && <p className="muted">Loading accounts…</p>}
-          {users !== null && users.length === 0 && <p className="muted">No accounts yet.</p>}
-          {users !== null && users.length > 0 && (
-            <ul className="settings-user-list" data-testid="settings-user-list">
-              {users.map((row) => (
-                <li key={row.id} className="settings-user-row">
-                  <span className="settings-user-name">
-                    {row.username}
-                    {row.id === user?.id && <span className="muted"> (you)</span>}
-                  </span>
-                  <span className="settings-role" data-role={row.role}>
-                    {row.role === 'admin' ? 'Administrator' : 'Member'}
-                  </span>
-                  <span className="muted settings-user-date">{formatDate(row.created_at)}</span>
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() => void revokeSessions(row)}
-                    disabled={revokeBusy === row.id}
-                  >
-                    {revokeBusy === row.id ? 'Signing out…' : 'Revoke sessions'}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+      <section className="settings-card" aria-labelledby="settings-tools">
+        <h2 id="settings-tools">Organize</h2>
+        <p className="muted settings-hint">
+          Everything below works on the library you have selected in the header.
+        </p>
+        <ul className="settings-links">
+          <li>
+            <Link className="button" to="/tags">
+              Tags
+            </Link>
+            <span className="muted">Labels you apply to media, and where to browse by them.</span>
+          </li>
+          <li>
+            <Link className="button" to="/albums">
+              Albums
+            </Link>
+            <span className="muted">Curated groups of photos and videos.</span>
+          </li>
+          <li>
+            <Link className="button" to="/memories">
+              Memories
+            </Link>
+            <span className="muted">Markdown notes about your media.</span>
+          </li>
+          <li>
+            <Link className="button" to="/people">
+              People
+            </Link>
+            <span className="muted">Face grouping, if the server supports it.</span>
+          </li>
+          <li>
+            <Link className="button" to="/sharing">
+              Sharing
+            </Link>
+            <span className="muted">Public links to albums and files.</span>
+          </li>
+          <li>
+            <Link className="button" to="/duplicates">
+              Duplicates
+            </Link>
+            <span className="muted">Files with identical contents.</span>
+          </li>
+        </ul>
+      </section>
 
-          <form className="settings-create" onSubmit={(e) => void createUser(e)}>
-            <h3>Add an account</h3>
-            <div className="settings-create-fields">
-              <input
-                className="settings-input"
-                type="text"
-                placeholder="Username"
-                aria-label="New username"
-                value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value)}
-                disabled={createBusy}
-              />
-              <input
-                className="settings-input"
-                type="password"
-                placeholder="Password"
-                aria-label="New password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                disabled={createBusy}
-              />
-              <select
-                className="settings-input"
-                aria-label="New account role"
-                value={newRole}
-                onChange={(e) => setNewRole(e.target.value as UserRole)}
-                disabled={createBusy}
-              >
-                <option value="user">Member</option>
-                <option value="admin">Administrator</option>
-              </select>
-              <button type="submit" className="button" disabled={createBusy}>
-                {createBusy ? 'Creating…' : 'Create account'}
-              </button>
-            </div>
-            {createError && (
+      {isAdmin ? (
+        <>
+          <section className="settings-card" aria-labelledby="settings-accounts">
+            <h2 id="settings-accounts">Accounts</h2>
+            {users.error && (
               <p className="error-text" role="alert">
-                {createError}
+                {users.error}
               </p>
             )}
-            {created && (
-              <p className="settings-created" role="status">
-                {created}
-              </p>
+            {users.loading && !users.error && <p className="muted">Loading accounts…</p>}
+            {users.data !== null && users.data.length === 0 && (
+              <p className="muted">No accounts yet.</p>
             )}
-          </form>
-        </section>
-      )}
+            {users.data !== null && users.data.length > 0 && (
+              <ul className="settings-user-list" data-testid="settings-user-list">
+                {users.data.map((row) => (
+                  <li key={row.id} className="settings-user-row">
+                    <span className="settings-user-name">
+                      {row.username}
+                      {row.id === user?.id && <span className="muted"> (you)</span>}
+                    </span>
+                    <span className="settings-role" data-role={row.role}>
+                      {row.role === 'admin' ? 'Administrator' : 'Member'}
+                    </span>
+                    <span className="muted settings-user-date">{formatDate(row.created_at)}</span>
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => {
+                        setRevokeError(null);
+                        setRevoking(row);
+                      }}
+                    >
+                      Revoke sessions
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-      {!isAdmin && (
+            <form className="settings-create" onSubmit={(e) => void create(e)}>
+              <h3>Add an account</h3>
+              <div className="settings-create-fields">
+                <input
+                  className="settings-input"
+                  type="text"
+                  placeholder="Username"
+                  aria-label="New username"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  disabled={createBusy}
+                />
+                <input
+                  className="settings-input"
+                  type="password"
+                  placeholder="Password"
+                  aria-label="New password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={createBusy}
+                />
+                <select
+                  className="settings-input"
+                  aria-label="New account role"
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value as UserRole)}
+                  disabled={createBusy}
+                >
+                  <option value="user">Member</option>
+                  <option value="admin">Administrator</option>
+                </select>
+                <button type="submit" className="button" disabled={createBusy}>
+                  {createBusy ? 'Creating…' : 'Create account'}
+                </button>
+              </div>
+              {createError && (
+                <p className="error-text" role="alert">
+                  {createError}
+                </p>
+              )}
+              {created && (
+                <p className="settings-created" role="status">
+                  {created}
+                </p>
+              )}
+            </form>
+          </section>
+
+          <section className="settings-card" aria-labelledby="settings-admin">
+            <h2 id="settings-admin">Server upkeep</h2>
+            <p className="muted settings-hint">
+              Administrator-only. These are the tasks that touch the whole server rather than one
+              library.
+            </p>
+            <ul className="settings-links">
+              <li>
+                <Link className="button" to="/libraries">
+                  Libraries
+                </Link>
+                <span className="muted">Register, reconnect, re-index, and unregister storage.</span>
+              </li>
+              <li>
+                <Link className="button" to="/permissions">
+                  Permissions
+                </Link>
+                <span className="muted">Who can read, write, and manage each library.</span>
+              </li>
+              <li>
+                <Link className="button" to="/ml">
+                  Machine learning
+                </Link>
+                <span className="muted">Similarity passes and visual search.</span>
+              </li>
+              <li>
+                <Link className="button" to="/backups">
+                  Backups
+                </Link>
+                <span className="muted">Take, verify, and restore a metadata snapshot.</span>
+              </li>
+            </ul>
+          </section>
+        </>
+      ) : (
         <section className="settings-card" aria-labelledby="settings-access">
           <h2 id="settings-access">Access</h2>
           <p className="muted">
@@ -239,6 +330,23 @@ export default function SettingsPage() {
           </p>
         </section>
       )}
+
+      <ConfirmDialog
+        open={revoking !== null}
+        title="Sign this account out everywhere?"
+        confirmLabel="Revoke sessions"
+        busy={revokeBusy}
+        error={revokeError}
+        message={
+          <p>
+            <strong>{revoking?.username}</strong> will be signed out of every device and browser.
+            They will need to sign in again.
+          </p>
+        }
+        onCancel={() => setRevoking(null)}
+        onConfirm={confirmRevoke}
+        testId="revoke-sessions-dialog"
+      />
 
       <footer className="settings-footer">
         <p className="muted">
