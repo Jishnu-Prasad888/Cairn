@@ -140,9 +140,7 @@ export const getFileMetadata = (libraryId: string, fileId: string) =>
   apiGet<{ metadata: FileMetadata }>(`/libraries/${libraryId}/files/${fileId}/metadata`);
 
 export const listDuplicates = (libraryId: string, cursor?: string, limit = 50) =>
-  apiGet<DuplicatesResponse>(
-    `/libraries/${libraryId}/files/duplicates${query({ cursor, limit })}`,
-  );
+  apiGet<DuplicatesResponse>(`/libraries/${libraryId}/files/duplicates${query({ cursor, limit })}`);
 
 /* --------------------------- file mutations -------------------------- */
 
@@ -163,12 +161,7 @@ export const uploadFile = (libraryId: string, file: File, destPath?: string) =>
 export const softDeleteFile = (libraryId: string, relPath: string, fileId: string) =>
   apiDelete<void>(`/libraries/${libraryId}/files/${fileId}`, { path: relPath });
 
-export const renameFile = (
-  libraryId: string,
-  relPath: string,
-  fileId: string,
-  newName: string,
-) =>
+export const renameFile = (libraryId: string, relPath: string, fileId: string, newName: string) =>
   apiPost<{ file: FileSummary }>(`/libraries/${libraryId}/files/${fileId}/rename`, {
     path: relPath,
     new_name: newName,
@@ -284,7 +277,8 @@ export const removeAlbumFile = (libraryId: string, albumId: string, fileId: stri
 
 /* ------------------------------- tags ------------------------------ */
 
-export const listTags = (libraryId: string) => apiGet<TagListResponse>(`/libraries/${libraryId}/tags`);
+export const listTags = (libraryId: string) =>
+  apiGet<TagListResponse>(`/libraries/${libraryId}/tags`);
 
 export const createTag = (libraryId: string, name: string, color?: string) =>
   apiPost<{ tag: Tag }>(`/libraries/${libraryId}/tags`, color ? { name, color } : { name });
@@ -393,9 +387,7 @@ export const assignFace = (libraryId: string, personId: string, faceId: string) 
   apiPost<{ assigned: boolean }>(`/libraries/${libraryId}/people/${personId}/faces/${faceId}`, {});
 
 export const unassignFace = (libraryId: string, personId: string, faceId: string) =>
-  apiDelete<{ unassigned: boolean }>(
-    `/libraries/${libraryId}/people/${personId}/faces/${faceId}`,
-  );
+  apiDelete<{ unassigned: boolean }>(`/libraries/${libraryId}/people/${personId}/faces/${faceId}`);
 
 export const faceImageUrl = (libraryId: string, faceId: string): string =>
   `${API_BASE}/libraries/${libraryId}/faces/${faceId}/image`;
@@ -436,8 +428,7 @@ export const revokeShare = (libraryId: string, shareId: string) =>
 
 /* --------------------------------- ml ------------------------------ */
 
-export const getMLStatus = (libraryId: string) =>
-  apiGet<MLStatus>(`/libraries/${libraryId}/ml`);
+export const getMLStatus = (libraryId: string) => apiGet<MLStatus>(`/libraries/${libraryId}/ml`);
 
 export const runSimilarityPass = (libraryId: string) =>
   apiPost<{ library_id: string; status: string }>(`/libraries/${libraryId}/ml/similarity/pass`);

@@ -206,9 +206,7 @@ export default function AlbumsPage() {
     useCallback(async (id: string) => (await listAlbums(id)).albums ?? [], []),
   );
   const files = useLibraryResource(
-    useCallback((id: string) => listAlbumFiles(id, albumId!).then((r) => r.files ?? []), [
-      albumId,
-    ]),
+    useCallback((id: string) => listAlbumFiles(id, albumId!).then((r) => r.files ?? []), [albumId]),
     [albumId],
     albumId !== null,
   );
@@ -341,7 +339,9 @@ export default function AlbumsPage() {
 
           {files.data !== null && files.data.length === 0 && (
             <EmptyState title="This album is empty" testId="album-empty">
-              <p className="muted">Use “Add files” to bring in media from anywhere in the library.</p>
+              <p className="muted">
+                Use “Add files” to bring in media from anywhere in the library.
+              </p>
             </EmptyState>
           )}
 
@@ -355,7 +355,9 @@ export default function AlbumsPage() {
                   type="button"
                   className="file-card-action"
                   aria-label={`Remove ${f.name} from album`}
-                  onClick={() => void run(() => removeAlbumFile(gate.libraryId, activeAlbum.id, f.id))}
+                  onClick={() =>
+                    void run(() => removeAlbumFile(gate.libraryId, activeAlbum.id, f.id))
+                  }
                 >
                   ×
                 </button>
@@ -459,13 +461,18 @@ export default function AlbumsPage() {
         busy={busy}
         error={error}
         message={
-          <p>The album is removed. The files in it are not affected and stay exactly where they are.</p>
+          <p>
+            The album is removed. The files in it are not affected and stay exactly where they are.
+          </p>
         }
         onCancel={() => setDeleting(null)}
         onConfirm={() => {
           if (!deleting) return;
           const target = deleting;
-          void run(() => deleteAlbum(gate.libraryId, target.id), () => setAlbumId(null));
+          void run(
+            () => deleteAlbum(gate.libraryId, target.id),
+            () => setAlbumId(null),
+          );
         }}
         testId="delete-album-dialog"
       />

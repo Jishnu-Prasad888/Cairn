@@ -14,14 +14,7 @@
  * F fullscreen, S slideshow, T details, Esc close.
  */
 
-import {
-  type FormEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   addFavorite,
@@ -93,10 +86,13 @@ export function ViewerModal({
   const [tab, setTab] = useState<PanelTab>('details');
   // Both are tagged with the file they describe, so navigating never shows the
   // previous file's favourite or metadata while the new request is in flight.
-  const [favoriteState, setFavoriteState] = useState<{ fileId: string; value: boolean } | null>(null);
-  const [metadataState, setMetadataState] = useState<{ fileId: string; value: FileMetadata | null } | null>(
+  const [favoriteState, setFavoriteState] = useState<{ fileId: string; value: boolean } | null>(
     null,
   );
+  const [metadataState, setMetadataState] = useState<{
+    fileId: string;
+    value: FileMetadata | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -348,7 +344,12 @@ export function ViewerModal({
           </span>
           <div className="viewer-toolbar-actions">
             {hasPrev && (
-              <button type="button" className="viewer-tool" onClick={goPrev} aria-label="Previous item">
+              <button
+                type="button"
+                className="viewer-tool"
+                onClick={goPrev}
+                aria-label="Previous item"
+              >
                 ‹
               </button>
             )}
@@ -526,12 +527,19 @@ export function ViewerModal({
                     onChanged={onChanged}
                   />
                 )}
-                {tab === 'people' && <PeoplePanel key={file.id} libraryId={libraryId} file={file} />}
+                {tab === 'people' && (
+                  <PeoplePanel key={file.id} libraryId={libraryId} file={file} />
+                )}
                 {tab === 'memories' && (
                   <MemoriesPanel key={file.id} libraryId={libraryId} file={file} />
                 )}
                 {tab === 'similar' && (
-                  <SimilarPanel key={file.id} libraryId={libraryId} file={file} onOpen={onNavigate} />
+                  <SimilarPanel
+                    key={file.id}
+                    libraryId={libraryId}
+                    file={file}
+                    onOpen={onNavigate}
+                  />
                 )}
                 {tab === 'share' && <SharePanel key={file.id} libraryId={libraryId} file={file} />}
               </div>
@@ -559,13 +567,7 @@ export function ViewerModal({
 
 /* ------------------------------ panels ------------------------------- */
 
-function DetailsPanel({
-  file,
-  metadata,
-}: {
-  file: FileSummary;
-  metadata: FileMetadata | null;
-}) {
+function DetailsPanel({ file, metadata }: { file: FileSummary; metadata: FileMetadata | null }) {
   return (
     <div data-testid="viewer-details-panel">
       <dl className="viewer-facts">
@@ -615,10 +617,7 @@ function FileFacts({ metadata }: { metadata: FileMetadata }) {
   }
   if (metadata.duration_secs != null && metadata.duration_secs > 0) {
     const total = Math.round(metadata.duration_secs);
-    rows.push([
-      'Duration',
-      `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`,
-    ]);
+    rows.push(['Duration', `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`]);
   }
   const camera = [metadata.camera_make, metadata.camera_model].filter(Boolean).join(' ');
   if (camera) rows.push(['Camera', camera]);

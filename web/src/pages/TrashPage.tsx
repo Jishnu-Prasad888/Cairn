@@ -45,11 +45,9 @@ export default function TrashPage() {
 
   // The viewer on this page offers a permanent delete rather than a second
   // soft delete, which would be a no-op.
-  const ops = useFileOperations(
-    gate.kind === 'ready' ? gate.libraryId : '',
-    trash.reload,
-    { permanent: true },
-  );
+  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', trash.reload, {
+    permanent: true,
+  });
 
   const restore = async (file: FileSummary) => {
     if (gate.kind !== 'ready') return;
@@ -198,8 +196,8 @@ export default function TrashPage() {
         message={
           erasing && (
             <p>
-              <strong>{erasing.name}</strong> will be erased from Cairn's index and its bytes removed
-              from disk. <strong>This cannot be undone.</strong>
+              <strong>{erasing.name}</strong> will be erased from Cairn's index and its bytes
+              removed from disk. <strong>This cannot be undone.</strong>
             </p>
           )
         }

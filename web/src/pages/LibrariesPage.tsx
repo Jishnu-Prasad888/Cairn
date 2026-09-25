@@ -207,13 +207,7 @@ function AddLibraryDialog({ onClose }: { onClose: () => void }) {
 }
 
 /** Reconnect an offline library that is back at a new mount point. */
-function ReconnectDialog({
-  library,
-  onClose,
-}: {
-  library: Library;
-  onClose: () => void;
-}) {
+function ReconnectDialog({ library, onClose }: { library: Library; onClose: () => void }) {
   const { refresh } = useLibraries();
   const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
@@ -325,8 +319,7 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
       <div className="library-row-main">
         <div className="library-row-titles">
           <h2>
-            {library.name}{' '}
-            <LibraryStatusBadge status={library.status} />
+            {library.name} <LibraryStatusBadge status={library.status} />
           </h2>
           <p className="muted library-row-path" title={library.root}>
             {library.root}
@@ -334,7 +327,9 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
           {status && (status.indexed ?? 0) > 0 && (
             <p className="muted library-row-index">
               {status.indexed} files indexed
-              {status.last_finished_at ? ` · last scan ${new Date(status.last_finished_at).toLocaleString()}` : ''}
+              {status.last_finished_at
+                ? ` · last scan ${new Date(status.last_finished_at).toLocaleString()}`
+                : ''}
             </p>
           )}
         </div>
@@ -400,9 +395,7 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
         </p>
       )}
 
-      {reconnecting && (
-        <ReconnectDialog library={library} onClose={() => setReconnecting(false)} />
-      )}
+      {reconnecting && <ReconnectDialog library={library} onClose={() => setReconnecting(false)} />}
 
       <ConfirmDialog
         open={confirmUnregister}

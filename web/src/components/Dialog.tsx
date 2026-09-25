@@ -261,9 +261,7 @@ export function PromptDialog({
         onSubmit={(event) => {
           event.preventDefault();
           const field = event.currentTarget.elements.namedItem('value') as
-            | HTMLInputElement
-            | HTMLTextAreaElement
-            | null;
+            HTMLInputElement | HTMLTextAreaElement | null;
           if (!field) return;
           const value = field.value.trim();
           if (value) onConfirm(value);

@@ -37,9 +37,7 @@ export interface LibraryResource<T> extends AsyncResource<T> {
 
 /** A settled result, tagged with the key it belongs to. */
 type Settled<T> =
-  | { key: string; status: 'ok'; data: T }
-  | { key: string; status: 'error'; message: string }
-  | null;
+  { key: string; status: 'ok'; data: T } | { key: string; status: 'error'; message: string } | null;
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -32,10 +32,7 @@ export function FileGrid({
   const selecting = selectable && selectedIds.size > 0;
 
   return (
-    <ul
-      className={selecting ? 'file-grid selecting' : 'file-grid'}
-      data-testid="file-grid"
-    >
+    <ul className={selecting ? 'file-grid selecting' : 'file-grid'} data-testid="file-grid">
       {files.map((f) => {
         const selected = selectedIds?.has(f.id) ?? false;
         const media =
@@ -53,10 +50,7 @@ export function FileGrid({
             </span>
           );
         return (
-          <li
-            key={f.id}
-            className={selected ? 'file-card selected' : 'file-card'}
-          >
+          <li key={f.id} className={selected ? 'file-card selected' : 'file-card'}>
             <button type="button" className="file-card-main" onClick={() => onOpen(f)}>
               {media}
               <span className="file-card-caption" title={f.rel_path}>

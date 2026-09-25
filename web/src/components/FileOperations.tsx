@@ -110,8 +110,8 @@ export function useFileOperations(
                 </p>
               ) : (
                 <p>
-                  <strong>{pending.file.name}</strong> will be moved to the trash. You can restore it
-                  from the Trash page; your original file is not modified.
+                  <strong>{pending.file.name}</strong> will be moved to the trash. You can restore
+                  it from the Trash page; your original file is not modified.
                 </p>
               )}
             </>

@@ -259,7 +259,12 @@ describe('AlbumsPage', () => {
     mockApi([
       (url) =>
         url.includes('/search?q=nothing')
-          ? json({ error: { code: 'BAD_REQUEST', message: 'Search is not indexed.', request_id: '1' } }, 400)
+          ? json(
+              {
+                error: { code: 'BAD_REQUEST', message: 'Search is not indexed.', request_id: '1' },
+              },
+              400,
+            )
           : undefined,
       (url) => (url.endsWith('/api/v1/libraries/lib1/albums') ? json(albums) : undefined),
       (url) =>

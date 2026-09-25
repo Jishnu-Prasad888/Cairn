@@ -118,9 +118,15 @@ describe('MemoriesPage', () => {
     mockApi([
       (url, init) =>
         /\/memories\/mem1$/.test(url) && init?.method === 'PUT'
-          ? json({ error: { code: 'CONFLICT', message: 'Someone else edited this.', request_id: '1' } }, 409)
+          ? json(
+              {
+                error: { code: 'CONFLICT', message: 'Someone else edited this.', request_id: '1' },
+              },
+              409,
+            )
           : undefined,
-      (url) => (/\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined),
+      (url) =>
+        /\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined,
     ]);
     renderPage(<MemoriesPage />);
     await screen.findByText('Trip to Rye');
@@ -192,11 +198,16 @@ describe('MemoryEditor ref picker', () => {
 
   it('inserts a picked reference at the caret', async () => {
     mockApi([
-      (url) => (/\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined),
+      (url) =>
+        /\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined,
       (url) => (/\/memories\/mem1\/versions$/.test(url) ? json(versions) : undefined),
       (url) =>
         url.includes('/search?q=beach')
-          ? json({ files: [{ id: 'f9', name: 'beach.jpg', folder_path: 'Rye', rel_path: 'Rye/beach.jpg' }] })
+          ? json({
+              files: [
+                { id: 'f9', name: 'beach.jpg', folder_path: 'Rye', rel_path: 'Rye/beach.jpg' },
+              ],
+            })
           : undefined,
     ]);
     renderPage(<MemoriesPage />);
@@ -217,7 +228,8 @@ describe('MemoryEditor ref picker', () => {
 
   it('searches the kind that is selected, and says when nothing matches', async () => {
     mockApi([
-      (url) => (/\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined),
+      (url) =>
+        /\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined,
       (url) => (/\/memories\/mem1\/versions$/.test(url) ? json(versions) : undefined),
       (url) => (url.endsWith('/api/v1/libraries/lib1/tags') ? json({ tags: [] }) : undefined),
     ]);

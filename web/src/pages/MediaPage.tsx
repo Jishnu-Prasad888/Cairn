@@ -210,9 +210,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
         cursor: nextCursor,
         limit: PAGE_SIZE,
       };
-      const listing = q
-        ? await searchFiles(libraryId, params)
-        : await listFiles(libraryId, params);
+      const listing = q ? await searchFiles(libraryId, params) : await listFiles(libraryId, params);
       setFiles((prev) => [...prev, ...(listing.files ?? [])]);
       setNextCursor(listing.next_cursor);
     } catch (e: unknown) {
@@ -294,10 +292,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
     });
 
   const crumbs = crumbSegments(folderPath);
-  const selectedFiles = useMemo(
-    () => files.filter((f) => selected.has(f.id)),
-    [files, selected],
-  );
+  const selectedFiles = useMemo(() => files.filter((f) => selected.has(f.id)), [files, selected]);
 
   if (gate.kind === 'loading') {
     return (
@@ -388,9 +383,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
             <button
               type="button"
               className="button danger-button"
-              onClick={() =>
-                setPending({ kind: 'trash-many', files: selectedFiles })
-              }
+              onClick={() => setPending({ kind: 'trash-many', files: selectedFiles })}
               data-testid="selection-trash"
             >
               Move to trash
@@ -550,11 +543,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
             </label>
           </div>
           {hasActiveFilters(filters) && (
-            <button
-              type="button"
-              className="button"
-              onClick={() => setFilters(DEFAULT_FILTERS)}
-            >
+            <button type="button" className="button" onClick={() => setFilters(DEFAULT_FILTERS)}>
               Clear filters
             </button>
           )}

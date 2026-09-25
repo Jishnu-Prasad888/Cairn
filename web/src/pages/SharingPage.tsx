@@ -65,10 +65,7 @@ function NewShareDialog({
       ...(expires ? { expires_at: new Date(expires).toISOString() } : {}),
     })
       .then((resp) => {
-        onCreated(
-          resp.share,
-          `${window.location.origin}/s/${resp.token}`,
-        );
+        onCreated(resp.share, `${window.location.origin}/s/${resp.token}`);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false));
@@ -112,19 +109,15 @@ function NewShareDialog({
         </label>
         <p className="share-hint">
           A whole library is <code>library:&lt;id&gt;</code>. One file is{' '}
-          <code>file:&lt;library-id&gt;/&lt;relative-path&gt;</code> — the viewer’s Share tab creates
-          those for you.
+          <code>file:&lt;library-id&gt;/&lt;relative-path&gt;</code> — the viewer’s Share tab
+          creates those for you.
         </p>
 
         <fieldset className="share-caps">
           <legend>Allowed actions</legend>
           {ALL_CAPABILITIES.map((cap) => (
             <label key={cap} className="share-cap">
-              <input
-                type="checkbox"
-                checked={caps.includes(cap)}
-                onChange={() => toggleCap(cap)}
-              />
+              <input type="checkbox" checked={caps.includes(cap)} onChange={() => toggleCap(cap)} />
               <span>{CAPABILITY_LABEL[cap]}</span>
             </label>
           ))}
@@ -267,8 +260,8 @@ export default function SharingPage() {
         <div className="share-fresh" role="status" data-testid="fresh-share">
           <h2>Your link is ready</h2>
           <p className="muted">
-            This is the only time Cairn shows the token. Copy it now — it cannot be recovered
-            later, only replaced.
+            This is the only time Cairn shows the token. Copy it now — it cannot be recovered later,
+            only replaced.
           </p>
           <div className="share-fresh-row">
             <label className="visually-hidden" htmlFor="fresh-share-url">
@@ -393,8 +386,8 @@ export default function SharingPage() {
         error={error}
         message={
           <p>
-            Anyone holding the link loses access immediately. The files themselves are not
-            affected, and you can create a new link at any time.
+            Anyone holding the link loses access immediately. The files themselves are not affected,
+            and you can create a new link at any time.
           </p>
         }
         onCancel={() => setRevoking(null)}

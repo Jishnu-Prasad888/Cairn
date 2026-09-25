@@ -63,10 +63,7 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
     if (body === lastSavedRef.current) return;
     setStatus('saving');
     setError(null);
-    apiPut<{ note: FileNoteData }>(
-      `/libraries/${libraryId}/files/${fileId}/note`,
-      { body },
-    )
+    apiPut<{ note: FileNoteData }>(`/libraries/${libraryId}/files/${fileId}/note`, { body })
       .then((resp) => {
         lastSavedRef.current = resp.note.body;
         setStatus('saved');

@@ -315,14 +315,7 @@ export interface FileMetadata {
 
 /** The closed capability set from ADR-0005. */
 export type Capability =
-  | 'read'
-  | 'download'
-  | 'create'
-  | 'edit'
-  | 'move'
-  | 'delete'
-  | 'share'
-  | 'manage';
+  'read' | 'download' | 'create' | 'edit' | 'move' | 'delete' | 'share' | 'manage';
 
 export const ALL_CAPABILITIES: Capability[] = [
   'read',

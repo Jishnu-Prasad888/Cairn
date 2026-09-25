@@ -72,7 +72,10 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
   // The first copy is the one to keep; the rest are the candidates to remove.
   const [keep, ...removable] = group.files;
   return (
-    <section className="dup-group" aria-label={`Duplicate group ${group.content_hash.slice(0, 12)}`}>
+    <section
+      className="dup-group"
+      aria-label={`Duplicate group ${group.content_hash.slice(0, 12)}`}
+    >
       <header className="dup-group-header">
         <h3>
           {group.files.length} identical files · {formatBytes(group.size_bytes)} each ·{' '}
@@ -80,9 +83,7 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
         </h3>
         <code title={group.content_hash}>{group.content_hash.slice(0, 16)}…</code>
       </header>
-      <ul className="dup-members">
-        {keep && <DuplicateMember file={keep} />}
-      </ul>
+      <ul className="dup-members">{keep && <DuplicateMember file={keep} />}</ul>
       {removable.length > 0 && (
         <>
           <p className="muted dup-group-hint">
@@ -105,10 +106,13 @@ export default function DuplicatesPage() {
   const [limit, setLimit] = useState(50);
 
   const duplicates = useLibraryResource<{ total: number; groups: DuplicateGroup[] }>(
-    useCallback(async (libraryId: string) => {
-      const resp = await listDuplicates(libraryId, undefined, limit);
-      return { total: resp.total ?? 0, groups: resp.groups ?? [] };
-    }, [limit]),
+    useCallback(
+      async (libraryId: string) => {
+        const resp = await listDuplicates(libraryId, undefined, limit);
+        return { total: resp.total ?? 0, groups: resp.groups ?? [] };
+      },
+      [limit],
+    ),
     [limit],
   );
 
@@ -197,8 +201,8 @@ export default function DuplicatesPage() {
       )}
 
       <p className="muted duplicates-footnote">
-        Duplicates are computed from the index. Re-run an{' '}
-        <Link to="/libraries">index</Link> after adding files to pick up new matches.
+        Duplicates are computed from the index. Re-run an <Link to="/libraries">index</Link> after
+        adding files to pick up new matches.
       </p>
     </main>
   );

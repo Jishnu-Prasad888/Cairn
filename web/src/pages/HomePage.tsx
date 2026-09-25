@@ -147,7 +147,12 @@ export default function HomePage() {
   const data = home.data;
   const tiles = [
     { to: '/photos', label: 'Photos', count: data?.photoCount ?? null, hint: 'Pictures on disk' },
-    { to: '/videos', label: 'Videos', count: data?.videoCount ?? null, hint: 'Clips and recordings' },
+    {
+      to: '/videos',
+      label: 'Videos',
+      count: data?.videoCount ?? null,
+      hint: 'Clips and recordings',
+    },
     { to: '/files', label: 'Files', count: data?.fileCount ?? null, hint: 'Documents and other' },
     {
       to: '/memories',
@@ -193,7 +198,12 @@ export default function HomePage() {
         </h2>
         <div className="home-tiles">
           {tiles.map((tile) => (
-            <Link className="home-tile" to={tile.to} key={tile.to} data-testid={`home-tile-${tile.to}`}>
+            <Link
+              className="home-tile"
+              to={tile.to}
+              key={tile.to}
+              data-testid={`home-tile-${tile.to}`}
+            >
               <span className="home-tile-count">{tile.count === null ? '—' : tile.count}</span>
               <span className="home-tile-label">{tile.label}</span>
               <span className="home-tile-hint">{tile.hint}</span>

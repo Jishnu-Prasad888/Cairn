@@ -41,7 +41,8 @@ function setup(overrides: { tags?: typeof tags; tagFiles?: typeof tagFiles } = {
       const name = url.split('tag=')[1]?.split('&')[0] ?? '';
       return json(name === 'vacation' ? files : { files: [] });
     },
-    (url) => (url.includes('/files/f1/note') ? json({ note: { file_id: 'f1', body: '' } }) : undefined),
+    (url) =>
+      url.includes('/files/f1/note') ? json({ note: { file_id: 'f1', body: '' } }) : undefined,
     (url) => (url.includes('/favorites') ? json({ files: [] }) : undefined),
     (url) =>
       url.includes('/files/f1/metadata')
@@ -114,7 +115,10 @@ describe('TagsPage', () => {
     mockApi([
       (url, init) =>
         url.endsWith('/api/v1/libraries/lib1/tags') && init?.method === 'POST'
-          ? json({ error: { code: 'CONFLICT', message: 'That tag already exists.', request_id: '1' } }, 409)
+          ? json(
+              { error: { code: 'CONFLICT', message: 'That tag already exists.', request_id: '1' } },
+              409,
+            )
           : undefined,
       (url) => (url.endsWith('/api/v1/libraries/lib1/tags') ? json(tags) : undefined),
     ]);

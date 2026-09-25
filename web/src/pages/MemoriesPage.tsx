@@ -159,7 +159,9 @@ function MemoryEditor({
           aria-label="Memory body"
           value={draft.body}
           onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-          placeholder={'Write in Markdown…\n\nUse the picker above to link to photos, albums, or people.'}
+          placeholder={
+            'Write in Markdown…\n\nUse the picker above to link to photos, albums, or people.'
+          }
         />
         <div
           className="editor-preview"

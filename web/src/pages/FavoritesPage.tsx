@@ -86,14 +86,9 @@ export default function FavoritesPage() {
 
       {favorites.data !== null && favorites.data.length > 0 && (
         <>
-          <FileGrid
-            libraryId={gate.libraryId}
-            files={favorites.data}
-            onOpen={ops.openViewer}
-          />
+          <FileGrid libraryId={gate.libraryId} files={favorites.data} onOpen={ops.openViewer} />
           <p className="muted media-pagination">
-            {favorites.data.length}{' '}
-            {favorites.data.length === 1 ? 'favorite' : 'favorites'}
+            {favorites.data.length} {favorites.data.length === 1 ? 'favorite' : 'favorites'}
           </p>
         </>
       )}

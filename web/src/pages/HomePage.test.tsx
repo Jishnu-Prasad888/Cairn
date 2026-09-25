@@ -1,14 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  apiError,
-  fileFixture,
-  json,
-  mockApi,
-  originalFetch,
-  renderPage,
-} from '../test/harness';
+import { apiError, fileFixture, json, mockApi, originalFetch, renderPage } from '../test/harness';
 import HomePage from './HomePage';
 
 const health = { status: 'ok', database: 'ok' };
@@ -27,7 +20,9 @@ interface Options {
   people?: { people: unknown[] } | 'unsupported';
 }
 
-const recent = { files: [fileFixture({ id: 'f1' }), fileFixture({ id: 'f2', name: 'IMG_0002.png' })] };
+const recent = {
+  files: [fileFixture({ id: 'f1' }), fileFixture({ id: 'f2', name: 'IMG_0002.png' })],
+};
 
 function setup(options: Options = {}) {
   const totals = options.totals ?? {};
@@ -84,7 +79,9 @@ describe('HomePage', () => {
     const photos = await screen.findByTestId('home-tile-/photos');
     expect(await within(photos).findByText('128')).toBeInTheDocument();
     expect(within(photos).getByText('Photos')).toBeInTheDocument();
-    expect(await within(screen.getByTestId('home-tile-/videos')).findByText('4')).toBeInTheDocument();
+    expect(
+      await within(screen.getByTestId('home-tile-/videos')).findByText('4'),
+    ).toBeInTheDocument();
     expect(within(screen.getByTestId('home-tile-/files')).getByText('7')).toBeInTheDocument();
     expect(within(screen.getByTestId('home-tile-/albums')).getByText('1')).toBeInTheDocument();
     expect(within(screen.getByTestId('home-tile-/people')).getByText('2')).toBeInTheDocument();
@@ -137,10 +134,10 @@ describe('HomePage', () => {
           : undefined,
       (url) =>
         url.includes('/api/v1/libraries/lib1/files') ? json({ files: [], total: 0 }) : undefined,
-      (url) =>
-        url.endsWith('/api/v1/libraries/lib1/albums') ? json({ albums: [] }) : undefined,
+      (url) => (url.endsWith('/api/v1/libraries/lib1/albums') ? json({ albums: [] }) : undefined),
       (url) => (url.endsWith('/api/v1/libraries/lib1/tags') ? json({ tags: [] }) : undefined),
-      (url) => (url.endsWith('/api/v1/libraries/lib1/memories') ? json({ memories: [] }) : undefined),
+      (url) =>
+        url.endsWith('/api/v1/libraries/lib1/memories') ? json({ memories: [] }) : undefined,
       (url) => (url.endsWith('/api/v1/libraries/lib1/favorites') ? json({ files: [] }) : undefined),
       (url) => (url.endsWith('/api/v1/libraries/lib1/people') ? json({ people: [] }) : undefined),
     ]);

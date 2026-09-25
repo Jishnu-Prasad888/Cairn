@@ -53,7 +53,9 @@
   font: inherit;
   cursor: pointer;
   text-align: left;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .tag-card:hover {

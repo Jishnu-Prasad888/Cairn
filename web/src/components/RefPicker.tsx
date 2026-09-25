@@ -13,13 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import {
-  listAlbums,
-  listMemories,
-  listPeople,
-  listTags,
-  searchFiles,
-} from '../api/queries';
+import { listAlbums, listMemories, listPeople, listTags, searchFiles } from '../api/queries';
 import type { RefType } from '../api/types';
 import './RefPicker.css';
 
@@ -93,7 +87,9 @@ export function RefPicker({
   const needle = term.trim();
   const active = needle.length >= 2;
   const key = active ? `${libraryId}|${type}|${needle}` : null;
-  const [settled, setSettled] = useState<{ key: string; results: Candidate[] } | { key: string; message: string } | null>(null);
+  const [settled, setSettled] = useState<
+    { key: string; results: Candidate[] } | { key: string; message: string } | null
+  >(null);
 
   // Fetch on a short debounce so typing does not fire a request per keystroke.
   useEffect(() => {
@@ -193,7 +189,9 @@ export function RefPicker({
                 data-testid={`ref-result-${candidate.id}`}
               >
                 <span className="ref-result-label">{candidate.label}</span>
-                {candidate.detail && <span className="muted ref-result-detail">{candidate.detail}</span>}
+                {candidate.detail && (
+                  <span className="muted ref-result-detail">{candidate.detail}</span>
+                )}
               </button>
             </li>
           ))}
