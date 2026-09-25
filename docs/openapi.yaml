@@ -1163,6 +1163,88 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/note:
+    get:
+      tags: [Files]
+      operationId: getFileNote
+      summary: Get a file's Markdown note
+      description: >
+        Requires an authenticated session with the `read` capability on the file.
+        Returns the note stored for the file; an empty `body` indicates no note
+        has been written yet.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The file's note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileNoteEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    put:
+      tags: [Files]
+      operationId: setFileNote
+      summary: Set or replace a file's Markdown note
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        Replaces the stored note with the request body. An empty `body` clears
+        the note. Bodies larger than 256 KiB are rejected with 413.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetNoteRequest'
+      responses:
+        '200':
+          description: The saved note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileNoteEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+    delete:
+      tags: [Files]
+      operationId: clearFileNote
+      summary: Remove a file's Markdown note
+      description: >
+        Requires an authenticated session with the `edit` capability on the file.
+        Deletes the stored note (idempotent; clearing a missing note succeeds).
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Note cleared
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /libraries/{libraryID}/files/{fileID}/thumbnail:
     get:
       tags: [Files]
@@ -3831,6 +3913,33 @@ components:
       properties:
         metadata:
           $ref: '#/components/schemas/FileMetadata'
+    FileNote:
+      type: object
+      required: [file_id, body]
+      properties:
+        file_id:
+          type: string
+        body:
+          type: string
+          description: Markdown note text; empty when none has been written.
+        updated_at:
+          type: string
+          format: date-time
+          description: Last time the note was saved.
+    SetNoteRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          description: Markdown note text. An empty string clears the note.
+      maxProperties: 1
+    FileNoteEnvelope:
+      type: object
+      required: [note]
+      properties:
+        note:
+          $ref: '#/components/schemas/FileNote'
     RenameRequest:
       type: object
       required: [path, new_name]
@@ -4175,6 +4284,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     Conflict:
       description: The request conflicts with the current state (e.g. duplicate username or double bootstrap)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PayloadTooLarge:
+      description: Request body exceeds the allowed size (e.g. a note over 256 KiB)
       content:
         application/json:
           schema:

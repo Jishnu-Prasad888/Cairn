@@ -34,18 +34,27 @@ files from the web UI.
 - **Upload** — multipart `POST .../files/upload` with the file and its computed
   destination path (current folder + filename). Shows an "Uploading…" state and
   reloads the listing on success.
-- **Photo / video viewer** — modal opened by clicking a file: photos use the
+- **Photo / video viewer** — modal opened by clicking a file; the modal occupies
+  60% of the screen width (near-full-width below 640px). Photos use the
   thumbnail endpoint, videos stream from the `{download}` endpoint with inline
   controls. Escape or backdrop click closes.
-- **File operations** — from the viewer: Download, Rename, Move, Copy, and Move
-  to trash. Rename / move / copy prompt for the new name or destination
-  relative path; delete is a soft delete (trash) with a confirmation.
+- **Markdown note** — a note editor sits directly under the image/video with
+  Write/Preview tabs, rendered Markdown, and debounced autosave (via the
+  per-file `note` endpoints). The note persists server-side per library.
+- **File operations** — from the viewer: Download, Favorite, Rename, Move, Copy,
+  and Move to trash. Rename / move / copy prompt for the new name or
+  destination relative path; delete is a soft delete (trash) with a
+  confirmation.
+- **Details** — when the extractor has populated metadata, a Details panel lists
+  dimensions, duration, camera, capture time, and a map link for GPS
+  coordinates.
 - **Trash** — header toggle showing trashed files with Restore. Permanent
   deletion of copies is out of scope for the UI (only soft delete + restore).
 
-The page consumes only existing endpoints (`folders`, `files`, `search`,
+The page consumes existing endpoints (`folders`, `files`, `search`,
 `trash`, `upload`, `thumbnail`, `download`, per-file `rename`/`move`/`copy`/
-`delete`/`restore`); the Phase 21 PR added no server surface.
+`delete`/`restore`, plus viewer `metadata`, `favorite`, and `note`); the Phase 21
+PR added no server surface.
 
 ## Organization (`/albums`, `/tags`)
 
