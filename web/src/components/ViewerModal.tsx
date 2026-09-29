@@ -31,6 +31,8 @@ import {
   createTag,
   getFileMetadata,
   getSimilarFiles,
+  listAlbumFiles,
+  listAlbums,
   listFavorites,
   listFileTags,
   listMemoryRefs,
@@ -39,9 +41,19 @@ import {
   listTags,
   removeFavorite,
   removeFileTag,
+  addAlbumFile,
+  removeAlbumFile,
   searchFiles,
 } from '../api/queries';
-import type { FileMetadata, FileSummary, Memory, Person, SimilarFile, Tag } from '../api/types';
+import type {
+  Album,
+  FileMetadata,
+  FileSummary,
+  Memory,
+  Person,
+  SimilarFile,
+  Tag,
+} from '../api/types';
 import { formatBytes } from '../api/types';
 import { useFocusTrap } from '../lib/focusTrap';
 import { FileNote } from './FileNote';
@@ -66,7 +78,7 @@ export interface ViewerModalProps {
   onClose: () => void;
 }
 
-type PanelTab = 'details' | 'tags' | 'people' | 'memories' | 'similar' | 'share';
+type PanelTab = 'details' | 'tags' | 'people' | 'memories' | 'similar' | 'share' | 'albums';
 
 const PANEL_TABS: Array<{ id: PanelTab; label: string }> = [
   { id: 'details', label: 'Details' },
@@ -75,6 +87,7 @@ const PANEL_TABS: Array<{ id: PanelTab; label: string }> = [
   { id: 'memories', label: 'Memories' },
   { id: 'similar', label: 'Similar' },
   { id: 'share', label: 'Share' },
+  { id: 'albums', label: 'Albums' },
 ];
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
@@ -452,133 +465,151 @@ export function ViewerModal({
         <div className="viewer-body">
           {stage}
 
-          {panelOpen && (
-            <aside className="viewer-panel" id="viewer-panel" aria-label="File details and actions">
-              <div className="viewer-meta">
-                <h2 title={file.rel_path}>{file.name}</h2>
-                <p className="muted">
-                  {file.folder_path || 'Library root'} · {formatBytes(file.size_bytes)}
-                </p>
-              </div>
+          {/* Scrollable area below the image: note (caption) then detail panel */}
+          <div className="viewer-scroll-area">
+            {/* Keyed by file so navigating remounts it with a clean note. */}
+            <FileNote key={file.id} libraryId={libraryId} fileId={file.id} />
 
-              <div className="viewer-actions">
-                <a
-                  className="button"
-                  href={downloadUrl(libraryId, file)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Download
-                </a>
-                <button
-                  type="button"
-                  className={favorite ? 'button favorite-button active' : 'button favorite-button'}
-                  onClick={() => void toggleFavorite()}
-                  disabled={favorite === null || busy}
-                  aria-pressed={favorite === true}
-                >
-                  {favorite ? '★ Favorite' : '☆ Favorite'}
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => onRequestAction('rename', file)}
-                  disabled={busy}
-                >
-                  Rename
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => onRequestAction('move', file)}
-                  disabled={busy}
-                >
-                  Move
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => onRequestAction('copy', file)}
-                  disabled={busy}
-                >
-                  Copy
-                </button>
-                <button
-                  type="button"
-                  className="button danger-button"
-                  onClick={() => onRequestAction('trash', file)}
-                  disabled={busy}
-                  data-testid="viewer-trash"
-                >
-                  Move to trash
-                </button>
-              </div>
-
-              <div className="viewer-tabs" role="tablist" aria-label="File information">
-                {PANEL_TABS.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="tab"
-                    id={`viewer-tab-${t.id}`}
-                    aria-selected={tab === t.id}
-                    aria-controls="viewer-tabpanel"
-                    className={tab === t.id ? 'viewer-tab active' : 'viewer-tab'}
-                    onClick={() => setTab(t.id)}
-                    data-testid={`viewer-tab-${t.id}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-
-              <div
-                className="viewer-tabpanel"
-                role="tabpanel"
-                id="viewer-tabpanel"
-                aria-labelledby={`viewer-tab-${tab}`}
-                tabIndex={0}
+            {panelOpen && (
+              <aside
+                className="viewer-panel"
+                id="viewer-panel"
+                aria-label="File details and actions"
               >
-                {tab === 'details' && (
-                  <DetailsPanel key={file.id} file={file} metadata={metadata} />
-                )}
-                {tab === 'tags' && (
-                  <TagsPanel
-                    key={file.id}
-                    libraryId={libraryId}
-                    file={file}
-                    onChanged={onChanged}
-                  />
-                )}
-                {tab === 'people' && (
-                  <PeoplePanel key={file.id} libraryId={libraryId} file={file} />
-                )}
-                {tab === 'memories' && (
-                  <MemoriesPanel key={file.id} libraryId={libraryId} file={file} />
-                )}
-                {tab === 'similar' && (
-                  <SimilarPanel
-                    key={file.id}
-                    libraryId={libraryId}
-                    file={file}
-                    onOpen={onNavigate}
-                  />
-                )}
-                {tab === 'share' && <SharePanel key={file.id} libraryId={libraryId} file={file} />}
-              </div>
+                <div className="viewer-meta">
+                  <h2 title={file.rel_path}>{file.name}</h2>
+                  <p className="muted">
+                    {file.folder_path || 'Library root'} · {formatBytes(file.size_bytes)}
+                  </p>
+                </div>
 
-              {error && (
-                <p className="error-text" role="alert">
-                  {error}
-                </p>
-              )}
-            </aside>
-          )}
+                <div className="viewer-actions">
+                  <a
+                    className="button"
+                    href={downloadUrl(libraryId, file)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Download
+                  </a>
+                  <button
+                    type="button"
+                    className={
+                      favorite ? 'button favorite-button active' : 'button favorite-button'
+                    }
+                    onClick={() => void toggleFavorite()}
+                    disabled={favorite === null || busy}
+                    aria-pressed={favorite === true}
+                  >
+                    {favorite ? '★ Favorite' : '☆ Favorite'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => onRequestAction('rename', file)}
+                    disabled={busy}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => onRequestAction('move', file)}
+                    disabled={busy}
+                  >
+                    Move
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => onRequestAction('copy', file)}
+                    disabled={busy}
+                  >
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="button danger-button"
+                    onClick={() => onRequestAction('trash', file)}
+                    disabled={busy}
+                    data-testid="viewer-trash"
+                  >
+                    Move to trash
+                  </button>
+                </div>
+
+                <div className="viewer-tabs" role="tablist" aria-label="File information">
+                  {PANEL_TABS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      id={`viewer-tab-${t.id}`}
+                      aria-selected={tab === t.id}
+                      aria-controls="viewer-tabpanel"
+                      className={tab === t.id ? 'viewer-tab active' : 'viewer-tab'}
+                      onClick={() => setTab(t.id)}
+                      data-testid={`viewer-tab-${t.id}`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div
+                  className="viewer-tabpanel"
+                  role="tabpanel"
+                  id="viewer-tabpanel"
+                  aria-labelledby={`viewer-tab-${tab}`}
+                  tabIndex={0}
+                >
+                  {tab === 'details' && (
+                    <DetailsPanel key={file.id} file={file} metadata={metadata} />
+                  )}
+                  {tab === 'tags' && (
+                    <TagsPanel
+                      key={file.id}
+                      libraryId={libraryId}
+                      file={file}
+                      onChanged={onChanged}
+                    />
+                  )}
+                  {tab === 'people' && (
+                    <PeoplePanel key={file.id} libraryId={libraryId} file={file} />
+                  )}
+                  {tab === 'memories' && (
+                    <MemoriesPanel key={file.id} libraryId={libraryId} file={file} />
+                  )}
+                  {tab === 'similar' && (
+                    <SimilarPanel
+                      key={file.id}
+                      libraryId={libraryId}
+                      file={file}
+                      onOpen={onNavigate}
+                    />
+                  )}
+                  {tab === 'share' && (
+                    <SharePanel key={file.id} libraryId={libraryId} file={file} />
+                  )}
+                  {tab === 'albums' && (
+                    <AlbumsPanel
+                      key={file.id}
+                      libraryId={libraryId}
+                      file={file}
+                      onChanged={onChanged}
+                    />
+                  )}
+                </div>
+
+                {error && (
+                  <p className="error-text" role="alert">
+                    {error}
+                  </p>
+                )}
+              </aside>
+            )}
+          </div>
         </div>
-
-        {/* Keyed by file so navigating remounts it with a clean note rather
-            than resetting its state from an effect. */}
-        <FileNote key={file.id} libraryId={libraryId} fileId={file.id} />
 
         <p className="viewer-hint muted">
           ← → move · + − zoom · 0 reset · F fullscreen · S slideshow · T details · Esc close
@@ -1068,6 +1099,118 @@ function SimilarPanel({
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * Albums panel: shows which albums already contain this file, and lets the
+ * user add it to any other album in the library.
+ */
+function AlbumsPanel({
+  libraryId,
+  file,
+  onChanged,
+}: {
+  libraryId: string;
+  file: FileSummary;
+  onChanged: () => void;
+}) {
+  const [allAlbums, setAllAlbums] = useState<Album[] | null>(null);
+  const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const resp = await listAlbums(libraryId);
+        const albums = resp.albums ?? [];
+        // Check which albums contain this file.
+        const checks = await Promise.all(
+          albums.map((a) =>
+            listAlbumFiles(libraryId, a.id)
+              .then((r) => (r.files ?? []).some((f) => f.id === file.id))
+              .catch(() => false),
+          ),
+        );
+        if (cancelled) return;
+        setAllAlbums(albums);
+        setMemberIds(new Set(albums.filter((_, i) => checks[i]).map((a) => a.id)));
+        setError(null);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryId, file.id, reloadKey]);
+
+  const toggle = async (album: Album) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (memberIds.has(album.id)) {
+        await removeAlbumFile(libraryId, album.id, file.id);
+      } else {
+        await addAlbumFile(libraryId, album.id, file.id);
+      }
+      setReloadKey((k) => k + 1);
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (allAlbums === null && error === null) {
+    return (
+      <p className="muted" role="status">
+        Loading albums…
+      </p>
+    );
+  }
+
+  if (error) {
+    return (
+      <p className="error-text" role="alert">
+        {error}
+      </p>
+    );
+  }
+
+  if (!allAlbums || allAlbums.length === 0) {
+    return (
+      <p className="muted">No albums yet. Create one from the Albums page to group your files.</p>
+    );
+  }
+
+  return (
+    <div data-testid="viewer-albums">
+      <ul className="viewer-album-list">
+        {allAlbums.map((album) => {
+          const inAlbum = memberIds.has(album.id);
+          return (
+            <li key={album.id} className="viewer-album-row">
+              <span className="viewer-album-name">{album.name}</span>
+              <button
+                type="button"
+                className={inAlbum ? 'button viewer-album-btn active' : 'button viewer-album-btn'}
+                disabled={busy}
+                onClick={() => void toggle(album)}
+                aria-pressed={inAlbum}
+              >
+                {inAlbum ? '✓ In album' : '+ Add'}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
