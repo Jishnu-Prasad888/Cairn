@@ -88,16 +88,36 @@ export interface LibraryCreateResponse {
 }
 
 /** The persistent state of a library's last indexing pass. */
+/**
+ * GET /libraries/{id}/index/status.
+ *
+ * The counts are the library's whole index, not the last scan's progress, so
+ * there is no percentage to show — "1,204 files indexed" is the truth.
+ */
 export interface IndexStatus {
   library_id?: string;
-  status?: string;
-  phase?: string;
-  indexed?: number;
-  total?: number;
-  errors?: number;
-  last_started_at?: string;
-  last_finished_at?: string;
-  message?: string;
+  /** Indexed files currently present on disk. */
+  present?: number;
+  /** Indexed files whose bytes are currently unavailable. */
+  missing?: number;
+  /** Indexed files sitting in the library trash. */
+  deleted?: number;
+  /** The running or next-queued scan, when any. */
+  active_job?: IndexJob;
+  /** Id of the most recent scan, when any. */
+  last_job_id?: string;
+}
+
+/**
+ * A background job as the server serializes it. The struct carries no JSON
+ * tags, so these keys are capitalised — `Status`, not `status`.
+ */
+export interface IndexJob {
+  ID: string;
+  Kind: string;
+  Status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  ErrorMsg?: string;
+  FinishedAt?: string;
 }
 
 /** POST /libraries/{id}/index — a scan was accepted for background execution. */

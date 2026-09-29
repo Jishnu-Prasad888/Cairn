@@ -17,6 +17,7 @@ import { copyFile, deleteForever, moveFile, renameFile, softDeleteFile } from '.
 import type { FileSummary } from '../api/types';
 import { ConfirmDialog, PromptDialog } from './Dialog';
 import { FolderPicker } from './FolderPicker';
+import type { GridFileAction } from './FileGrid';
 import type { ViewerAction } from './ViewerModal';
 
 export type FileDialogKind = ViewerAction | 'permanent';
@@ -33,6 +34,8 @@ export interface FileOperations {
   closeViewer: () => void;
   /** Let the viewer (or a page) route a file operation into the dialogs. */
   requestAction: (action: FileDialogKind, file: FileSummary) => void;
+  /** Adapter for the FileGrid `onAction` prop — maps GridFileAction to a dialog. */
+  onGridAction: (action: GridFileAction, file: FileSummary) => void;
   /** Dialog and error state to render. Renders nothing when idle. */
   dialogs: ReactElement;
   /** True while a dialog action is in flight. */
@@ -92,6 +95,16 @@ export function useFileOperations(
     [permanent],
   );
 
+  // Adapter for FileGrid's onAction prop. 'remove' is album-specific and
+  // handled by the page, so we map to a dialog-backed action.
+  const onGridAction = useCallback(
+    (action: GridFileAction, file: FileSummary) => {
+      if (action === 'remove') return; // caller handles album removal separately
+      requestAction(action, file);
+    },
+    [requestAction],
+  );
+
   const dialogs = (
     <>
       <ConfirmDialog
@@ -112,7 +125,7 @@ export function useFileOperations(
               ) : (
                 <p>
                   <strong>{pending.file.name}</strong> will be moved to the trash. You can restore
-                  it from the Trash page; your original file is not modified.
+                  it from the Trash page.
                 </p>
               )}
             </>
@@ -214,6 +227,7 @@ export function useFileOperations(
     openViewer: setViewer,
     closeViewer: () => setViewer(null),
     requestAction,
+    onGridAction,
     dialogs,
     busy,
   };
