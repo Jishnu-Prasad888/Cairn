@@ -352,7 +352,7 @@ export default function SettingsPage() {
 
       <footer className="settings-footer">
         <p className="muted">
-          <Brand>Cairn</Brand> — your files are never moved or modified.
+          <Brand>Cairn</Brand> — your personal media server.
         </p>
       </footer>
     </main>

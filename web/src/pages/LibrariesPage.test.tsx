@@ -15,7 +15,9 @@ import {
 import type { RouteHandler } from '../test/harness';
 import LibrariesPage from './LibrariesPage';
 
-const indexStatus = { status: { indexed: 1204, last_finished_at: '2026-09-01T00:00:00Z' } };
+const indexStatus = {
+  status: { present: 1204, missing: 0, active_job: null, last_finished_at: '2026-09-01T00:00:00Z' },
+};
 
 const probeClean = {
   probe: {

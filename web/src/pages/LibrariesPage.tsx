@@ -164,7 +164,7 @@ function AddLibraryDialog({ onClose }: { onClose: () => void }) {
         </label>
         <p className="library-hint">
           An absolute path on the machine running Cairn. Cairn indexes the media where it already
-          lives — originals are never moved, copied, or modified.
+          lives.
         </p>
 
         <label className="library-field">
@@ -324,12 +324,11 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
           <p className="muted library-row-path" title={library.root}>
             {library.root}
           </p>
-          {status && (status.indexed ?? 0) > 0 && (
+          {status && (status.present ?? 0) + (status.missing ?? 0) > 0 && (
             <p className="muted library-row-index">
-              {status.indexed} files indexed
-              {status.last_finished_at
-                ? ` · last scan ${new Date(status.last_finished_at).toLocaleString()}`
-                : ''}
+              {status.present} files indexed
+              {status.missing ? ` · ${status.missing} unavailable` : ''}
+              {status.active_job ? ' · scan in progress' : ''}
             </p>
           )}
         </div>
