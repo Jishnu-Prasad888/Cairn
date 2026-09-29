@@ -129,6 +129,30 @@ describe('LibrariesPage', () => {
     expect(screen.queryByTestId('server-folder-browser')).not.toBeInTheDocument();
   });
 
+  it('starts the folder browser at the list of drives', async () => {
+    setup([
+      (url) =>
+        url.includes('/api/v1/fs/dirs')
+          ? json({
+              path: '',
+              parent: '',
+              roots: true,
+              dirs: [
+                { name: 'Home', path: '/home/me' },
+                { name: '/mnt/Data', path: '/mnt/Data' },
+              ],
+            })
+          : undefined,
+    ]);
+    fireEvent.click(await screen.findByTestId('add-library-button'));
+    fireEvent.click(screen.getByTestId('browse-folders'));
+
+    expect(await screen.findByRole('button', { name: /\/mnt\/Data/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Home/ })).toBeInTheDocument();
+    // There is nothing to choose until a drive has been opened.
+    expect(screen.getByTestId('choose-folder')).toBeDisabled();
+  });
+
   it('refuses to register a path that is not a directory', async () => {
     setup([
       (url, init) =>
