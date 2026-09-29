@@ -430,16 +430,6 @@
 }
 
 .type-filter-select {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-.type-filter-select:focus {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
+  border-radius: var(--radius-pill);
+  padding-left: var(--space-4);
 }
