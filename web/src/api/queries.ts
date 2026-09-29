@@ -87,6 +87,17 @@ export const getLibrary = (id: string) => apiGet<{ library: Library }>(`/librari
 export const probeLibrary = (path: string) =>
   apiPost<LibraryProbeResponse>('/libraries/probe', { path });
 
+/** One level of the server's directory tree, for the library folder chooser. */
+export interface DirListing {
+  path: string;
+  /** Empty at the filesystem root. */
+  parent: string;
+  dirs: Array<{ name: string; path: string }>;
+}
+
+export const browseServerDirs = (path?: string) =>
+  apiGet<DirListing>(path ? `/fs/dirs?path=${encodeURIComponent(path)}` : '/fs/dirs');
+
 export const registerLibrary = (path: string, name?: string) =>
   apiPost<LibraryCreateResponse>('/libraries', name ? { path, name } : { path });
 
