@@ -14,13 +14,17 @@ LDFLAGS := -s -w \
 	-X "$(MODULE)/internal/version.Commit=$(COMMIT)" \
 	-X "$(MODULE)/internal/version.BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-.PHONY: help build test test-go test-web web-install web-build web-dev dev gofmt lint \
+.PHONY: help build test test-go test-web web-install web-build web-dev dev reset-data gofmt lint \
 	fmt fmt-check lint-go lint-web docker-build docker-buildx release release-cross clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' Makefile | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-build: web-build ## Build the production binary with the embedded frontend
+reset-data: ## Delete the local dev data directory (DB, sessions, everything) for a clean slate
+	rm -rf $(CURDIR)/cairn-data
+	@echo "Removed $(CURDIR)/cairn-data"
+
+build: reset-data web-build ## Build the production binary with the embedded frontend, wiping local dev data first
 	@mkdir -p bin
 	cp -r web/dist/. internal/webui/dist/
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/cairn
@@ -52,7 +56,7 @@ release-cross: ## Build release binaries without rebuilding the frontend (uses w
 	shasum -a 256 $(RELEASE_DIR)/cairn-* > $(RELEASE_DIR)/SHA256SUMS
 	@echo "Cross-compiled binaries written to $(RELEASE_DIR)/ (see SHA256SUMS)"
 
-dev: ## Run the backend with the on-disk built frontend, watched by the API proxy
+dev: reset-data ## Run the backend with the on-disk built frontend, wiping local dev data first
 	@mkdir -p $(CURDIR)/web/dist
 	CAIRN_DATA_DIR=$(CURDIR)/cairn-data \
 	CAIRN_HTTP_ADDR=127.0.0.1:8715 \
