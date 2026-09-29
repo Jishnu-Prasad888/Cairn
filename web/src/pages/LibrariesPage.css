@@ -1,0 +1,159 @@
+/* Library management: list rows, the add/reconnect forms, and the probe result. */
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-row {
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.library-row-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.library-row-titles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.library-row-titles h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.library-row-path {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.library-row-index {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.library-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.library-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.library-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.library-field > span {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.library-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.library-input:focus-visible {
+  border-color: var(--primary);
+}
+
+.library-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.library-probe {
+  padding: var(--space-3);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.library-probe p {
+  margin: 0 0 var(--space-2);
+}
+
+.library-probe p:last-child {
+  margin-bottom: 0;
+}
+
+.library-probe-ok {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--green) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--green) 34%, var(--border));
+}
+
+.library-probe-warn {
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--warning) 34%, var(--border));
+}
+
+.library-probe-error {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+}
+
+.library-form code {
+  padding: 1px 5px;
+  font-size: 0.85em;
+  background: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.libraries-note {
+  margin-top: var(--space-5);
+  font-size: 0.85rem;
+}
+
+.library-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+@media (max-width: 720px) {
+  .library-row-main {
+    flex-direction: column;
+  }
+
+  .library-row-actions {
+    justify-content: flex-start;
+  }
+}

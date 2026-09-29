@@ -1,18 +1,41 @@
+/**
+ * Memories — long-form Markdown documents about a library's media.
+ *
+ * This is the Obsidian-shaped editor the spec asks for: split source/preview,
+ * debounced autosave, version history you can restore from, and references to
+ * other things in the library. References are the part that used to be a row of
+ * buttons inserting `[[album:|]]` and leaving the user to find the id; they
+ * now go through a search picker, because the spec is explicit that nobody
+ * should have to type an id.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
-import type { Library, Memory, MemoryVersion, RefType } from '../api/types';
+import { useAuth } from '../auth/authContext';
+import { useLibraryGate } from '../api/libraries';
+import { useLibraryResource } from '../api/resources';
+import {
+  createMemory,
+  deleteMemory,
+  listMemories,
+  listMemoryVersions,
+  updateMemory,
+} from '../api/queries';
+import type { Memory, MemoryVersion } from '../api/types';
+import { ConfirmDialog } from '../components/Dialog';
+import LibraryPicker from '../components/LibraryPicker';
+import { RefPicker } from '../components/RefPicker';
+import {
+  EmptyState,
+  ErrorState,
+  LibraryOfflineNotice,
+  LoadingState,
+  NoLibrariesState,
+  PageHeader,
+} from '../components/States';
 import { insertRefAtCursor } from '../lib/editor';
 import { extractRefs, renderMarkdown } from '../lib/markdown';
 import './MemoriesPage.css';
-
-const REF_TYPES: Array<{ type: RefType; label: string }> = [
-  { type: 'media', label: 'Media' },
-  { type: 'memory', label: 'Memory' },
-  { type: 'album', label: 'Album' },
-  { type: 'person', label: 'Person' },
-  { type: 'tag', label: 'Tag' },
-];
 
 function formatDate(iso?: string): string {
   if (!iso) return '—';
@@ -23,53 +46,56 @@ function formatDate(iso?: string): string {
 
 interface SaveStatus {
   kind: 'idle' | 'saving' | 'saved' | 'error';
-  message?: string;
+  message?: string | undefined;
 }
 
-interface MemoryEditorProps {
+function MemoryEditor({
+  libraryId,
+  memory,
+  onDeleted,
+  onChanged,
+}: {
   libraryId: string;
   memory: Memory;
   onDeleted: (id: string) => void;
   onChanged: (memory: Memory) => void;
-}
-
-export function MemoryEditor({ libraryId, memory, onDeleted, onChanged }: MemoryEditorProps) {
+}) {
   const [draft, setDraft] = useState({ title: memory.title, body: memory.body });
   const [saved, setSaved] = useState<SaveStatus>({ kind: 'idle' });
   const [versions, setVersions] = useState<MemoryVersion[]>([]);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const draftRef = useRef(draft);
 
-  const memoryID = memory.id;
+  const memoryId = memory.id;
 
   // Keep the latest draft available to the (debounced) autosave timer.
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
 
-  // Load version history for this memory.
+  // Version history is best-effort in the editor; a failure here must not stop
+  // someone from writing.
   useEffect(() => {
     let cancelled = false;
-    apiGet<{ versions: MemoryVersion[] }>(`/libraries/${libraryId}/memories/${memoryID}/versions`)
-      .then((resp) => {
-        if (!cancelled) setVersions(resp.versions ?? []);
+    listMemoryVersions(libraryId, memoryId)
+      .then((versions) => {
+        if (!cancelled) setVersions(versions.versions ?? []);
       })
       .catch(() => {
-        // Version history is best-effort in the editor; ignore failures.
+        /* ignored on purpose */
       });
     return () => {
       cancelled = true;
     };
-  }, [memoryID, libraryId]);
+  }, [libraryId, memoryId]);
 
-  // Debounced autosave.
   const save = useCallback(() => {
     const current = draftRef.current;
     setSaved({ kind: 'saving' });
-    apiPut<{ memory: Memory }>(`/libraries/${libraryId}/memories/${memoryID}`, {
-      title: current.title,
-      body: current.body,
-    })
+    updateMemory(libraryId, memoryId, { title: current.title, body: current.body })
       .then((resp) => {
         onChanged(resp.memory);
         setSaved({ kind: 'saved' });
@@ -77,35 +103,33 @@ export function MemoryEditor({ libraryId, memory, onDeleted, onChanged }: Memory
       .catch((error: Error) => {
         setSaved({ kind: 'error', message: error.message });
       });
-  }, [libraryId, memoryID, onChanged]);
+  }, [libraryId, memoryId, onChanged]);
 
   useEffect(() => {
     const timer = setTimeout(save, 900);
     return () => clearTimeout(timer);
   }, [draft.title, draft.body, save]);
 
-  const insertFromTemplate = (type: RefType) => () => {
+  const insertRef = (ref: string) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    insertRefAtCursor(textarea, `[[${type}:|]]`);
+    insertRefAtCursor(textarea, ref);
     setDraft({ ...draftRef.current, body: textarea.value });
   };
 
   const preview = useMemo(() => renderMarkdown(draft.body), [draft.body]);
   const refs = useMemo(() => extractRefs(draft.body), [draft.body]);
 
-  const handleDelete = async () => {
-    if (!window.confirm('Delete this memory?')) return;
-    try {
-      await apiDelete(`/libraries/${libraryId}/memories/${memoryID}`);
-      onDeleted(memoryID);
-    } catch (error) {
-      setSaved({ kind: 'error', message: (error as Error).message });
-    }
-  };
-
-  const loadVersion = (version: MemoryVersion) => {
-    setDraft({ title: version.title, body: version.body });
+  const remove = () => {
+    setDeleting(true);
+    setDeleteError(null);
+    deleteMemory(libraryId, memoryId)
+      .then(() => {
+        setConfirmingDelete(false);
+        onDeleted(memoryId);
+      })
+      .catch((e: unknown) => setDeleteError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setDeleting(false));
   };
 
   return (
@@ -126,16 +150,7 @@ export function MemoryEditor({ libraryId, memory, onDeleted, onChanged }: Memory
         </span>
       </div>
 
-      <div className="editor-toolbar">
-        <span className="toolbar-label">Insert reference</span>
-        <div className="ref-buttons">
-          {REF_TYPES.map(({ type, label }) => (
-            <button key={type} type="button" onClick={insertFromTemplate(type)}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <RefPicker libraryId={libraryId} onInsert={insertRef} />
 
       <div className="editor-split">
         <textarea
@@ -144,7 +159,9 @@ export function MemoryEditor({ libraryId, memory, onDeleted, onChanged }: Memory
           aria-label="Memory body"
           value={draft.body}
           onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-          placeholder={'Write in Markdown…\n\n[[album:|]]  [[person:|]]  [[media:|]]'}
+          placeholder={
+            'Write in Markdown…\n\nUse the picker above to link to photos, albums, or people.'
+          }
         />
         <div
           className="editor-preview"
@@ -157,7 +174,7 @@ export function MemoryEditor({ libraryId, memory, onDeleted, onChanged }: Memory
         <div className="ref-chips">
           {refs.map((ref) => (
             <span className={`ref-chip ref-chip-${ref.type}`} key={`${ref.type}:${ref.id}`}>
-              {ref.type}:{ref.id}
+              {ref.label || `${ref.type}:${ref.id}`}
             </span>
           ))}
           {refs.length === 0 && <span className="muted">No references yet.</span>}
@@ -170,7 +187,7 @@ export function MemoryEditor({ libraryId, memory, onDeleted, onChanged }: Memory
             value=""
             onChange={(e) => {
               const v = versions.find((x) => String(x.version) === e.target.value);
-              if (v) loadVersion(v);
+              if (v) setDraft({ title: v.title, body: v.body });
             }}
           >
             <option value="" disabled>
@@ -182,167 +199,177 @@ export function MemoryEditor({ libraryId, memory, onDeleted, onChanged }: Memory
               </option>
             ))}
           </select>
-          <button type="button" className="danger-button" onClick={handleDelete}>
+          <button
+            type="button"
+            className="danger-button"
+            onClick={() => setConfirmingDelete(true)}
+            data-testid="delete-memory"
+          >
             Delete
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete this memory?"
+        destructive
+        confirmLabel="Delete"
+        busy={deleting}
+        error={deleteError}
+        message={
+          <p>
+            <strong>{draft.title || 'Untitled memory'}</strong> will be removed. Versions are kept,
+            so nothing you wrote is lost — but the memory itself leaves your list.
+          </p>
+        }
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={remove}
+        testId="delete-memory-dialog"
+      />
     </div>
   );
 }
 
-interface MemoriesPageProps {
-  initialLibraryId?: string;
-}
+export default function MemoriesPage() {
+  const gate = useLibraryGate();
+  const { user } = useAuth();
 
-export default function MemoriesPage({ initialLibraryId }: MemoriesPageProps) {
-  const [libraries, setLibraries] = useState<Library[]>([]);
-  const [libraryId, setLibraryId] = useState<string | null>(initialLibraryId ?? null);
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  /**
+   * The open memory is held, not derived by id alone. A memory created here is
+   * not in the list until the list reloads, and resolving purely by id made the
+   * editor close the instant you created something — the exact moment you most
+   * want it open. The list copy still wins once it arrives, so an external edit
+   * shows up.
+   */
+  const [active, setActive] = useState<Memory | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  // Load the library list; default to the first usable one.
-  useEffect(() => {
-    let cancelled = false;
-    apiGet<{ libraries: Library[] }>('/libraries')
+  const memories = useLibraryResource<Memory[]>(
+    useCallback(async (libraryId: string) => (await listMemories(libraryId)).memories ?? [], []),
+  );
+
+  const activeId = active?.id ?? null;
+  const activeMemory = useMemo(
+    () => (activeId ? (memories.data?.find((m) => m.id === activeId) ?? active) : null),
+    [active, activeId, memories.data],
+  );
+
+  const create = () => {
+    if (gate.kind !== 'ready') return;
+    setCreating(true);
+    setCreateError(null);
+    createMemory(gate.libraryId, {
+      title: 'Untitled memory',
+      body: '# New memory\n\nWrite something worth remembering…',
+    })
       .then((resp) => {
-        if (cancelled) return;
-        const libs = resp.libraries ?? [];
-        setLibraries(libs);
-        setLoading(false);
-        if (libs.length > 0) {
-          const preferred = libs.find((lib) => lib.id === libraryId) ?? libs[0]!;
-          setLibraryId(preferred.id);
-        }
+        setActive(resp.memory);
+        memories.reload();
       })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setError(e.message);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Load memories when the library changes.
-  useEffect(() => {
-    if (!libraryId) return;
-    let cancelled = false;
-    apiGet<{ memories: Memory[] }>(`/libraries/${libraryId}/memories`)
-      .then((resp) => {
-        if (cancelled) return;
-        setMemories(resp.memories ?? []);
-        setError(null);
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        setError(e.message);
-        setMemories([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId]);
-
-  const activeMemory = activeId ? (memories.find((m) => m.id === activeId) ?? null) : null;
-
-  const handleCreate = async () => {
-    if (!libraryId) return;
-    setError(null);
-    try {
-      const resp = await apiPost<{ memory: Memory }>(`/libraries/${libraryId}/memories`, {
-        title: 'Untitled memory',
-        body: '# New memory\n\nWrite something worth remembering…',
-      });
-      setMemories((prev) => [resp.memory, ...prev]);
-      setActiveId(resp.memory.id);
-    } catch (e) {
-      setError((e as Error).message);
-    }
+      .catch((e: unknown) => setCreateError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setCreating(false));
   };
 
-  const handleDelete = (id: string) => {
-    setMemories((prev) => prev.filter((m) => m.id !== id));
-    setActiveId(null);
-  };
-
-  const handleChanged = (updated: Memory) => {
-    setMemories((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
-  };
-
-  if (libraries.length === 0 && loading) {
-    return <div className="page-muted">Loading libraries…</div>;
+  if (gate.kind === 'loading') {
+    return (
+      <main className="memories-page">
+        <LoadingState label="Loading libraries…" />
+      </main>
+    );
   }
 
-  if (libraries.length === 0) {
+  const header = (
+    <PageHeader
+      title="Memories"
+      subtitle="Long-form notes written in Markdown, with links to the media they are about."
+      controls={
+        <>
+          <LibraryPicker />
+          <button
+            type="button"
+            className="button primary-button"
+            onClick={create}
+            disabled={creating || gate.kind !== 'ready'}
+            data-testid="new-memory"
+          >
+            {creating ? 'Creating…' : 'New memory'}
+          </button>
+        </>
+      }
+    />
+  );
+
+  if (gate.kind === 'error') {
     return (
-      <div className="page-muted">
-        No libraries yet. Add a library from the server to start writing memories.
-      </div>
+      <main className="memories-page">
+        {header}
+        <ErrorState message={gate.message} onRetry={memories.reload} />
+      </main>
+    );
+  }
+
+  if (gate.kind === 'empty') {
+    return (
+      <main className="memories-page">
+        {header}
+        <NoLibrariesState isAdmin={user?.role === 'admin'} />
+      </main>
     );
   }
 
   return (
     <main className="memories-page">
-      <header className="page-header">
-        <h1>Memories</h1>
-        <div className="header-controls">
-          <select
-            aria-label="Library"
-            value={libraryId ?? ''}
-            onChange={(e) => {
-              setLibraryId(e.target.value);
-              setActiveId(null);
-            }}
-          >
-            {libraries.map((lib) => (
-              <option key={lib.id} value={lib.id}>
-                {lib.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={handleCreate}>
-            New memory
-          </button>
-        </div>
-      </header>
+      {header}
 
-      {error && (
+      {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
+      {memories.error && <ErrorState message={memories.error} onRetry={memories.reload} />}
+      {createError && (
         <p className="error-text" role="alert">
-          {error}
+          {createError}
         </p>
       )}
+      {memories.loading && <LoadingState label="Loading memories…" />}
 
       <div className="memories-layout" data-testid="memories-layout">
         <nav className="memory-list" aria-label="Memories">
-          {memories.map((m) => (
+          {memories.data?.map((m) => (
             <button
               key={m.id}
               type="button"
               className={m.id === activeId ? 'memory-row active' : 'memory-row'}
-              onClick={() => setActiveId(m.id)}
+              aria-current={m.id === activeId ? 'true' : undefined}
+              onClick={() => setActive(m)}
             >
               <span className="memory-row-title">{m.title}</span>
               <span className="memory-row-date">{formatDate(m.updated_at)}</span>
             </button>
           ))}
-          {!loading && memories.length === 0 && (
-            <p className="muted">No memories yet. Create your first one.</p>
+          {memories.data !== null && memories.data.length === 0 && (
+            <EmptyState title="No memories yet" testId="memories-empty">
+              <p className="muted">
+                A memory is a note you write about something — a trip, a year, a person. Write it in
+                Markdown and link to the photos it is about.
+              </p>
+            </EmptyState>
           )}
         </nav>
 
         <section className="editor-pane">
-          {libraryId && activeMemory && (
+          {activeMemory && (
             <MemoryEditor
               key={activeMemory.id}
-              libraryId={libraryId}
+              libraryId={gate.libraryId}
               memory={activeMemory}
-              onDeleted={handleDelete}
-              onChanged={handleChanged}
+              onDeleted={() => {
+                setActive(null);
+                memories.reload();
+              }}
+              onChanged={(memory) => {
+                setActive(memory);
+                memories.reload();
+              }}
             />
           )}
           {!activeMemory && (

@@ -7,7 +7,7 @@ into `main`. This file is the index; each phase gets design documents in
 
 ## How to read this
 
-- **All phases 0–22 are merged to `main`; v1.0 is feature-complete.**
+- **All phases 0–22 are merged to `main`; Phase 23 is on a branch.**
 - Status: `done` = merged to `main`, `in progress` = branch + PR open,
   `planned` = design doc written, `backlog` = not yet started generally.
 
@@ -242,10 +242,10 @@ changes — the browser consumes existing endpoints (`folders`, `files`, `search
 
 Implementation:
 
-- **Navigation + views** — `web/src/pages/BrowserPage.tsx`: library selector,
-  breadcrumb navigation over `rel_path` folders, folder cards with file counts,
-  grid/list toggle, and `data-testid` empty states (`browser-empty`,
-  `search-empty`).
+- **Navigation + views** — `web/src/pages/BrowserPage.tsx` (superseded by
+  `MediaPage` in Phase 23): library selector, breadcrumb navigation over
+  `rel_path` folders, folder cards with file counts, grid/list toggle, and
+  `data-testid` empty states (`browser-empty`, `search-empty`).
 - **Photo/video viewer** — modal using the `{thumbnail}` endpoint for photos and
   the `{download}` endpoint for inline video playback; escape/backdrop dismiss.
 - **Operations** — upload (multipart, destination = current folder), download,
@@ -306,14 +306,57 @@ Validation:
   migration was needed.
 
 Result: web typecheck + lint + 59 tests + build all green; no server surface
-changed. With this phase merged, every Definition of Success capability is
-reachable from the web interface.
+changed. Albums and tags are now reachable, but roughly thirty other shipped
+endpoints — share links, permissions, ML, backups, library registration,
+favorites, the public share view — still had no web surface. That gap is
+Phase 23.
+
+## Phase 23 — Frontend completeness (in progress)
+
+The API had 98 routes; about thirty of them had no page, no control, or no link
+that could reach them. The backend was finished and the product was not, which
+is the worst of both worlds: everything works when you `curl` it. This phase
+builds the missing surfaces rather than adding new server features, and is
+therefore mostly frontend — with one exception, below.
+
+- **Server** — `GET /libraries` was admin-only, so a member could not even
+  populate the library selector that every page depends on. It now returns the
+  libraries the caller has `read` on, and an empty list for a caller with no
+  grants rather than a 403: "you can see nothing" and "you may not ask" are
+  different answers, and the frontend needs the first one. Covered by
+  `internal/httpapi/libraries_list_test.go`.
+- **Auth and shell** — session sign-in and first-run setup, a persisted light
+  and dark theme, a standalone `/403`, the full navigation from
+  `todos/prompt.md` §27 in two groups (browsing, and **Upkeep**), and a drawer
+  below the rail breakpoint with `aria-expanded`, a dismissable backdrop, and
+  Escape that returns focus to the button that opened it.
+- **Media** — `MediaPage` replaces the four near-copies behind `/browse`:
+  server-side search, a date and size filter that re-queries when cleared, a
+  combined sort control, and cursor pagination as "Load more" rather than page
+  numbers the API cannot produce.
+- **Viewer** — zoom and pan, fullscreen, previous/next across the collection it
+  was opened from, a slideshow that stops at the end instead of looping, and
+  Details/Tags/People/Memories/Similar/Share panels that fetch only the open
+  tab. Mutations are delegated to the page through `onRequestAction`, so the
+  dialogs exist once in `useFileOperations` rather than once per page.
+- **New pages** — libraries, sharing, the public `/s/:token` view, permissions,
+  ML, backups, trash, and favorites.
+- **Accessibility** — every `window.prompt` and `window.confirm` replaced with a
+  real dialog; focus trapping shared by the dialogs and the viewer via
+  `web/src/lib/focusTrap.ts`; the media grid is buttons, not clickable `div`s;
+  every loading, empty, offline, and error state is text.
+- **Tests** — a shared harness (`web/src/test/harness.tsx`) and one suite per
+  page, 257 tests across 24 files, each asserting behaviour rather than markup.
+
+Validation: `npm run typecheck && npm run lint && npm test && npm run build &&
+npm run format:check` and `go build ./... && go test ./...`, all green.
 
 ## Later phases (under design)
 
-Share tokens as server features, webhooks/Plugins, docker compose manifest,
-enhanced mobile/time views, physical privacy de-risking, native clients, and
-an OpenAPI-driven contract test suite for phase workers.
+Webhooks/Plugins, docker compose manifest, enhanced mobile/time views, physical
+privacy de-risking, native clients, and an OpenAPI-driven contract test suite
+for phase workers. Share links are now a web feature rather than a later server
+phase (Phase 23).
 
 ## Branch conventions
 

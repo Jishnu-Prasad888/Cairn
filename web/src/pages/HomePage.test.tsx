@@ -1,16 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { apiError, fileFixture, json, mockApi, originalFetch, renderPage } from '../test/harness';
 import HomePage from './HomePage';
-
-function renderPage() {
-  return render(
-    <MemoryRouter>
-      <HomePage />
-    </MemoryRouter>,
-  );
-}
 
 const health = { status: 'ok', database: 'ok' };
 const version = {
@@ -21,65 +13,164 @@ const version = {
   platform: 'linux/amd64',
 };
 
-function mockHealthFetch() {
-  const fn = vi.fn(async (input: URL | RequestInfo) => {
-    const url = String(input);
-    if (url.endsWith('/health')) {
-      return new Response(JSON.stringify(health), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    if (url.endsWith('/version')) {
-      return new Response(JSON.stringify(version), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    return new Response(
-      '{ "error": { "code": "NOT_FOUND", "message": "missing", "request_id": "1" } }',
-      {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  });
-  globalThis.fetch = fn as unknown as typeof fetch;
+interface Options {
+  /** Total reported for each media type. */
+  totals?: { photo?: number; video?: number; other?: number };
+  recent?: typeof recent;
+  people?: { people: unknown[] } | 'unsupported';
+}
+
+const recent = {
+  files: [fileFixture({ id: 'f1' }), fileFixture({ id: 'f2', name: 'IMG_0002.png' })],
+};
+
+function setup(options: Options = {}) {
+  const totals = options.totals ?? {};
+  const recentFiles = options.recent ?? recent;
+  const fn = mockApi([
+    (url) => (url.endsWith('/api/v1/health') ? json(health) : undefined),
+    (url) => (url.endsWith('/api/v1/version') ? json(version) : undefined),
+    (url) => {
+      if (!url.includes('/api/v1/libraries/lib1/files')) return undefined;
+      if (url.includes('type=photo')) {
+        return json({ ...recentFiles, total: totals.photo ?? 2 });
+      }
+      if (url.includes('type=video')) return json({ files: [], total: totals.video ?? 0 });
+      if (url.includes('type=other')) return json({ files: [], total: totals.other ?? 7 });
+      return json({ files: [], total: 0 });
+    },
+    (url) =>
+      url.endsWith('/api/v1/libraries/lib1/albums') ? json({ albums: [{ id: 'a1' }] }) : undefined,
+    (url) => (url.endsWith('/api/v1/libraries/lib1/tags') ? json({ tags: [] }) : undefined),
+    (url) => (url.endsWith('/api/v1/libraries/lib1/memories') ? json({ memories: [] }) : undefined),
+    (url) => (url.endsWith('/api/v1/libraries/lib1/favorites') ? json({ files: [] }) : undefined),
+    (url) => {
+      if (!url.endsWith('/api/v1/libraries/lib1/people')) return undefined;
+      if (options.people === 'unsupported') {
+        return json({ error: { code: 'NOT_FOUND', message: 'no faces', request_id: '1' } }, 404);
+      }
+      return json(options.people ?? { people: [{ id: 'p1' }, { id: 'p2' }] });
+    },
+  ]);
+  renderPage(<HomePage />);
   return fn;
 }
 
 describe('HomePage', () => {
-  it('renders the Cairn brand', () => {
-    mockHealthFetch();
-    renderPage();
-    expect(screen.getByRole('heading', { name: 'Cairn' })).toBeInTheDocument();
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('renders the Cairn brand and greets the signed-in account', async () => {
+    setup();
+
+    // The brand and the dashboard only appear once a library is selected, so
+    // the gate resolves first.
+    expect(await screen.findByRole('heading', { name: 'Cairn' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Welcome back, jishnu' })).toBeInTheDocument();
+  });
+
+  it('counts each collection into a shortcut tile', async () => {
+    setup({ totals: { photo: 128, video: 4, other: 7 } });
+
+    // The tiles render immediately with a placeholder; the counts land when the
+    // dashboard's parallel listing resolves.
+    const photos = await screen.findByTestId('home-tile-/photos');
+    expect(await within(photos).findByText('128')).toBeInTheDocument();
+    expect(within(photos).getByText('Photos')).toBeInTheDocument();
+    expect(
+      await within(screen.getByTestId('home-tile-/videos')).findByText('4'),
+    ).toBeInTheDocument();
+    expect(within(screen.getByTestId('home-tile-/files')).getByText('7')).toBeInTheDocument();
+    expect(within(screen.getByTestId('home-tile-/albums')).getByText('1')).toBeInTheDocument();
+    expect(within(screen.getByTestId('home-tile-/people')).getByText('2')).toBeInTheDocument();
+  });
+
+  it('hides the people tile when the build has no face support', async () => {
+    setup({ people: 'unsupported' });
+
+    // The tile is only dropped once the people listing has actually failed, so
+    // wait for the rest of the dashboard to settle first.
+    const photos = await screen.findByTestId('home-tile-/photos');
+    await within(photos).findByText('2');
+    expect(screen.queryByTestId('home-tile-/people')).not.toBeInTheDocument();
+    expect(screen.getByTestId('home-tile-/tags')).toBeInTheDocument();
+  });
+
+  it('links each recent photo into the photos browser', async () => {
+    setup();
+
+    const strip = await screen.findByTestId('home-recent');
+    const links = within(strip).getAllByRole('link');
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute('href', '/photos?file=f1');
+  });
+
+  it('shows an empty state when the library has no photos yet', async () => {
+    setup({ recent: { files: [] } });
+
+    expect(await screen.findByTestId('home-no-photos')).toBeInTheDocument();
   });
 
   it('shows server and version status after loading', async () => {
-    mockHealthFetch();
-    renderPage();
+    setup();
 
     await waitFor(() => {
-      expect(screen.getByText('Version', { selector: 'h2' })).toBeInTheDocument();
+      expect(screen.getByText('dev')).toBeInTheDocument();
     });
-
-    // Version values from the API are rendered.
-    const sections = screen.getAllByRole('region');
-    void sections;
-    expect(screen.getByText('dev')).toBeInTheDocument();
     expect(screen.getByText('abc')).toBeInTheDocument();
+    const rows = screen.getByText('Status').closest('dl') as HTMLElement;
+    expect(within(rows).getByText('Database')).toBeInTheDocument();
+    expect(within(rows).getByText('Commit')).toBeInTheDocument();
+    expect(within(rows).getAllByText('ok')).toHaveLength(2);
   });
 
-  it('shows an error and a retry action when the API is unreachable', async () => {
-    globalThis.fetch = vi.fn(async () => {
-      throw new Error('network down');
-    }) as unknown as typeof fetch;
+  it('shows an error and a retry action when the status endpoints fail', async () => {
+    mockApi([
+      (url) =>
+        url.endsWith('/api/v1/health') || url.endsWith('/api/v1/version')
+          ? apiError(503, 'UNAVAILABLE', 'Service unavailable')
+          : undefined,
+      (url) =>
+        url.includes('/api/v1/libraries/lib1/files') ? json({ files: [], total: 0 }) : undefined,
+      (url) => (url.endsWith('/api/v1/libraries/lib1/albums') ? json({ albums: [] }) : undefined),
+      (url) => (url.endsWith('/api/v1/libraries/lib1/tags') ? json({ tags: [] }) : undefined),
+      (url) =>
+        url.endsWith('/api/v1/libraries/lib1/memories') ? json({ memories: [] }) : undefined,
+      (url) => (url.endsWith('/api/v1/libraries/lib1/favorites') ? json({ files: [] }) : undefined),
+      (url) => (url.endsWith('/api/v1/libraries/lib1/people') ? json({ people: [] }) : undefined),
+    ]);
+    renderPage(<HomePage />);
 
-    renderPage();
+    const status = await screen.findByText(/Service unavailable/);
+    expect(status).toBeInTheDocument();
+    expect(
+      within(status.parentElement as HTMLElement).getByRole('button', { name: 'Retry' }),
+    ).toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(screen.getByText('Could not reach the Cairn server.')).toBeInTheDocument();
-    });
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  it('reports a library-list failure instead of rendering an empty dashboard', async () => {
+    mockApi([
+      (url) =>
+        url.endsWith('/api/v1/libraries')
+          ? apiError(500, 'INTERNAL', 'Libraries are unavailable.')
+          : undefined,
+    ]);
+    renderPage(<HomePage />);
+
+    expect(await screen.findByText('Libraries are unavailable.')).toBeInTheDocument();
+    expect(screen.queryByTestId('home-tile-/photos')).not.toBeInTheDocument();
+  });
+
+  it('offers the library picker and a way out when there are no libraries', async () => {
+    mockApi([], { libraries: [] });
+    renderPage(<HomePage />, { libraries: [] });
+
+    expect(await screen.findByTestId('no-libraries')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Add a library' })).toHaveAttribute(
+      'href',
+      '/libraries',
+    );
   });
 });

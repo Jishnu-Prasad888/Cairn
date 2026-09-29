@@ -138,7 +138,7 @@ func (s *SearchStore) Search(ctx context.Context, q SearchQuery) (*SearchPage, e
 		}
 		queryStr = fmt.Sprintf(`
 			SELECT f.id, f.rel_path, f.size_bytes, f.mod_time, f.content_hash,
-			       f.status, f.first_seen_at, f.last_seen_at, m.rank
+			       f.media_type, f.status, f.first_seen_at, f.last_seen_at, m.rank
 			FROM (SELECT file_id, rank FROM fts_files WHERE fts_files MATCH ?) AS m
 			JOIN indexed_files f ON f.id = m.file_id
 			%s
@@ -163,7 +163,7 @@ func (s *SearchStore) Search(ctx context.Context, q SearchQuery) (*SearchPage, e
 		}
 		queryStr = fmt.Sprintf(`
 			SELECT f.id, f.rel_path, f.size_bytes, f.mod_time, f.content_hash,
-			       f.status, f.first_seen_at, f.last_seen_at, NULL
+			       f.media_type, f.status, f.first_seen_at, f.last_seen_at, NULL
 			FROM indexed_files f
 			%s
 			ORDER BY f.id
@@ -216,8 +216,11 @@ func buildExtraFilters(q SearchQuery) ([]string, []any) {
 		conditions = append(conditions, "f.rel_path LIKE ? "+likeutil.EscapeClause)
 		args = append(args, likeutil.Escape(fp)+"/%")
 	}
+	// The type lives on indexed_files, set by the indexer. media_metadata is
+	// only ever written by the photo extractor, so filtering on it here matched
+	// every photo and no videos at all.
 	if q.Type != "" {
-		conditions = append(conditions, "f.id IN (SELECT file_id FROM media_metadata WHERE media_type = ?)")
+		conditions = append(conditions, "f.media_type = ?")
 		args = append(args, string(q.Type))
 	}
 	if q.Tag != "" {
@@ -335,15 +338,18 @@ type rowScanner interface {
 // which the browse path pads with NULL) into a media.File.
 func scanSearchFile(row rowScanner, libraryID string) (*media.File, float64, error) {
 	var (
-		f        media.File
-		modStr   string
-		firstStr string
-		lastStr  string
-		hash     sql.NullString
-		status   string
-		rank     sql.NullFloat64
+		f         media.File
+		modStr    string
+		firstStr  string
+		lastStr   string
+		hash      sql.NullString
+		mediaType string
+		status    string
+		rank      sql.NullFloat64
 	)
-	err := row.Scan(&f.ID, &f.RelPath, &f.SizeBytes, &modStr, &hash, &status, &firstStr, &lastStr, &rank)
+	err := row.Scan(
+		&f.ID, &f.RelPath, &f.SizeBytes, &modStr, &hash, &mediaType, &status, &firstStr, &lastStr, &rank,
+	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("scan search file: %w", err)
 	}
@@ -355,7 +361,7 @@ func scanSearchFile(row rowScanner, libraryID string) (*media.File, float64, err
 	if f.FolderPath == "." {
 		f.FolderPath = ""
 	}
-	f.MediaType = media.DetectMediaType(f.RelPath)
+	f.MediaType = media.MediaType(mediaType)
 	f.MIMEType = media.DetectMIME(f.RelPath)
 	if err := parseTime(modStr, &f.ModTime); err != nil {
 		return nil, 0, err

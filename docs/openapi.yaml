@@ -343,19 +343,23 @@ paths:
     get:
       tags: [Libraries]
       operationId: listLibraries
-      summary: List registered libraries
-      description: Requires an admin session. Returns every registered library.
+      summary: List libraries the caller may use
+      description: >
+        Requires any session. Administrators receive every registered library.
+        Every other caller receives only the libraries where it holds the `read`
+        capability, so a member account can discover the libraries it was granted
+        rather than receiving 403 from every content route. A library the caller
+        cannot read is omitted entirely, so its existence is never disclosed. A
+        caller with no grants receives an empty list, not an error.
       responses:
         '200':
-          description: Registered libraries
+          description: Libraries the caller can read
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/LibraryListEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Libraries]
       operationId: createLibrary
@@ -3709,6 +3713,13 @@ components:
           description: >
             `created` means fresh metadata was written; `adopted` means an
             existing `.cairn` metadata directory was bound and reused.
+        indexing:
+          type: boolean
+          description: >
+            Whether the first index scan was queued. Registration always queues
+            one, so a new library starts filling itself without a second manual
+            step; `false` means the server has no indexer configured, and the
+            library has to be scanned with `POST /libraries/{id}/index`.
     LibraryProbeRequest:
       type: object
       required: [path]

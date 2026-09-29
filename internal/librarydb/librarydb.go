@@ -7,12 +7,20 @@
 // The server-level database (internal/db) is used for global concerns:
 // user accounts, sessions, registered libraries, global settings, and audit
 // records.
+//
+// This package imports internal/media for the extension-to-type classifier,
+// because a library's database is only ever opened from inside that library's
+// own root, so a schema change has to be applied by the code that opens it
+// rather than by a server-side migration. The dependency is safe: internal/media
+// never imports this package — it is handed an open *sql.DB instead.
 package librarydb
 
 import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
 )
@@ -23,7 +31,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 6
+	SchemaVersion = 7
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.
@@ -95,8 +103,95 @@ func dsn(path string) string {
 // migrate applies the per-library schema. Each statement is idempotent via
 // CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS.
 func migrate(db *sql.DB) error {
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	return addIndexedFileMediaType(db)
+}
+
+// addIndexedFileMediaType backfills indexed_files.media_type on a library
+// database created before that column existed.
+//
+// SQLite has no `ADD COLUMN IF NOT EXISTS`, so a library that was indexed
+// before this change would otherwise keep a table without the column and every
+// `?type=` listing would fail with "no such column". A library's database
+// lives inside its own root, so this cannot be a server-side migration: the
+// file is only opened when that library is next used.
+func addIndexedFileMediaType(db *sql.DB) error {
+	has, err := columnExists(db, "indexed_files", "media_type")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE indexed_files
+			ADD COLUMN media_type TEXT NOT NULL DEFAULT 'other'
+			CHECK (media_type IN ('photo','video','audio','document','other'))`); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(
+		`CREATE INDEX IF NOT EXISTS indexed_files_type_idx ON indexed_files (media_type)`); err != nil {
+		return err
+	}
+	// Every existing row is still classified as 'other' at this point. The
+	// extension is what the type is derived from, so the backfill is a rewrite
+	// rather than a guess — it is also exactly what a re-index would store, so
+	// the two paths cannot disagree.
+	rows, err := db.Query(`SELECT id, rel_path FROM indexed_files WHERE media_type = 'other'`)
+	if err != nil {
+		return err
+	}
+	type pending struct {
+		id, relPath, mediaType string
+	}
+	var updates []pending
+	for rows.Next() {
+		var id, relPath string
+		if err := rows.Scan(&id, &relPath); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		updates = append(updates, pending{id: id, relPath: relPath, mediaType: string(media.DetectMediaType(relPath))})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, u := range updates {
+		if _, err := db.Exec(`UPDATE indexed_files SET media_type = ? WHERE id = ?`, u.mediaType, u.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// columnExists reports whether a table already has the named column.
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notNull    int
+			dflt       sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // schema is the canonical per-library DDL. All tables use CREATE TABLE IF NOT
@@ -111,6 +206,8 @@ CREATE TABLE IF NOT EXISTS indexed_files (
 	size_bytes    INTEGER NOT NULL,
 	mod_time      TEXT NOT NULL,
 	content_hash  TEXT,
+	media_type    TEXT NOT NULL DEFAULT 'other'
+		CHECK (media_type IN ('photo','video','audio','document','other')),
 	status        TEXT NOT NULL DEFAULT 'present'
 		CHECK (status IN ('present', 'missing', 'deleted')),
 	first_seen_at TEXT NOT NULL,
@@ -122,6 +219,9 @@ CREATE INDEX IF NOT EXISTS indexed_files_rel_path_idx ON indexed_files (rel_path
 CREATE INDEX IF NOT EXISTS indexed_files_status_idx   ON indexed_files (status);
 CREATE INDEX IF NOT EXISTS indexed_files_hash_idx     ON indexed_files (content_hash)
 	WHERE content_hash IS NOT NULL;
+-- indexed_files_type_idx is deliberately not created here: on a database that
+-- predates the media_type column it would fail before the column is added. It
+-- is created by addIndexedFileMediaType, which runs for every database.
 
 -- Background job queue for library-scoped operations.
 -- Jobs are persisted so they survive process restarts; a job that was
