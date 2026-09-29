@@ -17,6 +17,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { useAuth } from '../auth/authContext';
 import { ApiError, apiGet } from './client';
 import type { Library } from './types';
 
@@ -80,43 +81,51 @@ const LibrariesContext = createContext<LibrariesState | null>(null);
 export function LibrariesProvider({ children }: { children: ReactNode }) {
   const [requestedId, setRequestedId] = useState<string | null>(() => readStoredLibraryId());
   const [reloadKey, setReloadKey] = useState(0);
+  // The list is per account. Fetching it before anyone is signed in yields a
+  // 401 that would otherwise stay on screen after sign-in ("authentication
+  // required" until a manual reload), so it follows the signed-in user.
+  const { user, loading: authLoading } = useAuth();
+  const userId = user?.id ?? null;
+  const requestKey = `${userId}:${reloadKey}`;
 
   // The response is tagged with the request it belongs to, so `loading` is
   // derived during render instead of being toggled around the fetch. This is
   // also what makes a refresh show the spinner again instead of silently
   // keeping the stale list on screen.
   const [settled, setSettled] = useState<
-    { key: number; libraries: Library[] } | { key: number; message: string } | null
+    { key: string; libraries: Library[] } | { key: string; message: string } | null
   >(null);
 
   useEffect(() => {
+    if (userId === null) return;
     let cancelled = false;
     apiGet<{ libraries: Library[] }>('/libraries')
       .then((resp) => {
         if (cancelled) return;
-        setSettled({ key: reloadKey, libraries: resp.libraries ?? [] });
+        setSettled({ key: requestKey, libraries: resp.libraries ?? [] });
       })
       .catch((e: unknown) => {
         if (cancelled) return;
         setSettled({
-          key: reloadKey,
+          key: requestKey,
           message: e instanceof ApiError ? e.message : 'Could not load libraries.',
         });
       });
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [requestKey, userId]);
 
-  const loading = settled === null || settled.key !== reloadKey;
+  const loading =
+    authLoading || (userId !== null && (settled === null || settled.key !== requestKey));
   const error =
-    settled !== null && settled.key === reloadKey && 'message' in settled ? settled.message : null;
+    settled !== null && settled.key === requestKey && 'message' in settled ? settled.message : null;
   const libraries = useMemo(
     () =>
-      settled !== null && settled.key === reloadKey && 'libraries' in settled
+      settled !== null && settled.key === requestKey && 'libraries' in settled
         ? settled.libraries
         : [],
-    [settled, reloadKey],
+    [settled, requestKey],
   );
 
   // The selection is validated against the list: a remembered library that is
