@@ -14,7 +14,7 @@ function shell(route = '/') {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<p>home content</p>} />
-            <Route path="/photos" element={<p>photos content</p>} />
+            <Route path="/media" element={<p>media content</p>} />
             <Route path="/browse" element={<p>browse content</p>} />
           </Route>
         </Routes>
@@ -39,9 +39,7 @@ describe('AppShell', () => {
       .map((link) => link.textContent);
     expect(labels).toEqual([
       'Home',
-      'Photos',
-      'Videos',
-      'Files',
+      'Media',
       'Memories',
       'Albums',
       'People',
@@ -74,15 +72,15 @@ describe('AppShell', () => {
     mockApi();
     renderPage(<AppShell />);
 
-    // A "Browse" link next to Photos, Videos, and Files is one too many.
+    // A "Browse" link next to Media is one too many.
     expect(screen.queryByRole('link', { name: /Browse/ })).not.toBeInTheDocument();
   });
 
   it('marks the current section', async () => {
     mockApi();
-    shell('/photos');
+    shell('/media');
 
-    const current = await screen.findByRole('link', { name: 'Photos' });
+    const current = await screen.findByRole('link', { name: 'Media' });
     expect(current).toHaveClass('active');
     expect(screen.getByRole('link', { name: 'Home' })).not.toHaveClass('active');
   });

@@ -114,6 +114,23 @@ describe('MediaPage', () => {
     expect(screen.getByText('clip.mp4')).toBeInTheDocument();
   });
 
+  it('preselects the type filter from ?type= and sends it to the API', async () => {
+    const fetchMock = mockApi(apiRules());
+    renderPage(<MediaPage config={CONFIG} />, { route: '/media?type=video' });
+
+    await screen.findByTestId('file-grid');
+    expect(screen.getByTestId('type-filter-select')).toHaveValue('video');
+    expect(called(fetchMock, 'GET', 'type=video')).toBe(true);
+  });
+
+  it('ignores an unknown ?type= value', async () => {
+    mockApi(apiRules());
+    renderPage(<MediaPage config={CONFIG} />, { route: '/media?type=bogus' });
+
+    await screen.findByTestId('file-grid');
+    expect(screen.getByTestId('type-filter-select')).toHaveValue('');
+  });
+
   it('shows how much of the result set is on screen', async () => {
     setup();
 

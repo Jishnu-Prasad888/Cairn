@@ -43,20 +43,6 @@ const iconPhoto = (
   </svg>
 );
 
-const iconVideo = (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <rect x="2.5" y="5" width="13" height="14" rx="2" />
-    <path d="m15.5 10.5 6-3.5v10l-6-3.5z" />
-  </svg>
-);
-
-const iconFile = (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-    <path d="M14 3v5h5" />
-  </svg>
-);
-
 const iconMemories = (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
@@ -184,9 +170,7 @@ const iconMenu = (
  */
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Home', icon: iconHome, end: true },
-  { to: '/photos', label: 'Photos', icon: iconPhoto },
-  { to: '/videos', label: 'Videos', icon: iconVideo },
-  { to: '/files', label: 'Files', icon: iconFile },
+  { to: '/media', label: 'Media', icon: iconPhoto },
   { to: '/memories', label: 'Memories', icon: iconMemories },
   { to: '/albums', label: 'Albums', icon: iconAlbums },
   { to: '/people', label: 'People', icon: iconPeople },
