@@ -1,0 +1,87 @@
+/* Machine learning: two sections of status tiles with the actions that produce
+   or discard the derived data behind them. */
+
+.ml-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.ml-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.ml-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.ml-section-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+/* -------------------------------- tiles -------------------------------- */
+
+.ml-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+
+.ml-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.ml-stat-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.ml-stat-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.ml-stat-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* ------------------------------- actions ------------------------------ */
+
+.ml-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ml-note {
+  margin: 0;
+  max-width: 52rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.ml-job {
+  margin: 0;
+}

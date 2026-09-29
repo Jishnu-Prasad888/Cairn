@@ -79,6 +79,13 @@ func (s *Server) handleProbeLibrary(w http.ResponseWriter, r *http.Request, u *a
 
 // handleCreateLibrary registers a library, creating fresh metadata or adopting
 // an existing one. Admin only.
+//
+// Registering a library also queues its first scan. A library is registered
+// precisely so its files can be seen, and a library that has never been scanned
+// has no rows in indexed_files, so every page came up empty until an
+// administrator noticed and clicked Re-index. The scan is queued in the
+// background: the response does not wait for it, and a library whose scan fails
+// to queue is still registered and can be re-triggered.
 func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	var body libraryRequest
 	if err := readJSON(w, r, &body); err != nil {
@@ -90,14 +97,31 @@ func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request, u *
 		s.writeLibraryError(w, r, err)
 		return
 	}
+
+	indexing := false
+	if s.indexer != nil {
+		if _, err := s.indexer.TriggerScan(actorCtx(r, u).Context(), lib.ID, lib.Root); err != nil {
+			s.logger.Error("trigger initial index", "library_id", lib.ID, "error", err)
+		} else {
+			indexing = true
+		}
+	}
+
 	writeJSON(w, s.logger, http.StatusCreated, map[string]any{
-		"library": toLibraryResponse(lib),
-		"mode":    mode,
+		"library":  toLibraryResponse(lib),
+		"mode":     mode,
+		"indexing": indexing,
 	})
 }
 
-// handleListLibraries returns all registered libraries. Admin only.
-func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+// handleListLibraries returns the registered libraries the caller may use.
+//
+// Administrators see every library. Everyone else sees only the libraries
+// where they hold the read capability, so a member account can discover the
+// libraries it has been granted instead of hitting 403 on every content route.
+// This is the same resource-based decision every other handler makes through
+// requireCap; it never leaks the existence of a library the caller cannot read.
+func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	libs, err := s.libraries.List(r.Context())
 	if err != nil {
 		s.logger.Error("list libraries", "error", err)
@@ -105,11 +129,32 @@ func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request, _ *
 			CodeInternal, "Internal server error.")
 		return
 	}
+	isAdmin := u != nil && u.Role == auth.RoleAdmin
 	resp := make([]libraryResponse, 0, len(libs))
 	for i := range libs {
+		if !isAdmin && !s.canReadLibrary(r, u, libs[i].ID) {
+			continue
+		}
 		resp = append(resp, toLibraryResponse(&libs[i]))
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"libraries": resp})
+}
+
+// canReadLibrary reports whether the principal holds read on the library scope.
+// A failing authorization subsystem is treated as "not readable" here so a
+// database error narrows the listing instead of widening it; the individual
+// content endpoints remain the authority and will surface the real error.
+func (s *Server) canReadLibrary(r *http.Request, u *auth.User, libID string) bool {
+	if s.authz == nil {
+		// No authorization service wired: fall back to the pre-Phase-9 gate.
+		return u != nil && u.Role == auth.RoleAdmin
+	}
+	ok, err := s.authz.Can(r.Context(), principalFrom(u), authz.LibraryKey(libID), authz.CapRead)
+	if err != nil {
+		s.logger.Error("list libraries", "library", libID, "error", err)
+		return false
+	}
+	return ok
 }
 
 // handleGetLibrary returns a single library. Requires read on the library

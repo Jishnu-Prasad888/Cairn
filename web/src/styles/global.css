@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './pages.css';
 
 /* Handlee — branding. Bundled locally; no runtime network dependency. */
 @font-face {
@@ -77,6 +78,27 @@ a {
 
 button {
   font-family: var(--font-ui);
+}
+
+/* The <Brand> component marks every Cairn wordmark. Handlee stays reserved for
+   branding contexts; surrounding text keeps the UI font. */
+.brand {
+  font-family: var(--font-brand);
+  font-weight: 400;
+}
+
+/* Content for assistive technology only. Used for the labels a sighted user
+   gets from a placeholder or an icon, and for table captions. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 :focus-visible {

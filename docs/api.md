@@ -181,7 +181,7 @@ authenticated user, `admin` = admin role, `cap` = capability-checked
 
 | Method | Path                                  | Purpose                          | Auth |
 | ------ | ------------------------------------- | -------------------------------- | ---- |
-| GET    | `/libraries`                          | List libraries                   | admin |
+| GET    | `/libraries`                          | List libraries you can read      | session |
 | POST   | `/libraries`                          | Register a library               | admin |
 | POST   | `/libraries/probe`                    | Pre-registration probe           | admin |
 | GET    | `/libraries/{libraryID}`              | Library details + status         | session |
@@ -189,6 +189,21 @@ authenticated user, `admin` = admin role, `cap` = capability-checked
 | DELETE | `/libraries/{libraryID}`              | Unregister (never deletes data)  | admin |
 | POST   | `/libraries/{libraryID}/index`        | Trigger an index job             | admin |
 | GET    | `/libraries/{libraryID}/index/status` | Current index job state          | admin |
+
+`GET /libraries` returns the libraries the caller may use: administrators see
+every registered library, everyone else sees only the libraries where they hold
+`read`. This is the same resource-based decision every content route makes, so a
+member account can find the libraries it was granted instead of receiving 403.
+A library the caller cannot read is omitted entirely rather than reported as
+forbidden, so its existence is not disclosed.
+
+`POST /libraries` queues the library's **first** index scan as part of
+registering it and reports `indexing: true` when it did. A library is registered
+so its files can be seen, and an unscanned library has no rows in the index, so
+every page came up empty until someone found `POST /libraries/{id}/index`. The
+scan runs in the background — registration does not wait for it — and
+`indexing: false` means the server has no indexer configured, in which case the
+library has to be scanned by hand.
 
 ### Media, files, and folders
 
@@ -212,6 +227,12 @@ authenticated user, `admin` = admin role, `cap` = capability-checked
 | GET    | `/libraries/{libraryID}/files/{fileID}/thumbnail`           | JPEG thumbnail                   | cap  |
 | GET    | `/libraries/{libraryID}/folders`                            | Child folders                    | cap  |
 | GET    | `/libraries/{libraryID}/trash`                              | Trashed files                    | cap  |
+
+`GET /files` and `GET /search` both take `type=` (`photo`, `video`, `audio`,
+`document`, `other`) and both filter on the same value: the media type the
+indexer stored on the row, derived from the file extension. The type is
+re-derived whenever a file is renamed or moved, so changing an extension moves
+the file between the typed pages.
 
 ### Favorites, tags, and albums
 

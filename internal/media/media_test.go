@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -185,6 +186,92 @@ func TestListFilesPagination(t *testing.T) {
 		if seen[f.RelPath] {
 			t.Errorf("overlap: %s appeared in both pages", f.RelPath)
 		}
+	}
+}
+
+// TestListFilesFilterByType proves the media-type filter reaches the query.
+//
+// The Videos page asks for ?type=video and was answered with the whole
+// library, because the handler parsed the type and the store dropped it. The
+// count is asserted as well: a filter that narrows the rows but not the count
+// makes the pager promise a page the query will never return.
+func TestListFilesFilterByType(t *testing.T) {
+	store, root := newTestStore(t)
+	ctx := context.Background()
+	seedFile(t, store, root, "a.jpg")
+	seedFile(t, store, root, "b.png")
+	seedFile(t, store, root, "c.mp4")
+	seedFile(t, store, root, "d.mov")
+	seedFile(t, store, root, "notes.pdf")
+	seedFile(t, store, root, "sub/e.mp4")
+
+	cases := []struct {
+		typ  media.MediaType
+		want []string
+	}{
+		{media.MediaTypeVideo, []string{"c.mp4", "d.mov", "sub/e.mp4"}},
+		{media.MediaTypePhoto, []string{"a.jpg", "b.png"}},
+		{media.MediaTypeDocument, []string{"notes.pdf"}},
+		{media.MediaTypeAudio, nil},
+	}
+	for _, tc := range cases {
+		page, err := store.List(ctx, media.ListOptions{Type: tc.typ, Recursive: true})
+		if err != nil {
+			t.Fatalf("List(%s): %v", tc.typ, err)
+		}
+		var got []string
+		for _, f := range page.Files {
+			got = append(got, f.RelPath)
+			if f.MediaType != tc.typ {
+				t.Errorf("List(%s) returned %s whose type is %s", tc.typ, f.RelPath, f.MediaType)
+			}
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("List(%s) = %v, want %v", tc.typ, got, tc.want)
+		}
+		if page.Total != len(tc.want) {
+			t.Errorf("List(%s) total = %d, want %d", tc.typ, page.Total, len(tc.want))
+		}
+	}
+
+	// The type survives the type-specific scans, not just the listing.
+	f, err := store.GetByRelPath(ctx, "c.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.MediaType != media.MediaTypeVideo {
+		t.Errorf("GetByRelPath(c.mp4).MediaType = %s, want video", f.MediaType)
+	}
+}
+
+// TestUpdateRelPathReclassifies proves a rename that changes the extension
+// moves the file between the typed listings.
+func TestUpdateRelPathReclassifies(t *testing.T) {
+	store, root := newTestStore(t)
+	ctx := context.Background()
+	seedFile(t, store, root, "clip.mp4")
+	f, err := store.GetByRelPath(ctx, "clip.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateRelPath(ctx, f.ID, "clip.mov"); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := store.List(ctx, media.ListOptions{Type: media.MediaTypeVideo, Recursive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Files) != 1 || page.Files[0].MediaType != media.MediaTypeVideo {
+		t.Errorf("after rename to .mov, video listing = %v", page.Files)
+	}
+	page, err = store.List(ctx, media.ListOptions{Type: media.MediaTypePhoto, Recursive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Files) != 0 {
+		t.Errorf("after rename to .mov, photo listing = %v, want empty", page.Files)
 	}
 }
 

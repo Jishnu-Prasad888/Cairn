@@ -4,7 +4,10 @@
 .golangci.yml
 .github
 todos
+dev ntoes
 bin
+/dist
+node_modules
 cairn-data
 data
 *.db

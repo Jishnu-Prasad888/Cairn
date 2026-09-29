@@ -24,7 +24,8 @@
 
 export type RefType = 'media' | 'memory' | 'album' | 'person' | 'tag';
 
-export interface RefLink {
+/** A `@type:id` reference found in a Markdown body. */
+interface RefLink {
   type: RefType;
   id: string;
   label: string;
