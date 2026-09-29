@@ -92,6 +92,26 @@ const PANEL_TABS: Array<{ id: PanelTab; label: string }> = [
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
 const SLIDESHOW_MS = 4000;
+const CHROME_IDLE_MS = 3500;
+
+const PANEL_STORAGE_KEY = 'cairn.viewer.panel';
+
+/** Whether the person last left the details panel open. Closed by default. */
+function readPanelPreference(): boolean {
+  try {
+    return localStorage.getItem(PANEL_STORAGE_KEY) === 'open';
+  } catch {
+    return false;
+  }
+}
+
+function writePanelPreference(open: boolean): void {
+  try {
+    localStorage.setItem(PANEL_STORAGE_KEY, open ? 'open' : 'closed');
+  } catch {
+    // The choice just is not remembered.
+  }
+}
 
 export function ViewerModal({
   libraryId,
@@ -104,11 +124,11 @@ export function ViewerModal({
 }: ViewerModalProps) {
   const [zoom, setZoom] = useState(1);
   const [slideshowWanted, setSlideshowWanted] = useState(false);
-  // Beside the image on a wide screen; on a phone the image comes first and the
-  // details are one tap away.
-  const [panelOpen, setPanelOpen] = useState(
-    () => typeof window === 'undefined' || window.innerWidth > 900,
-  );
+  // Closed until asked for: the image comes first. The choice is remembered.
+  const [panelOpen, setPanelOpen] = useState(readPanelPreference);
+  // The interface fades away after a moment of stillness, or on request, so
+  // the photo has the whole window; any movement or key brings it back.
+  const [chromeHidden, setChromeHidden] = useState(false);
   const [tab, setTab] = useState<PanelTab>('details');
   // Both are tagged with the file they describe, so navigating never shows the
   // previous file's favourite or metadata while the new request is in flight.
@@ -124,7 +144,6 @@ export function ViewerModal({
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
-  const stageRef = useRef<HTMLDivElement | null>(null);
 
   const index = siblings.findIndex((f) => f.id === file.id);
   const position = index >= 0 ? index + 1 : 0;
@@ -169,7 +188,7 @@ export function ViewerModal({
   useFocusTrap(dialogRef);
 
   const toggleFullscreen = useCallback(() => {
-    const el = stageRef.current;
+    const el = dialogRef.current;
     if (!el) return;
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => undefined);
@@ -177,6 +196,31 @@ export function ViewerModal({
       void el.requestFullscreen?.().catch(() => undefined);
     }
   }, []);
+
+  const togglePanel = useCallback(() => {
+    setPanelOpen((open) => {
+      writePanelPreference(!open);
+      return !open;
+    });
+  }, []);
+
+  // Idle timer: hide the interface after a few seconds without input. Held off
+  // while the details are open, since reading them is not idleness.
+  const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armIdle = useCallback(() => {
+    if (idleRef.current) clearTimeout(idleRef.current);
+    idleRef.current = setTimeout(() => setChromeHidden(true), CHROME_IDLE_MS);
+  }, []);
+  const revealChrome = useCallback(() => {
+    setChromeHidden((hidden) => (hidden ? false : hidden));
+    armIdle();
+  }, [armIdle]);
+  useEffect(() => {
+    armIdle();
+    return () => {
+      if (idleRef.current) clearTimeout(idleRef.current);
+    };
+  }, [armIdle, file.id]);
 
   const stepZoom = useCallback((direction: 1 | -1) => {
     setZoom((current) => {
@@ -231,7 +275,12 @@ export function ViewerModal({
         case 't':
         case 'T':
           e.preventDefault();
-          setPanelOpen((v) => !v);
+          togglePanel();
+          break;
+        case 'h':
+        case 'H':
+          e.preventDefault();
+          setChromeHidden((v) => !v);
           break;
         default:
           break;
@@ -239,7 +288,7 @@ export function ViewerModal({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [close, goNext, goPrev, stepZoom, toggleFullscreen]);
+  }, [close, goNext, goPrev, stepZoom, toggleFullscreen, togglePanel]);
 
   // Slideshow: advance through the siblings, and stop at the end rather than
   // looping forever behind the user's back. Whether it is *running* is derived
@@ -327,7 +376,6 @@ export function ViewerModal({
   const stage = (
     <div
       className="viewer-stage"
-      ref={stageRef}
       onWheel={onWheel}
       onDoubleClick={() => {
         if (file.media_type === 'photo') setZoom((z) => (z === 1 ? 2 : 1));
@@ -370,15 +418,24 @@ export function ViewerModal({
       data-testid="viewer"
     >
       <div
-        className="viewer-modal"
+        className={[
+          'viewer-modal',
+          panelOpen ? 'panel-open' : '',
+          chromeHidden ? 'chrome-hidden' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
         role="dialog"
         aria-modal="true"
         aria-label={file.name}
         tabIndex={-1}
         ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
+        onMouseMove={revealChrome}
+        onTouchStart={revealChrome}
+        onKeyDown={revealChrome}
       >
-        <div className="viewer-toolbar">
+        <header className="viewer-toolbar viewer-chrome">
           <button type="button" className="viewer-tool" onClick={close} aria-label="Close viewer">
             <ToolIcon name="close" />
           </button>
@@ -442,8 +499,18 @@ export function ViewerModal({
             )}
             <button
               type="button"
+              className="viewer-tool"
+              onClick={() => setChromeHidden(true)}
+              aria-label="Hide controls"
+              title="Hide controls (H)"
+              data-testid="hide-controls"
+            >
+              <ToolIcon name="eye-off" />
+            </button>
+            <button
+              type="button"
               className={panelOpen ? 'viewer-tool active' : 'viewer-tool'}
-              onClick={() => setPanelOpen((v) => !v)}
+              onClick={togglePanel}
               aria-expanded={panelOpen}
               aria-controls="viewer-panel"
               aria-label="Details"
@@ -453,54 +520,52 @@ export function ViewerModal({
               <ToolIcon name="info" />
             </button>
           </div>
+        </header>
+
+        <div className="viewer-stage-wrap">{stage}</div>
+
+        {slideshow && (
+          <p className="viewer-slideshow-note viewer-chrome" role="status">
+            Slideshow is playing — press S to stop.
+          </p>
+        )}
+
+        {hasPrev && (
+          <button
+            type="button"
+            className="viewer-nav viewer-nav-prev viewer-chrome"
+            onClick={goPrev}
+            aria-label="Previous item"
+          >
+            <ToolIcon name="prev" />
+          </button>
+        )}
+        {hasNext && (
+          <button
+            type="button"
+            className="viewer-nav viewer-nav-next viewer-chrome"
+            onClick={goNext}
+            aria-label="Next item"
+          >
+            <ToolIcon name="next" />
+          </button>
+        )}
+
+        <div className="viewer-bottom viewer-chrome">
+          {/* Keyed by file so navigating remounts it with a clean note. */}
+          <FileNote key={file.id} libraryId={libraryId} fileId={file.id} />
+          {siblings.length > 1 && (
+            <Filmstrip
+              libraryId={libraryId}
+              siblings={siblings}
+              index={index}
+              onNavigate={onNavigate}
+            />
+          )}
         </div>
 
-        <div className="viewer-body">
-          <div className="viewer-stage-wrap">
-            {stage}
-
-            {slideshow && (
-              <p className="viewer-slideshow-note" role="status">
-                Slideshow is playing — press S to stop.
-              </p>
-            )}
-
-            {hasPrev && (
-              <button
-                type="button"
-                className="viewer-nav viewer-nav-prev"
-                onClick={goPrev}
-                aria-label="Previous item"
-              >
-                <ToolIcon name="prev" />
-              </button>
-            )}
-            {hasNext && (
-              <button
-                type="button"
-                className="viewer-nav viewer-nav-next"
-                onClick={goNext}
-                aria-label="Next item"
-              >
-                <ToolIcon name="next" />
-              </button>
-            )}
-
-            {siblings.length > 1 && (
-              <Filmstrip
-                libraryId={libraryId}
-                siblings={siblings}
-                index={index}
-                onNavigate={onNavigate}
-              />
-            )}
-          </div>
-
-          {/* Beside the image: the note (caption), then the detail panel */}
-          <div className="viewer-scroll-area" hidden={!panelOpen}>
-            {/* Keyed by file so navigating remounts it with a clean note. */}
-            <FileNote key={file.id} libraryId={libraryId} fileId={file.id} />
-
+        {panelOpen && (
+          <div className="viewer-scroll-area">
             {panelOpen && (
               <aside
                 className="viewer-panel"
@@ -640,7 +705,7 @@ export function ViewerModal({
               </aside>
             )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -656,6 +721,8 @@ const TOOL_PATHS = {
   play: 'M8 5.5v13l11-6.5z',
   pause: 'M8 5v14M16 5v14',
   info: 'M12 11v6M12 7.5v.01M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
+  'eye-off':
+    'M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A9.6 9.6 0 0 1 12 5c5 0 8.5 4.5 9.5 7a13 13 0 0 1-2.6 3.8M6.5 6.6A13 13 0 0 0 2.5 12c1 2.5 4.5 7 9.5 7 1.6 0 3-.4 4.3-1.1',
   prev: 'm15 5-7 7 7 7',
   next: 'm9 5 7 7-7 7',
 } as const;
