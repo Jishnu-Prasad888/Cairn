@@ -4,12 +4,15 @@
    drawer slides in from the right only when asked for. The base `.viewer-*`
    primitives live in views.css. */
 
-.viewer-backdrop {
+.viewer-backdrop.viewer-backdrop {
   padding: 0;
   background: #0d0908;
 }
 
-.viewer-modal {
+/* views.css declares a smaller `.viewer-modal` and is bundled after this file, so
+   the base rule is nested under the backdrop to out-rank it rather than depend
+   on stylesheet order. */
+.viewer-backdrop > .viewer-modal {
   --viewer-ink: #f5ece4;
   --viewer-ink-muted: #c1b1a5;
   --viewer-glass: rgba(20, 14, 12, 0.55);
@@ -165,7 +168,7 @@
 
 /* The stage owns the fullscreen request's content: the photo, fitted to the
    window with no frame around it. */
-.viewer-stage {
+.viewer-stage-wrap > .viewer-stage {
   flex: 1 1 auto;
   min-width: 0;
   height: auto;
@@ -193,8 +196,8 @@
   transition: transform 120ms ease;
 }
 
-.viewer-generic,
-.viewer-generic .muted {
+.viewer-stage .viewer-generic,
+.viewer-stage .viewer-generic .muted {
   color: var(--viewer-ink-muted);
 }
 
