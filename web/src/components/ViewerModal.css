@@ -3,8 +3,8 @@
    and are shared with the older single-purpose viewer. */
 
 .viewer-modal {
-  width: min(1240px, calc(100vw - var(--space-4) * 2));
-  height: min(92vh, 900px);
+  width: min(760px, calc(100vw - var(--space-4) * 2));
+  height: min(92vh, 960px);
   max-height: 92vh;
 }
 
@@ -77,18 +77,24 @@
   font-size: 12px;
 }
 
+/* The viewer body is now a vertical stack: image hero at the top,
+   scrollable note + details below. */
 .viewer-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* The stage owns the fullscreen request so the media can expand past the
-   dialog chrome on browsers that support element fullscreen. */
+   dialog chrome on browsers that support element fullscreen.
+   Fixed height so the image is the hero without expanding to fill everything
+   — scrolling down shows the note and details. */
 .viewer-stage {
-  flex: 1 1 auto;
-  min-height: 220px;
+  flex: 0 0 auto;
+  height: 54vh;
+  max-height: 54vh;
   background: #1c1614;
   display: flex;
   align-items: center;
@@ -98,6 +104,8 @@
 
 .viewer-stage:fullscreen {
   background: #000;
+  height: 100vh;
+  max-height: 100vh;
 }
 
 /* Zoomed, the media is laid out larger than the stage and the stage scrolls
@@ -120,16 +128,21 @@
   max-width: 100vw;
 }
 
-/* ----------------------------- side panel ----------------------------- */
-
-.viewer-panel {
+/* Scrollable area below the image: FileNote + detail panel. */
+.viewer-scroll-area {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  background: var(--surface);
+}
+
+/* ----------------------------- side panel ----------------------------- */
+
+.viewer-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-4) var(--space-4);
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
@@ -282,10 +295,40 @@
   font-size: 12px;
 }
 
-.viewer-note {
+/* Albums panel */
+.viewer-album-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.viewer-album-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+.viewer-album-name {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-album-btn {
   flex: none;
-  max-height: 30vh;
-  overflow-y: auto;
+  font-size: 13px;
+  padding: var(--space-1) var(--space-2);
+}
+
+/* The note is now inside the scrollable area; let it grow naturally. */
+.viewer-scroll-area .viewer-note {
+  border-bottom: 1px solid var(--border);
 }
 
 @media (max-width: 720px) {
@@ -294,6 +337,11 @@
     height: 100dvh;
     max-height: 100dvh;
     border-radius: 0;
+  }
+
+  .viewer-stage {
+    height: 40vh;
+    max-height: 40vh;
   }
 
   .viewer-hint {
