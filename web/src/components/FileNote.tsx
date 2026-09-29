@@ -13,7 +13,7 @@ interface FileNoteProps {
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 /**
- * A per-file Markdown note rendered directly under the media in the viewer.
+ * A per-file Markdown note, shown as a caption over the bottom of the photo.
  *
  * The note is stored server-side (the file's note endpoint) and autosaves with
  * a short debounce — the same pattern the memories editor uses. Missing notes
@@ -22,7 +22,7 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export function FileNote({ libraryId, fileId }: FileNoteProps) {
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState('');
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [editing, setEditing] = useState(false);
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +45,6 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
         lastSavedRef.current = resp.note.body;
         setDraft(resp.note.body);
         setLoaded(true);
-        setMode(resp.note.body ? 'preview' : 'edit');
       })
       .catch(() => {
         // Notes are optional; a failed read behaves like an empty note.
@@ -98,63 +97,61 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
   const preview = useMemo(() => (draft ? renderMarkdown(draft).html : ''), [draft]);
   const hasNote = draft.trim() !== '';
 
+  // Nothing to show until the stored note has been read, so a caption never
+  // flashes in as "Add a caption" over a photo that already has one.
+  if (!loaded) return null;
+
   return (
-    <section className="viewer-note" data-testid="viewer-note">
-      <div className="viewer-note-header">
-        <h3>Note</h3>
-        <div className="viewer-note-controls">
-          <div className="viewer-note-tabs" role="group" aria-label="Note view">
+    <section className="viewer-caption" data-testid="viewer-note">
+      {editing ? (
+        <div className="viewer-caption-edit">
+          <textarea
+            className="viewer-note-input"
+            aria-label="Markdown note"
+            placeholder="Write a caption. Markdown works."
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setStatus('idle');
+            }}
+            rows={3}
+            autoFocus
+          />
+          <div className="viewer-caption-actions">
+            <span className={`note-status note-status-${status}`} role="status" aria-live="polite">
+              {status === 'saving' && 'Saving…'}
+              {status === 'saved' && 'Saved'}
+              {status === 'error' && 'Save failed'}
+            </span>
+            {hasNote && (
+              <button type="button" className="viewer-caption-button" onClick={() => void clear()}>
+                Clear
+              </button>
+            )}
             <button
               type="button"
-              className={mode === 'edit' ? 'viewer-note-tab active' : 'viewer-note-tab'}
-              onClick={() => setMode('edit')}
-              aria-pressed={mode === 'edit'}
-            >
-              Write
-            </button>
-            <button
-              type="button"
-              className={mode === 'preview' ? 'viewer-note-tab active' : 'viewer-note-tab'}
-              onClick={() => setMode('preview')}
-              aria-pressed={mode === 'preview'}
+              className="viewer-caption-button primary"
+              onClick={() => setEditing(false)}
             >
               Preview
             </button>
           </div>
-          {hasNote && (
-            <button type="button" className="viewer-note-clear" onClick={() => void clear()}>
-              Clear
-            </button>
-          )}
-          <span className={`note-status note-status-${status}`} role="status" aria-live="polite">
-            {status === 'saving' && 'Saving…'}
-            {status === 'saved' && 'Saved'}
-            {status === 'error' && 'Save failed'}
-            {status === 'idle' && ''}
-          </span>
         </div>
-      </div>
-
-      {mode === 'edit' ? (
-        <textarea
-          className="viewer-note-input"
-          aria-label="Markdown note"
-          placeholder={'Add a Markdown note…\n\n_This text will be shown under the image._'}
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setStatus('idle');
-          }}
-          rows={4}
-        />
       ) : hasNote ? (
-        <div
-          className="viewer-note-preview"
-          aria-label="Markdown note preview"
-          dangerouslySetInnerHTML={{ __html: preview }}
-        />
+        <div className="viewer-caption-view">
+          <div
+            className="viewer-caption-body"
+            aria-label="Markdown note preview"
+            dangerouslySetInnerHTML={{ __html: preview }}
+          />
+          <button type="button" className="viewer-caption-button" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        </div>
       ) : (
-        <p className="muted viewer-note-empty">No note yet — use Write to add one.</p>
+        <button type="button" className="viewer-caption-add" onClick={() => setEditing(true)}>
+          Add a caption
+        </button>
       )}
 
       {error && (

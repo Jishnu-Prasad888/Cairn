@@ -1,37 +1,72 @@
-/* The viewer: a full-window lightbox. A dark stage holds the media with
-   floating previous/next buttons and a filmstrip; the note and details sit in a
-   sidebar that follows the app theme. The base `.viewer-*` primitives live in
-   views.css. */
+/* The viewer: the photo is the window. The stage fills the whole screen and
+   everything else — toolbar, previous/next, caption, filmstrip — floats over it
+   and fades away after a moment of stillness (or on request, with H). The details
+   drawer slides in from the right only when asked for. The base `.viewer-*`
+   primitives live in views.css. */
 
 .viewer-backdrop {
   padding: 0;
-  background: rgba(14, 10, 9, 0.96);
-  backdrop-filter: blur(6px);
+  background: #0d0908;
 }
 
 .viewer-modal {
-  --viewer-ink: #f3e9e1;
-  --viewer-ink-muted: #b7a79b;
-  --viewer-glass: rgba(255, 255, 255, 0.08);
-  width: 100vw;
-  height: 100dvh;
+  --viewer-ink: #f5ece4;
+  --viewer-ink-muted: #c1b1a5;
+  --viewer-glass: rgba(20, 14, 12, 0.55);
+  --viewer-drawer: 380px;
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
   max-height: none;
   border: 0;
   border-radius: 0;
-  background: #171211;
+  background: #0d0908;
   color: var(--viewer-ink);
+  overflow: hidden;
 }
 
-/* -------------------------------- toolbar ------------------------------- */
+/* ------------------------------ floating chrome ------------------------- */
+
+.viewer-chrome {
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+
+.viewer-modal.chrome-hidden .viewer-chrome:not(:focus-within) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.viewer-modal.chrome-hidden {
+  cursor: none;
+}
+
+/* Reading the details is not idleness: keep the toolbar while the drawer is open. */
+.viewer-modal.panel-open.chrome-hidden .viewer-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 .viewer-toolbar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  flex: none;
-  padding: var(--space-2) var(--space-4);
-  background: #1d1716;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding: var(--space-3) var(--space-4) var(--space-6);
+  background: linear-gradient(rgba(0, 0, 0, 0.7), transparent);
+  pointer-events: none;
+}
+
+.viewer-toolbar > * {
+  pointer-events: auto;
+}
+
+.viewer-modal.panel-open .viewer-toolbar {
+  right: var(--viewer-drawer);
 }
 
 .viewer-position {
@@ -39,8 +74,9 @@
   min-width: 0;
   overflow: hidden;
   font-size: 0.9rem;
-  color: var(--viewer-ink-muted);
+  color: var(--viewer-ink);
   text-overflow: ellipsis;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
   white-space: nowrap;
 }
 
@@ -56,13 +92,14 @@
   align-items: center;
   background: var(--viewer-glass);
   border-radius: var(--radius-pill);
+  backdrop-filter: blur(8px);
 }
 
 .viewer-tool {
   display: inline-grid;
   place-items: center;
-  min-width: 36px;
-  height: 36px;
+  min-width: 38px;
+  height: 38px;
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-pill);
@@ -75,17 +112,21 @@
   transition: background 120ms ease;
 }
 
-.viewer-toolbar-actions > .viewer-tool {
+.viewer-toolbar-actions > .viewer-tool,
+.viewer-toolbar > .viewer-tool {
   background: var(--viewer-glass);
+  backdrop-filter: blur(8px);
 }
 
 .viewer-tool:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .viewer-tool:focus-visible,
 .viewer-nav:focus-visible,
-.viewer-film:focus-visible {
+.viewer-film:focus-visible,
+.viewer-caption-button:focus-visible,
+.viewer-caption-add:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -111,42 +152,30 @@
 
 /* --------------------------------- stage -------------------------------- */
 
-.viewer-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: row;
-  overflow: hidden;
-}
-
 .viewer-stage-wrap {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
+  position: absolute;
+  inset: 0;
   display: flex;
-  flex-direction: column;
+  transition: right 200ms ease;
 }
 
-/* The stage owns the fullscreen request so the media can expand past the
-   window chrome on browsers that support element fullscreen. */
+.viewer-modal.panel-open .viewer-stage-wrap {
+  right: var(--viewer-drawer);
+}
+
+/* The stage owns the fullscreen request's content: the photo, fitted to the
+   window with no frame around it. */
 .viewer-stage {
   flex: 1 1 auto;
-  min-height: 0;
+  min-width: 0;
   height: auto;
   max-height: none;
-  padding: var(--space-4);
+  padding: var(--space-2);
   background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: auto;
-}
-
-.viewer-stage:fullscreen {
-  padding: 0;
-  background: #000;
-  height: 100vh;
-  max-height: 100vh;
 }
 
 /* Zoomed, the media is laid out larger than the stage and the stage scrolls
@@ -160,56 +189,50 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: var(--radius-sm);
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
   transform-origin: center center;
   transition: transform 120ms ease;
 }
 
-.viewer-stage:fullscreen .viewer-media {
-  max-height: 100vh;
-  max-width: 100vw;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.viewer-generic {
-  color: var(--viewer-ink-muted);
-}
-
+.viewer-generic,
 .viewer-generic .muted {
   color: var(--viewer-ink-muted);
 }
 
 .viewer-slideshow-note {
   position: absolute;
-  top: var(--space-3);
+  top: var(--space-6);
   left: 50%;
+  z-index: 3;
   transform: translateX(-50%);
   margin: 0;
   padding: var(--space-1) var(--space-4);
   font-size: 0.8rem;
   color: var(--viewer-ink);
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--viewer-glass);
   border-radius: var(--radius-pill);
   pointer-events: none;
 }
 
-/* Previous and next float over the edges of the stage. */
+/* Previous and next float over the edges of the photo. */
 .viewer-nav {
   position: absolute;
-  top: calc(50% - 40px);
+  top: 50%;
+  z-index: 3;
   display: grid;
   place-items: center;
   width: 48px;
   height: 48px;
+  margin-top: -24px;
   padding: 0;
   color: var(--viewer-ink);
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--viewer-glass);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 50%;
+  backdrop-filter: blur(8px);
   cursor: pointer;
-  transition: background 120ms ease;
+  transition:
+    background 120ms ease,
+    opacity 220ms ease;
 }
 
 .viewer-nav:hover {
@@ -224,45 +247,168 @@
   right: var(--space-4);
 }
 
+.viewer-modal.panel-open .viewer-nav-next {
+  right: calc(var(--viewer-drawer) + var(--space-4));
+}
+
 .viewer-nav svg {
   width: 24px;
   height: 24px;
 }
 
-/* -------------------------------- filmstrip ----------------------------- */
+/* ------------------------------ caption + strip ------------------------- */
+
+.viewer-bottom {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8, 56px) var(--space-4) var(--space-3);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+  pointer-events: none;
+}
+
+.viewer-bottom > * {
+  pointer-events: auto;
+}
+
+.viewer-modal.panel-open .viewer-bottom {
+  right: var(--viewer-drawer);
+}
+
+.viewer-caption {
+  width: min(720px, 100%);
+}
+
+.viewer-caption-view {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.viewer-caption-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 22vh;
+  overflow-y: auto;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--viewer-ink);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+  overflow-wrap: anywhere;
+}
+
+.viewer-caption-body > :first-child {
+  margin-top: 0;
+}
+
+.viewer-caption-body > :last-child {
+  margin-bottom: 0;
+}
+
+.viewer-caption-body a {
+  color: var(--accent-soft);
+}
+
+.viewer-caption-add,
+.viewer-caption-button {
+  flex: none;
+  padding: var(--space-1) var(--space-3);
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--viewer-ink);
+  background: var(--viewer-glass);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+.viewer-caption-add {
+  display: block;
+  margin: 0 auto;
+}
+
+.viewer-caption-add:hover,
+.viewer-caption-button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.viewer-caption-button.primary {
+  color: #1d1716;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.viewer-caption-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: rgba(20, 14, 12, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(10px);
+}
+
+.viewer-caption-edit .viewer-note-input {
+  color: var(--viewer-ink);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.viewer-caption-edit .viewer-note-input::placeholder {
+  color: var(--viewer-ink-muted);
+}
+
+.viewer-caption-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.viewer-caption-actions .note-status {
+  margin-right: auto;
+  color: var(--viewer-ink-muted);
+}
 
 .viewer-filmstrip {
-  margin: 0;
-  list-style: none;
   display: flex;
-  flex: none;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
   overflow-x: auto;
-  background: rgba(0, 0, 0, 0.35);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  scrollbar-width: thin;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.viewer-filmstrip li {
+  flex: none;
 }
 
 .viewer-film {
-  flex: none;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   overflow: hidden;
   color: var(--viewer-ink-muted);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
   border: 0;
   border-radius: var(--radius-sm);
-  opacity: 0.55;
+  opacity: 0.6;
   cursor: pointer;
   transition: opacity 120ms ease;
 }
 
 .viewer-film:hover {
-  opacity: 0.9;
+  opacity: 0.95;
 }
 
 .viewer-film.active {
@@ -278,19 +424,88 @@
   object-fit: cover;
 }
 
-/* -------------------------------- sidebar ------------------------------- */
+/* -------------------------------- drawer -------------------------------- */
 
 .viewer-scroll-area {
-  flex: 0 0 380px;
-  min-height: 0;
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 4;
+  width: var(--viewer-drawer);
   overflow-y: auto;
   color: var(--text-primary);
   background: var(--surface);
   border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+  animation: viewer-drawer-in 200ms ease-out;
 }
 
-.viewer-scroll-area[hidden] {
-  display: none;
+@keyframes viewer-drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer-scroll-area,
+  .viewer-chrome,
+  .viewer-stage-wrap {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 900px) {
+  /* On a narrow screen the drawer covers the photo like a sheet instead of
+     squeezing it. */
+  .viewer-modal {
+    --viewer-drawer: 100vw;
+  }
+
+  .viewer-modal.panel-open .viewer-stage-wrap,
+  .viewer-modal.panel-open .viewer-toolbar,
+  .viewer-modal.panel-open .viewer-bottom {
+    right: 0;
+  }
+
+  .viewer-modal.panel-open .viewer-nav-next {
+    right: var(--space-2);
+  }
+
+  .viewer-scroll-area {
+    inset: 30dvh 0 0 0;
+    width: auto;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .viewer-modal.panel-open .viewer-nav,
+  .viewer-modal.panel-open .viewer-bottom {
+    display: none;
+  }
+
+  .viewer-nav {
+    width: 40px;
+    height: 40px;
+    margin-top: -20px;
+  }
+
+  .viewer-nav-prev {
+    left: var(--space-2);
+  }
+
+  .viewer-nav-next {
+    right: var(--space-2);
+  }
+
+  .viewer-toolbar {
+    padding: var(--space-2) var(--space-3) var(--space-5);
+  }
 }
 
 /* ----------------------------- side panel ----------------------------- */
@@ -488,41 +703,4 @@
 .viewer-panel .viewer-actions .button {
   padding: var(--space-1) var(--space-3);
   font-size: 13px;
-}
-
-@media (max-width: 900px) {
-  .viewer-body {
-    flex-direction: column;
-  }
-
-  .viewer-stage-wrap {
-    flex: 0 0 56dvh;
-  }
-
-  .viewer-scroll-area {
-    flex: 1 1 auto;
-    border-top: 1px solid var(--border);
-    border-left: 0;
-  }
-
-  .viewer-nav {
-    width: 40px;
-    height: 40px;
-  }
-
-  .viewer-nav-prev {
-    left: var(--space-2);
-  }
-
-  .viewer-nav-next {
-    right: var(--space-2);
-  }
-
-  .viewer-toolbar {
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .viewer-stage {
-    padding: var(--space-2);
-  }
 }

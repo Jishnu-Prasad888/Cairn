@@ -548,6 +548,49 @@ describe('MediaPage', () => {
     expect(last).toHaveFocus();
   });
 
+  it('opens with the photo alone and the details closed', async () => {
+    setup();
+    // setup() starts returning users with the drawer open; this one is new.
+    localStorage.setItem('cairn.viewer.panel', 'closed');
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+
+    expect(within(viewer).getByRole('img')).toBeInTheDocument();
+    expect(within(viewer).queryByTestId('viewer-details-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('toggle-panel')).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.keyDown(window, { key: 't' });
+    expect(await screen.findByTestId('viewer-details-panel')).toBeInTheDocument();
+    // The choice is remembered for the next photo.
+    expect(localStorage.getItem('cairn.viewer.panel')).toBe('open');
+  });
+
+  it('hides the controls on request and brings them back on movement', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const dialog = within(await screen.findByTestId('viewer')).getByRole('dialog');
+    expect(dialog).not.toHaveClass('chrome-hidden');
+
+    fireEvent.click(within(dialog).getByTestId('hide-controls'));
+    await waitFor(() => {
+      expect(dialog).toHaveClass('chrome-hidden');
+    });
+
+    fireEvent.mouseMove(dialog);
+    await waitFor(() => {
+      expect(dialog).not.toHaveClass('chrome-hidden');
+    });
+
+    fireEvent.keyDown(window, { key: 'h' });
+    await waitFor(() => {
+      expect(dialog).toHaveClass('chrome-hidden');
+    });
+  });
+
   it('hides and restores the details panel', async () => {
     setup();
 
@@ -744,6 +787,7 @@ describe('MediaPage', () => {
     const viewer = await screen.findByTestId('viewer');
     const noteSection = await within(viewer).findByTestId('viewer-note');
 
+    fireEvent.click(within(noteSection).getByRole('button', { name: 'Add a caption' }));
     const textarea = within(noteSection).getByLabelText('Markdown note');
     fireEvent.change(textarea, { target: { value: '# Beach day\n\nSunset over the **dunes**.' } });
     fireEvent.click(within(noteSection).getByRole('button', { name: 'Preview' }));
