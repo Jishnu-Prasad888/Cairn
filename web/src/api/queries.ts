@@ -90,8 +90,10 @@ export const probeLibrary = (path: string) =>
 /** One level of the server's directory tree, for the library folder chooser. */
 export interface DirListing {
   path: string;
-  /** Empty at the filesystem root. */
+  /** Empty at the top; the parent of a top-level folder is the places list. */
   parent: string;
+  /** True for the starting list of places: home, the root, and mounted drives. */
+  roots?: boolean;
   dirs: Array<{ name: string; path: string }>;
 }
 

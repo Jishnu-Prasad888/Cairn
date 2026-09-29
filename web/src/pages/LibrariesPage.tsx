@@ -131,12 +131,20 @@ function ServerFolderBrowser({
           type="button"
           className="button"
           onClick={() => listing && setTarget(listing.parent)}
-          disabled={!listing || listing.parent === ''}
+          disabled={!listing || listing.roots}
         >
           ↑ Up
         </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => setTarget('')}
+          disabled={!listing || listing.roots}
+        >
+          Drives
+        </button>
         <code className="folder-browser-path" title={listing?.path}>
-          {listing?.path ?? '…'}
+          {listing ? (listing.roots ? 'Choose a drive or folder' : listing.path) : '…'}
         </code>
       </div>
       <ul className="folder-browser-list">
@@ -149,7 +157,7 @@ function ServerFolderBrowser({
               className="folder-browser-item"
               onClick={() => setTarget(dir.path)}
             >
-              <span aria-hidden="true">📁</span> {dir.name}
+              <span aria-hidden="true">{listing?.roots ? '💽' : '📁'}</span> {dir.name}
             </button>
           </li>
         ))}
@@ -162,7 +170,7 @@ function ServerFolderBrowser({
           type="button"
           className="button primary-button"
           onClick={() => listing && onChoose(listing.path)}
-          disabled={!listing}
+          disabled={!listing || listing.roots}
           data-testid="choose-folder"
         >
           Use this folder
