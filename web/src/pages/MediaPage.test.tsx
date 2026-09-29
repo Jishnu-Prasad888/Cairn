@@ -369,7 +369,7 @@ describe('MediaPage', () => {
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByRole('img')).toHaveAttribute(
       'src',
-      '/api/v1/libraries/lib1/files/f1/thumbnail',
+      '/api/v1/libraries/lib1/files/f1/download',
     );
     expect(within(dialog).getByRole('link', { name: 'Download' })).toHaveAttribute(
       'href',
@@ -379,6 +379,22 @@ describe('MediaPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close viewer' }));
     await waitFor(() => {
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    });
+  });
+
+  it('falls back to the thumbnail when the original cannot be displayed', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const dialog = within(await screen.findByTestId('viewer')).getByRole('dialog');
+
+    fireEvent.error(within(dialog).getByRole('img'));
+    await waitFor(() => {
+      expect(within(dialog).getByRole('img')).toHaveAttribute(
+        'src',
+        '/api/v1/libraries/lib1/files/f1/thumbnail',
+      );
     });
   });
 

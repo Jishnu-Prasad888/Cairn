@@ -129,6 +129,7 @@ export function ViewerModal({
   // The interface fades away after a moment of stillness, or on request, so
   // the photo has the whole window; any movement or key brings it back.
   const [chromeHidden, setChromeHidden] = useState(false);
+  const [originalFailedId, setOriginalFailedId] = useState<string | null>(null);
   const [tab, setTab] = useState<PanelTab>('details');
   // Both are tagged with the file they describe, so navigating never shows the
   // previous file's favourite or metadata while the new request is in flight.
@@ -370,7 +371,13 @@ export function ViewerModal({
   // itself once zoomed, and let the stage do the scrolling.
   const mediaStyle: CSSProperties =
     zoom > 1
-      ? { width: `${zoom * 100}%`, maxWidth: 'none', height: 'auto', objectFit: 'contain' }
+      ? {
+          width: `${zoom * 100}%`,
+          maxWidth: 'none',
+          height: 'auto',
+          maxHeight: 'none',
+          objectFit: 'contain',
+        }
       : {};
 
   const stage = (
@@ -386,7 +393,15 @@ export function ViewerModal({
       {file.media_type === 'photo' ? (
         <img
           className="viewer-media"
-          src={thumbnailUrl(libraryId, file)}
+          // The thumbnail is a small preview, far too low-resolution to fill
+          // the window; show the original, and fall back to the preview for a
+          // format the browser cannot decode (HEIC, RAW).
+          src={
+            originalFailedId === file.id
+              ? thumbnailUrl(libraryId, file)
+              : downloadUrl(libraryId, file)
+          }
+          onError={() => setOriginalFailedId(file.id)}
           alt={file.name}
           style={mediaStyle}
         />
