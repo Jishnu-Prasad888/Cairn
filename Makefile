@@ -56,7 +56,7 @@ release-cross: ## Build release binaries without rebuilding the frontend (uses w
 	shasum -a 256 $(RELEASE_DIR)/cairn-* > $(RELEASE_DIR)/SHA256SUMS
 	@echo "Cross-compiled binaries written to $(RELEASE_DIR)/ (see SHA256SUMS)"
 
-dev: reset-data ## Run the backend with the on-disk built frontend, wiping local dev data first
+dev: reset-data web-build ## Rebuild the frontend, wipe local dev data, and run the backend
 	@mkdir -p $(CURDIR)/web/dist
 	CAIRN_DATA_DIR=$(CURDIR)/cairn-data \
 	CAIRN_HTTP_ADDR=127.0.0.1:8715 \
