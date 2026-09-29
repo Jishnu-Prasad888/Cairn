@@ -18,6 +18,7 @@ interface Options {
   totals?: { photo?: number; video?: number; other?: number };
   recent?: typeof recent;
   people?: { people: unknown[] } | 'unsupported';
+  memories?: unknown[];
 }
 
 const recent = {
@@ -42,7 +43,10 @@ function setup(options: Options = {}) {
     (url) =>
       url.endsWith('/api/v1/libraries/lib1/albums') ? json({ albums: [{ id: 'a1' }] }) : undefined,
     (url) => (url.endsWith('/api/v1/libraries/lib1/tags') ? json({ tags: [] }) : undefined),
-    (url) => (url.endsWith('/api/v1/libraries/lib1/memories') ? json({ memories: [] }) : undefined),
+    (url) =>
+      url.endsWith('/api/v1/libraries/lib1/memories')
+        ? json({ memories: options.memories ?? [] })
+        : undefined,
     (url) => (url.endsWith('/api/v1/libraries/lib1/favorites') ? json({ files: [] }) : undefined),
     (url) => {
       if (!url.endsWith('/api/v1/libraries/lib1/people')) return undefined;
@@ -112,6 +116,36 @@ describe('HomePage', () => {
     setup({ recent: { files: [] } });
 
     expect(await screen.findByTestId('home-no-photos')).toBeInTheDocument();
+  });
+
+  it('lists the most recently edited memories, newest first', async () => {
+    const memory = (id: string, title: string, updated_at: string) => ({
+      id,
+      title,
+      body: '',
+      deleted: false,
+      created_at: updated_at,
+      updated_at,
+    });
+    setup({
+      memories: [
+        memory('m1', 'Old trip', '2026-01-01T00:00:00Z'),
+        memory('m2', 'Birthday', '2026-09-01T00:00:00Z'),
+      ],
+    });
+
+    const list = await screen.findByTestId('home-memories');
+    const titles = within(list)
+      .getAllByRole('link')
+      .map((link) => link.textContent);
+    expect(titles[0]).toContain('Birthday');
+    expect(titles[1]).toContain('Old trip');
+  });
+
+  it('invites the first memory when there are none', async () => {
+    setup();
+
+    expect(await screen.findByTestId('home-no-memories')).toBeInTheDocument();
   });
 
   it('shows server and version status after loading', async () => {

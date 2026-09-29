@@ -25,7 +25,23 @@ import {
   listPeople,
   listTags,
 } from '../api/queries';
-import type { FileListResponse, FileSummary, HealthResponse, VersionResponse } from '../api/types';
+import type {
+  FileListResponse,
+  FileSummary,
+  HealthResponse,
+  Memory,
+  VersionResponse,
+} from '../api/types';
+import {
+  IconAlbum,
+  IconFile,
+  IconMemory,
+  IconPeople,
+  IconPhoto,
+  IconStar,
+  IconTag,
+  IconVideo,
+} from '../components/icons';
 import { thumbnailUrl } from '../components/media';
 import LibraryPicker from '../components/LibraryPicker';
 import {
@@ -50,6 +66,8 @@ interface HomeData {
   /** Null when the server has no face support, so the tile is hidden. */
   personCount: number | null;
   recent: FileSummary[];
+  /** The most recently edited memories, newest first. */
+  recentMemories: Memory[];
 }
 
 async function countByType(libraryId: string, type: 'photo' | 'video' | 'other'): Promise<number> {
@@ -70,7 +88,7 @@ export default function HomePage() {
           countByType(libraryId, 'other'),
           listAlbums(libraryId).then((r) => r.albums?.length ?? 0),
           listTags(libraryId).then((r) => r.tags?.length ?? 0),
-          listMemories(libraryId).then((r) => r.memories?.length ?? 0),
+          listMemories(libraryId).then((r) => r.memories ?? []),
           listFavorites(libraryId).then((r) => r.files?.length ?? 0),
           // A server without face support 404s this route; that is "not
           // available", not "zero people", so it resolves to null.
@@ -91,7 +109,10 @@ export default function HomePage() {
         fileCount: files,
         albumCount: albums,
         tagCount: tags,
-        memoryCount: memories,
+        memoryCount: memories.length,
+        recentMemories: [...memories]
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+          .slice(0, 4),
         favoriteCount: favorites,
         personCount: people,
         recent: (recentPage as FileListResponse).files ?? [],
@@ -144,44 +165,44 @@ export default function HomePage() {
   }
 
   const data = home.data;
-  const tiles = [
+  const count = (n: number | undefined) => (data ? (n ?? 0) : null);
+  const mediaTiles = [
     {
       to: '/media?type=photo',
       label: 'Photos',
-      count: data?.photoCount ?? null,
+      count: count(data?.photoCount),
       hint: 'Pictures on disk',
+      tone: 'clay',
+      icon: IconPhoto,
     },
     {
       to: '/media?type=video',
       label: 'Videos',
-      count: data?.videoCount ?? null,
+      count: count(data?.videoCount),
       hint: 'Clips and recordings',
+      tone: 'blue',
+      icon: IconVideo,
     },
     {
       to: '/media?type=other',
       label: 'Files',
-      count: data?.fileCount ?? null,
+      count: count(data?.fileCount),
       hint: 'Documents and other',
+      tone: 'green',
+      icon: IconFile,
     },
-    {
-      to: '/memories',
-      label: 'Memories',
-      count: data?.memoryCount ?? null,
-      hint: 'Notes you have written',
-    },
+  ];
+  const organizeTiles = [
+    { to: '/memories', label: 'Memories', n: data?.memoryCount, tone: 'yellow', icon: IconMemory },
+    { to: '/albums', label: 'Albums', n: data?.albumCount, tone: 'pink', icon: IconAlbum },
+    { to: '/tags', label: 'Tags', n: data?.tagCount, tone: 'blue', icon: IconTag },
+    { to: '/favorites', label: 'Favorites', n: data?.favoriteCount, tone: 'clay', icon: IconStar },
     {
       to: '/people',
       label: 'People',
-      count: data?.personCount ?? null,
-      hint: 'Faces you have named',
-    },
-    { to: '/albums', label: 'Albums', count: data?.albumCount ?? null, hint: 'Groupings' },
-    { to: '/tags', label: 'Tags', count: data?.tagCount ?? null, hint: 'Labels' },
-    {
-      to: '/favorites',
-      label: 'Favorites',
-      count: data?.favoriteCount ?? null,
-      hint: 'The ones you kept',
+      n: data?.personCount ?? undefined,
+      tone: 'green',
+      icon: IconPeople,
     },
   ].filter((tile) => tile.to !== '/people' || data?.personCount !== null);
 
@@ -194,52 +215,121 @@ export default function HomePage() {
       {home.error && <ErrorState message={home.error} onRetry={home.reload} />}
       {home.loading && <LoadingState label="Counting your library…" />}
 
+      <nav className="home-actions" aria-label="Quick actions">
+        <Link className="button primary-button" to="/media">
+          Browse media
+        </Link>
+        <Link className="button" to="/memories">
+          Write a memory
+        </Link>
+        <Link className="button" to="/albums">
+          New album
+        </Link>
+        <Link className="button" to="/shared">
+          Share something
+        </Link>
+      </nav>
+
       <section aria-labelledby="home-shortcuts-title" className="home-section">
-        <h2 id="home-shortcuts-title" className="visually-hidden">
-          Your library
+        <h2 id="home-shortcuts-title" className="home-heading">
+          {gate.library.name}
         </h2>
-        <div className="home-tiles">
-          {tiles.map((tile) => (
+        <div className="home-tiles home-tiles-media">
+          {mediaTiles.map((tile) => (
             <Link
-              className="home-tile"
+              className={`home-tile home-tile-large tone-${tile.tone}`}
               to={tile.to}
               key={tile.to}
               data-testid={`home-tile-${tile.to}`}
             >
+              <span className="home-tile-icon">{tile.icon}</span>
               <span className="home-tile-count">{tile.count === null ? '—' : tile.count}</span>
               <span className="home-tile-label">{tile.label}</span>
               <span className="home-tile-hint">{tile.hint}</span>
             </Link>
           ))}
         </div>
+        <div className="home-tiles home-tiles-organize">
+          {organizeTiles.map((tile) => (
+            <Link
+              className={`home-tile home-tile-compact tone-${tile.tone}`}
+              to={tile.to}
+              key={tile.to}
+              data-testid={`home-tile-${tile.to}`}
+            >
+              <span className="home-tile-icon">{tile.icon}</span>
+              <span className="home-tile-text">
+                <span className="home-tile-label">{tile.label}</span>
+              </span>
+              <span className="home-tile-count">{data ? (tile.n ?? 0) : '—'}</span>
+            </Link>
+          ))}
+        </div>
       </section>
 
-      <section aria-labelledby="home-recent-title" className="home-section">
-        <div className="home-section-head">
-          <h2 id="home-recent-title">Recently added photos</h2>
-          <Link to="/media?type=photo" className="link-button">
-            See all photos
-          </Link>
-        </div>
-        {data !== null && data.recent.length === 0 && !home.loading && (
-          <EmptyState title="No photos yet" testId="home-no-photos">
-            <p className="muted">
-              Once an index pass has run over a library, the photos it finds appear here.
-            </p>
-          </EmptyState>
-        )}
-        {data !== null && data.recent.length > 0 && (
-          <ul className="home-recent" data-testid="home-recent">
-            {data.recent.map((file) => (
-              <li key={file.id}>
-                <Link to="/media?type=photo" title={file.name}>
-                  <img src={thumbnailUrl(gate.libraryId, file)} alt={file.name} loading="lazy" />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <div className="home-columns">
+        <section aria-labelledby="home-recent-title" className="home-section">
+          <div className="home-section-head">
+            <h2 id="home-recent-title" className="home-heading">
+              Recently added photos
+            </h2>
+            <Link to="/media?type=photo" className="link-button">
+              See all photos
+            </Link>
+          </div>
+          {data !== null && data.recent.length === 0 && !home.loading && (
+            <EmptyState title="No photos yet" testId="home-no-photos">
+              <p className="muted">
+                Once an index pass has run over a library, the photos it finds appear here.
+              </p>
+            </EmptyState>
+          )}
+          {data !== null && data.recent.length > 0 && (
+            <ul className="home-recent" data-testid="home-recent">
+              {data.recent.map((file) => (
+                <li key={file.id}>
+                  <Link to="/media?type=photo" title={file.name}>
+                    <img src={thumbnailUrl(gate.libraryId, file)} alt={file.name} loading="lazy" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section aria-labelledby="home-memories-title" className="home-section home-memories">
+          <div className="home-section-head">
+            <h2 id="home-memories-title" className="home-heading">
+              Recent memories
+            </h2>
+            <Link to="/memories" className="link-button">
+              All memories
+            </Link>
+          </div>
+          {data !== null && data.recentMemories.length === 0 && !home.loading && (
+            <EmptyState title="No memories yet" testId="home-no-memories">
+              <p className="muted">Write down a day, a trip, or a thought and link your photos.</p>
+              <Link className="button" to="/memories">
+                Write the first one
+              </Link>
+            </EmptyState>
+          )}
+          {data !== null && data.recentMemories.length > 0 && (
+            <ul className="home-memory-list" data-testid="home-memories">
+              {data.recentMemories.map((memory) => (
+                <li key={memory.id}>
+                  <Link to="/memories" className="home-memory">
+                    <span className="home-memory-title">{memory.title || 'Untitled'}</span>
+                    <span className="home-memory-date muted">
+                      {new Date(memory.memory_date ?? memory.updated_at).toLocaleDateString()}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
 
       <section aria-labelledby="home-server-title" className="home-section">
         <h2 id="home-server-title" className="visually-hidden">
