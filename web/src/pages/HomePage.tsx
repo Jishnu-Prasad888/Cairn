@@ -26,7 +26,6 @@ import {
   listTags,
 } from '../api/queries';
 import type { FileListResponse, FileSummary, HealthResponse, VersionResponse } from '../api/types';
-import Brand from '../components/Brand';
 import { thumbnailUrl } from '../components/media';
 import LibraryPicker from '../components/LibraryPicker';
 import {
@@ -146,14 +145,24 @@ export default function HomePage() {
 
   const data = home.data;
   const tiles = [
-    { to: '/photos', label: 'Photos', count: data?.photoCount ?? null, hint: 'Pictures on disk' },
     {
-      to: '/videos',
+      to: '/media?type=photo',
+      label: 'Photos',
+      count: data?.photoCount ?? null,
+      hint: 'Pictures on disk',
+    },
+    {
+      to: '/media?type=video',
       label: 'Videos',
       count: data?.videoCount ?? null,
       hint: 'Clips and recordings',
     },
-    { to: '/files', label: 'Files', count: data?.fileCount ?? null, hint: 'Documents and other' },
+    {
+      to: '/media?type=other',
+      label: 'Files',
+      count: data?.fileCount ?? null,
+      hint: 'Documents and other',
+    },
     {
       to: '/memories',
       label: 'Memories',
@@ -178,13 +187,6 @@ export default function HomePage() {
 
   return (
     <main className="home">
-      <header className="home-header">
-        <h1>
-          <Brand>Cairn</Brand>
-        </h1>
-        <p className="tagline">Your personal place for files, photos, videos, and memories.</p>
-      </header>
-
       {header}
 
       {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
@@ -215,7 +217,7 @@ export default function HomePage() {
       <section aria-labelledby="home-recent-title" className="home-section">
         <div className="home-section-head">
           <h2 id="home-recent-title">Recently added photos</h2>
-          <Link to="/photos" className="link-button">
+          <Link to="/media?type=photo" className="link-button">
             See all photos
           </Link>
         </div>
@@ -230,7 +232,7 @@ export default function HomePage() {
           <ul className="home-recent" data-testid="home-recent">
             {data.recent.map((file) => (
               <li key={file.id}>
-                <Link to={`/photos?file=${file.id}`} title={file.name}>
+                <Link to="/media?type=photo" title={file.name}>
                   <img src={thumbnailUrl(gate.libraryId, file)} alt={file.name} loading="lazy" />
                 </Link>
               </li>
@@ -278,7 +280,8 @@ export default function HomePage() {
 
       <footer className="home-footer">
         <p className="muted">
-          Cairn indexes your media in place — your files are never moved or modified.
+          Cairn indexes your media in place — browse, search, and organize without touching your
+          originals.
         </p>
       </footer>
     </main>
