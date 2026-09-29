@@ -9,15 +9,22 @@
  * pagination so a 100k-item library never loads in one page.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
-import { listFiles, listFolders, searchFiles, softDeleteFile, uploadFile } from '../api/queries';
+import {
+  listFiles,
+  listFolders,
+  moveFile,
+  searchFiles,
+  softDeleteFile,
+  uploadFile,
+} from '../api/queries';
 import type { FileSort, FileSummary, Folder, MediaFilter, SortOrder } from '../api/queries';
 import { formatBytes } from '../api/queries';
-import { ConfirmDialog } from '../components/Dialog';
+import { ConfirmDialog, PromptDialog } from '../components/Dialog';
 import { FileGrid } from '../components/FileGrid';
 import { useFileOperations } from '../components/FileOperations';
 import LibraryPicker from '../components/LibraryPicker';
@@ -37,7 +44,7 @@ const PAGE_SIZE = 100;
 
 export interface MediaPageConfig {
   title: string;
-  /** Fixed media-type filter, or undefined to show everything. */
+  /** Fixed media-type filter, or undefined to let the user choose via dropdown. */
   type?: MediaFilter;
   /** Whether the folder tree and upload controls make sense here. */
   showFolders?: boolean;
@@ -45,6 +52,8 @@ export interface MediaPageConfig {
   subtitle: string;
   emptyTitle: string;
   emptyBody: string;
+  /** Whether to show the type-filter dropdown (default: true when type is undefined). */
+  showTypeFilter?: boolean;
 }
 
 interface FilterState {
@@ -91,6 +100,17 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
+  // When config.type is set the filter is fixed. Otherwise the user can pick.
+  const showTypeFilter = config.showTypeFilter ?? config.type === undefined;
+  // `?type=video` preselects the dropdown, so the Home tiles and the old
+  // /photos, /videos, and /files links land on the section they name.
+  const [typeFilter, setTypeFilter] = useState<MediaFilter | undefined>(() => {
+    const fromUrl = searchParams.get('type');
+    const known = ['photo', 'video', 'audio', 'document', 'other'];
+    return (
+      config.type ?? (fromUrl && known.includes(fromUrl) ? (fromUrl as MediaFilter) : undefined)
+    );
+  });
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [files, setFiles] = useState<FileSummary[]>([]);
@@ -107,6 +127,8 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
   const [pending, setPending] = useState<PendingAction>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
 
   const libraryId = gate.kind === 'ready' ? gate.libraryId : null;
   const library = gate.kind === 'ready' ? gate.library : null;
@@ -126,7 +148,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
 
   // A changed folder, query, or filter invalidates the current selection —
   // also adjusted during render, for the same reason.
-  const selectionKey = `${libraryId}|${folderPath}|${search}|${JSON.stringify(filters)}`;
+  const selectionKey = `${libraryId}|${folderPath}|${search}|${JSON.stringify(filters)}|${typeFilter ?? ''}`;
   const [prevSelectionKey, setPrevSelectionKey] = useState(selectionKey);
   if (prevSelectionKey !== selectionKey) {
     setPrevSelectionKey(selectionKey);
@@ -139,7 +161,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
 
     const params = {
       q,
-      type: config.type,
+      type: typeFilter,
       folder: q ? undefined : folderPath,
       sort: filters.sort,
       order: filters.order,
@@ -152,8 +174,6 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
 
     const load = async () => {
       try {
-        // Searching ignores the current folder: a query means "everywhere in
-        // this library", which is what the top-bar search promises.
         const [dirs, listing] = await Promise.all([
           q || !config.showFolders || offline
             ? Promise.resolve({ folders: [] as Folder[] })
@@ -162,7 +182,12 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
         ]);
         if (cancelled) return;
         setFolders(dirs.folders ?? []);
-        setFiles(listing.files ?? []);
+        const allFiles = listing.files ?? [];
+        // Client-side guard for any edge-cases where media_type is misclassified.
+        const filtered = typeFilter
+          ? allFiles.filter((f) => f.media_type === typeFilter)
+          : allFiles;
+        setFiles(filtered);
         setNextCursor(listing.next_cursor);
         setTotal(listing.total ?? 0);
         setError(null);
@@ -180,7 +205,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
     return () => {
       cancelled = true;
     };
-  }, [libraryId, folderPath, search, filters, run, offline, config.showFolders, config.type, q]);
+  }, [libraryId, folderPath, search, filters, run, offline, config.showFolders, typeFilter, q]);
 
   // Derived from the run counter so a reload shows the spinner again instead of
   // quietly leaving the previous page on screen.
@@ -191,7 +216,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
   // The viewer and its rename/move/copy/trash dialogs. The gate is not ready
   // while the libraries list is loading, in which case nothing here is used.
   const ops = useFileOperations(libraryId ?? '', reload);
-  const { viewer, openViewer, closeViewer, requestAction, dialogs } = ops;
+  const { viewer, openViewer, closeViewer, requestAction, onGridAction, dialogs } = ops;
 
   const loadMore = async () => {
     if (!libraryId || !nextCursor || loadingMore) return;
@@ -199,7 +224,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
     try {
       const params = {
         q,
-        type: config.type,
+        type: typeFilter,
         folder: q ? undefined : folderPath,
         sort: filters.sort,
         order: filters.order,
@@ -211,7 +236,9 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
         limit: PAGE_SIZE,
       };
       const listing = q ? await searchFiles(libraryId, params) : await listFiles(libraryId, params);
-      setFiles((prev) => [...prev, ...(listing.files ?? [])]);
+      const newFiles = listing.files ?? [];
+      const filtered = typeFilter ? newFiles.filter((f) => f.media_type === typeFilter) : newFiles;
+      setFiles((prev) => [...prev, ...filtered]);
       setNextCursor(listing.next_cursor);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -220,13 +247,32 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
     }
   };
 
-  const toggleSelect = (file: FileSummary) => {
+  // Shift-click range selection: select everything between last clicked and current.
+  const lastSelectedRef = useRef<string | null>(null);
+
+  const toggleSelect = (file: FileSummary, shiftKey = false) => {
     setSelected((prev) => {
       const next = new Set(prev);
+      if (shiftKey && lastSelectedRef.current) {
+        const ids = files.map((f) => f.id);
+        const a = ids.indexOf(lastSelectedRef.current);
+        const b = ids.indexOf(file.id);
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          for (let i = lo; i <= hi; i++) {
+            const id = ids[i];
+            if (id) next.add(id);
+          }
+          lastSelectedRef.current = file.id;
+          return next;
+        }
+      }
       if (next.has(file.id)) {
         next.delete(file.id);
+        lastSelectedRef.current = null;
       } else {
         next.add(file.id);
+        lastSelectedRef.current = file.id;
       }
       return next;
     });
@@ -291,6 +337,20 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
       }
     });
 
+  const handleDropOnFolder = async (e: React.DragEvent, destFolderPath: string) => {
+    e.preventDefault();
+    setDragOverFolder(null);
+    const raw = e.dataTransfer.getData('application/cairn-file');
+    if (!raw || !libraryId) return;
+    try {
+      const file = JSON.parse(raw) as { id: string; rel_path: string; name: string };
+      await moveFile(libraryId, file.rel_path, file.id, destFolderPath, file.name);
+      reload();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const crumbs = crumbSegments(folderPath);
   const selectedFiles = useMemo(() => files.filter((f) => selected.has(f.id)), [files, selected]);
 
@@ -342,6 +402,16 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
                 />
               </label>
             )}
+            {config.showFolders && !offline && !q && (
+              <button
+                type="button"
+                className="button"
+                onClick={() => setNewFolderOpen(true)}
+                data-testid="new-folder-btn"
+              >
+                + Folder
+              </button>
+            )}
           </>
         }
       />
@@ -366,6 +436,13 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
             {selected.size} selected
           </span>
           <div className="selection-actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() => setSelected(new Set(files.map((f) => f.id)))}
+            >
+              Select all
+            </button>
             <a
               className="button"
               href={
@@ -399,11 +476,17 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
             <nav className="breadcrumbs" aria-label="Folders">
               <button
                 type="button"
-                className="crumb"
+                className={`crumb${dragOverFolder === '' ? ' drag-over' : ''}`}
                 onClick={() => {
                   setFolderPath('');
                   setSearch('');
                 }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverFolder('');
+                }}
+                onDragLeave={() => setDragOverFolder(null)}
+                onDrop={(e) => void handleDropOnFolder(e, '')}
               >
                 Library root
               </button>
@@ -414,11 +497,17 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
                   </span>
                   <button
                     type="button"
-                    className="crumb"
+                    className={`crumb${dragOverFolder === crumb.path ? ' drag-over' : ''}`}
                     onClick={() => {
                       setFolderPath(crumb.path);
                       setSearch('');
                     }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverFolder(crumb.path);
+                    }}
+                    onDragLeave={() => setDragOverFolder(null)}
+                    onDrop={(e) => void handleDropOnFolder(e, crumb.path)}
                     aria-current={i === crumbs.length - 1 ? 'page' : undefined}
                   >
                     {crumb.label}
@@ -429,6 +518,26 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
           )}
 
           <div className="media-toolbar-actions">
+            {showTypeFilter && (
+              <select
+                aria-label="Media type"
+                className="type-filter-select"
+                value={typeFilter ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value as MediaFilter | '';
+                  setTypeFilter(v === '' ? undefined : v);
+                  setFolderPath('');
+                }}
+                data-testid="type-filter-select"
+              >
+                <option value="">All media</option>
+                <option value="photo">Photos</option>
+                <option value="video">Videos</option>
+                <option value="audio">Audio</option>
+                <option value="document">Documents</option>
+                <option value="other">Other files</option>
+              </select>
+            )}
             <input
               className="search-input"
               type="search"
@@ -573,11 +682,17 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
             <li key={folder.id}>
               <button
                 type="button"
-                className="folder-card"
+                className={`folder-card${dragOverFolder === folder.rel_path ? ' drag-over' : ''}`}
                 onClick={() => {
                   setFolderPath(folder.rel_path);
                   setSearch('');
                 }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverFolder(folder.rel_path);
+                }}
+                onDragLeave={() => setDragOverFolder(null)}
+                onDrop={(e) => void handleDropOnFolder(e, folder.rel_path)}
               >
                 <span className="folder-glyph" aria-hidden="true">
                   📁
@@ -607,6 +722,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
               libraryId={gate.libraryId}
               files={files}
               onOpen={openViewer}
+              onAction={onGridAction}
               selectedIds={selected}
               onToggleSelect={toggleSelect}
             />
@@ -654,8 +770,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
         error={dialogError}
         message={
           <p>
-            The selected items will be moved to the trash. You can restore them from the Trash page;
-            your original files are not modified.
+            The selected items will be moved to the trash. You can restore them from the Trash page.
           </p>
         }
         onCancel={closeDialog}
@@ -663,6 +778,21 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
           if (pending?.kind === 'trash-many') void trashMany(pending.files);
         }}
         testId="trash-many-dialog"
+      />
+
+      <PromptDialog
+        open={newFolderOpen}
+        title="New folder"
+        label="Folder name"
+        placeholder="2024/vacation"
+        hint="The folder will be created when you move or upload a file into it."
+        onCancel={() => setNewFolderOpen(false)}
+        onConfirm={(name) => {
+          const newPath = folderPath ? `${folderPath}/${name}` : name;
+          setFolderPath(newPath);
+          setNewFolderOpen(false);
+        }}
+        testId="new-folder-dialog"
       />
     </main>
   );
@@ -683,7 +813,7 @@ interface FileListProps {
   files: FileSummary[];
   onOpen: (file: FileSummary) => void;
   selected: ReadonlySet<string>;
-  onToggleSelect: (file: FileSummary) => void;
+  onToggleSelect: (file: FileSummary, shiftKey?: boolean) => void;
 }
 
 /** The dense, information-first list view. */
@@ -712,7 +842,7 @@ function FileList({ libraryId, files, onOpen, selected, onToggleSelect }: FileLi
               <input
                 type="checkbox"
                 checked={selected.has(file.id)}
-                onChange={() => onToggleSelect(file)}
+                onChange={(e) => onToggleSelect(file, (e.nativeEvent as MouseEvent).shiftKey)}
                 aria-label={`Select ${file.name}`}
               />
             </td>
