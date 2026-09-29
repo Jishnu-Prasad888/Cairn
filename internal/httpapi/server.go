@@ -156,6 +156,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /api/v1/libraries", s.withAuth(allowAny, s.handleListLibraries))
 		mux.Handle("POST /api/v1/libraries", s.withAuth(allowAdmin, s.handleCreateLibrary))
 		mux.Handle("POST /api/v1/libraries/probe", s.withAuth(allowAdmin, s.handleProbeLibrary))
+		mux.Handle("GET /api/v1/fs/dirs", s.withAuth(allowAdmin, s.handleBrowseDirs))
 		mux.Handle("GET /api/v1/libraries/{id}", s.withAuth(allowAny, s.handleGetLibrary))
 		mux.Handle("POST /api/v1/libraries/{id}/refresh", s.withAuth(allowAdmin, s.handleRefreshLibrary))
 		mux.Handle("DELETE /api/v1/libraries/{id}", s.withAuth(allowAdmin, s.handleDeleteLibrary))
