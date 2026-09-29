@@ -132,6 +132,8 @@ function MemoryEditor({
       .finally(() => setDeleting(false));
   };
 
+  const wordCount = draft.body.trim() === '' ? 0 : draft.body.trim().split(/\s+/).length;
+
   return (
     <div className="editor" data-testid="memory-editor">
       <div className="editor-bar">
@@ -147,6 +149,9 @@ function MemoryEditor({
           {saved.kind === 'saved' && 'Saved'}
           {saved.kind === 'error' && `Save failed: ${saved.message ?? ''}`}
           {saved.kind === 'idle' && 'Draft'}
+        </span>
+        <span className="save-status" title="Keyboard shortcuts">
+          ⌘S saves · ⌃Z undoes
         </span>
       </div>
 
@@ -169,6 +174,7 @@ function MemoryEditor({
           dangerouslySetInnerHTML={{ __html: preview.html }}
         />
       </div>
+      <p className="word-count">{wordCount} words</p>
 
       <div className="editor-footer">
         <div className="ref-chips">
@@ -245,6 +251,7 @@ export default function MemoriesPage() {
   const [active, setActive] = useState<Memory | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [memFilter, setMemFilter] = useState('');
 
   const memories = useLibraryResource<Memory[]>(
     useCallback(async (libraryId: string) => (await listMemories(libraryId)).memories ?? [], []),
@@ -255,6 +262,11 @@ export default function MemoriesPage() {
     () => (activeId ? (memories.data?.find((m) => m.id === activeId) ?? active) : null),
     [active, activeId, memories.data],
   );
+
+  const visibleMemories =
+    memories.data?.filter(
+      (m) => memFilter === '' || m.title.toLowerCase().includes(memFilter.toLowerCase()),
+    ) ?? [];
 
   const create = () => {
     if (gate.kind !== 'ready') return;
@@ -334,7 +346,17 @@ export default function MemoriesPage() {
 
       <div className="memories-layout" data-testid="memories-layout">
         <nav className="memory-list" aria-label="Memories">
-          {memories.data?.map((m) => (
+          <div className="memory-list-header">
+            <span className="memory-list-count">{memories.data?.length ?? 0} memories</span>
+            <input
+              className="memory-filter-input"
+              type="search"
+              placeholder="Filter memories…"
+              value={memFilter}
+              onChange={(e) => setMemFilter(e.target.value)}
+            />
+          </div>
+          {visibleMemories.map((m) => (
             <button
               key={m.id}
               type="button"
