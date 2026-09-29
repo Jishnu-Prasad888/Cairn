@@ -4,7 +4,8 @@
 FROM node:22-alpine AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci
 COPY web/ ./
 RUN npm run build
 
@@ -15,11 +16,18 @@ ARG VERSION=dev
 ARG COMMIT=none
 ARG BUILD_DATE=unknown
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+  go mod download
 COPY . .
 # Overwrite the committed placeholder with the freshly built frontend.
 COPY --from=web /src/web/dist ./internal/webui/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags \
+# Cache mounts persist Go's module and build caches across `docker build`
+# invocations (they otherwise live outside any image layer and are lost the
+# moment a source file changes and invalidates this RUN), so incremental
+# builds only recompile what actually changed instead of every dependency.
+RUN --mount=type=cache,target=/go/pkg/mod \
+  --mount=type=cache,target=/root/.cache/go-build \
+  CGO_ENABLED=0 go build -trimpath -ldflags \
   "-s -w \
   -X 'github.com/Jishnu-Prasad888/Cairn/internal/version.Version=${VERSION}' \
   -X 'github.com/Jishnu-Prasad888/Cairn/internal/version.Commit=${COMMIT}' \
