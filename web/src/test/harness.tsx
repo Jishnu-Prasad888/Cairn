@@ -145,6 +145,8 @@ export interface RenderPageOptions {
   route?: string;
   /** Render bare, without the auth and library providers. */
   bare?: boolean;
+  /** Whether the viewer's details drawer starts open. Defaults to open. */
+  viewerPanel?: 'open' | 'closed';
 }
 
 /**
@@ -152,6 +154,13 @@ export interface RenderPageOptions {
  * provider, and the shared library list.
  */
 export function renderPage(ui: ReactElement, options: RenderPageOptions = {}): RenderResult {
+  // The viewer opens its details drawer only when asked; most tests exercise
+  // what is in it, so they start with it open, as a returning user's would be.
+  try {
+    localStorage.setItem('cairn.viewer.panel', options.viewerPanel ?? 'open');
+  } catch {
+    // No storage: the viewer just starts closed.
+  }
   const tree = options.bare ? (
     <MemoryRouter initialEntries={[options.route ?? '/']}>{ui}</MemoryRouter>
   ) : (
