@@ -165,34 +165,23 @@ export default function HomePage() {
   }
 
   const data = home.data;
-  const count = (n: number | undefined) => (data ? (n ?? 0) : null);
-  const mediaTiles = [
+  const count = (n: number | undefined) => (data ? (n ?? 0) : '—');
+  const tiles = [
     {
       to: '/media?type=photo',
       label: 'Photos',
-      count: count(data?.photoCount),
-      hint: 'Pictures on disk',
+      n: data?.photoCount,
       tone: 'clay',
       icon: IconPhoto,
     },
     {
       to: '/media?type=video',
       label: 'Videos',
-      count: count(data?.videoCount),
-      hint: 'Clips and recordings',
+      n: data?.videoCount,
       tone: 'blue',
       icon: IconVideo,
     },
-    {
-      to: '/media?type=other',
-      label: 'Files',
-      count: count(data?.fileCount),
-      hint: 'Documents and other',
-      tone: 'green',
-      icon: IconFile,
-    },
-  ];
-  const organizeTiles = [
+    { to: '/media?type=other', label: 'Files', n: data?.fileCount, tone: 'green', icon: IconFile },
     { to: '/memories', label: 'Memories', n: data?.memoryCount, tone: 'yellow', icon: IconMemory },
     { to: '/albums', label: 'Albums', n: data?.albumCount, tone: 'pink', icon: IconAlbum },
     { to: '/tags', label: 'Tags', n: data?.tagCount, tone: 'blue', icon: IconTag },
@@ -215,56 +204,19 @@ export default function HomePage() {
       {home.error && <ErrorState message={home.error} onRetry={home.reload} />}
       {home.loading && <LoadingState label="Counting your library…" />}
 
-      <nav className="home-actions" aria-label="Quick actions">
-        <Link className="button primary-button" to="/media">
-          Browse media
-        </Link>
-        <Link className="button" to="/memories">
-          Write a memory
-        </Link>
-        <Link className="button" to="/albums">
-          New album
-        </Link>
-        <Link className="button" to="/shared">
-          Share something
-        </Link>
-      </nav>
-
-      <section aria-labelledby="home-shortcuts-title" className="home-section">
-        <h2 id="home-shortcuts-title" className="home-heading">
-          {gate.library.name}
-        </h2>
-        <div className="home-tiles home-tiles-media">
-          {mediaTiles.map((tile) => (
-            <Link
-              className={`home-tile home-tile-large tone-${tile.tone}`}
-              to={tile.to}
-              key={tile.to}
-              data-testid={`home-tile-${tile.to}`}
-            >
-              <span className="home-tile-icon">{tile.icon}</span>
-              <span className="home-tile-count">{tile.count === null ? '—' : tile.count}</span>
-              <span className="home-tile-label">{tile.label}</span>
-              <span className="home-tile-hint">{tile.hint}</span>
-            </Link>
-          ))}
-        </div>
-        <div className="home-tiles home-tiles-organize">
-          {organizeTiles.map((tile) => (
-            <Link
-              className={`home-tile home-tile-compact tone-${tile.tone}`}
-              to={tile.to}
-              key={tile.to}
-              data-testid={`home-tile-${tile.to}`}
-            >
-              <span className="home-tile-icon">{tile.icon}</span>
-              <span className="home-tile-text">
-                <span className="home-tile-label">{tile.label}</span>
-              </span>
-              <span className="home-tile-count">{data ? (tile.n ?? 0) : '—'}</span>
-            </Link>
-          ))}
-        </div>
+      <section aria-label="Your library" className="home-tiles">
+        {tiles.map((tile) => (
+          <Link
+            className={`home-tile tone-${tile.tone}`}
+            to={tile.to}
+            key={tile.to}
+            data-testid={`home-tile-${tile.to}`}
+          >
+            <span className="home-tile-icon">{tile.icon}</span>
+            <span className="home-tile-label">{tile.label}</span>
+            <span className="home-tile-count">{count(tile.n)}</span>
+          </Link>
+        ))}
       </section>
 
       <div className="home-columns">
@@ -297,7 +249,7 @@ export default function HomePage() {
           )}
         </section>
 
-        <section aria-labelledby="home-memories-title" className="home-section home-memories">
+        <section aria-labelledby="home-memories-title" className="home-section">
           <div className="home-section-head">
             <h2 id="home-memories-title" className="home-heading">
               Recent memories
@@ -308,7 +260,7 @@ export default function HomePage() {
           </div>
           {data !== null && data.recentMemories.length === 0 && !home.loading && (
             <EmptyState title="No memories yet" testId="home-no-memories">
-              <p className="muted">Write down a day, a trip, or a thought and link your photos.</p>
+              <p className="muted">Write down a day, a trip, or a thought.</p>
               <Link className="button" to="/memories">
                 Write the first one
               </Link>
@@ -331,7 +283,7 @@ export default function HomePage() {
         </section>
       </div>
 
-      <section aria-labelledby="home-server-title" className="home-section">
+      <section aria-labelledby="home-server-title" className="home-server-section">
         <h2 id="home-server-title" className="visually-hidden">
           Server status
         </h2>
@@ -367,13 +319,6 @@ export default function HomePage() {
           )}
         </div>
       </section>
-
-      <footer className="home-footer">
-        <p className="muted">
-          Cairn indexes your media in place — browse, search, and organize without touching your
-          originals.
-        </p>
-      </footer>
     </main>
   );
 }
