@@ -89,6 +89,46 @@ describe('LibrariesPage', () => {
     expect(screen.queryByTestId('library-probe')).not.toBeInTheDocument();
   });
 
+  it('names the library after the folder until the name is edited', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('add-library-button'));
+    fireEvent.change(screen.getByTestId('library-path-input'), {
+      target: { value: '/mnt/Family Photos' },
+    });
+    const name = screen.getByLabelText('Name');
+    expect(name).toHaveValue('Family Photos');
+
+    fireEvent.change(name, { target: { value: 'Mine' } });
+    fireEvent.change(screen.getByTestId('library-path-input'), { target: { value: '/mnt/other' } });
+    expect(name).toHaveValue('Mine');
+  });
+
+  it('fills the path from the server folder browser', async () => {
+    setup([
+      (url) => {
+        if (!url.includes('/api/v1/fs/dirs')) return undefined;
+        return url.includes(encodeURIComponent('/mnt/Pictures'))
+          ? json({ path: '/mnt/Pictures', parent: '/mnt', dirs: [] })
+          : json({
+              path: '/mnt',
+              parent: '/',
+              dirs: [{ name: 'Pictures', path: '/mnt/Pictures' }],
+            });
+      },
+    ]);
+    fireEvent.click(await screen.findByTestId('add-library-button'));
+    fireEvent.click(screen.getByTestId('browse-folders'));
+    fireEvent.click(await screen.findByRole('button', { name: /Pictures/ }));
+    expect(await screen.findByText('/mnt/Pictures')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('choose-folder'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('library-path-input')).toHaveValue('/mnt/Pictures');
+    });
+    expect(screen.getByLabelText('Name')).toHaveValue('Pictures');
+    expect(screen.queryByTestId('server-folder-browser')).not.toBeInTheDocument();
+  });
+
   it('refuses to register a path that is not a directory', async () => {
     setup([
       (url, init) =>
@@ -165,7 +205,7 @@ describe('LibrariesPage', () => {
     fireEvent.change(screen.getByTestId('library-path-input'), {
       target: { value: '/mnt/archive' },
     });
-    fireEvent.change(screen.getByLabelText('Name (optional)'), { target: { value: 'Archive' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Archive' } });
     fireEvent.click(screen.getByTestId('confirm-add-library'));
 
     await waitFor(() => {
