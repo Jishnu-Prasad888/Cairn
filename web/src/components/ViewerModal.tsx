@@ -104,7 +104,11 @@ export function ViewerModal({
 }: ViewerModalProps) {
   const [zoom, setZoom] = useState(1);
   const [slideshowWanted, setSlideshowWanted] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(true);
+  // Beside the image on a wide screen; on a phone the image comes first and the
+  // details are one tap away.
+  const [panelOpen, setPanelOpen] = useState(
+    () => typeof window === 'undefined' || window.innerWidth > 900,
+  );
   const [tab, setTab] = useState<PanelTab>('details');
   // Both are tagged with the file they describe, so navigating never shows the
   // previous file's favourite or metadata while the new request is in flight.
@@ -325,6 +329,9 @@ export function ViewerModal({
       className="viewer-stage"
       ref={stageRef}
       onWheel={onWheel}
+      onDoubleClick={() => {
+        if (file.media_type === 'photo') setZoom((z) => (z === 1 ? 2 : 1));
+      }}
       data-testid="viewer-stage"
       data-zoomed={zoom > 1}
     >
@@ -373,63 +380,51 @@ export function ViewerModal({
       >
         <div className="viewer-toolbar">
           <button type="button" className="viewer-tool" onClick={close} aria-label="Close viewer">
-            ✕
+            <ToolIcon name="close" />
           </button>
           <span className="viewer-position" aria-live="polite">
             {siblings.length > 1 ? `${position} of ${siblings.length}` : file.name}
           </span>
           <div className="viewer-toolbar-actions">
-            {hasPrev && (
-              <button
-                type="button"
-                className="viewer-tool"
-                onClick={goPrev}
-                aria-label="Previous item"
-              >
-                ‹
-              </button>
-            )}
-            {hasNext && (
-              <button type="button" className="viewer-tool" onClick={goNext} aria-label="Next item">
-                ›
-              </button>
-            )}
             {previewable && (
               <>
-                <button
-                  type="button"
-                  className="viewer-tool"
-                  onClick={() => stepZoom(-1)}
-                  disabled={zoom === 1}
-                  aria-label="Zoom out"
-                >
-                  −
-                </button>
-                <button
-                  type="button"
-                  className="viewer-tool viewer-tool-wide"
-                  onClick={() => setZoom(1)}
-                  aria-label="Reset zoom"
-                >
-                  {Math.round(zoom * 100)}%
-                </button>
-                <button
-                  type="button"
-                  className="viewer-tool"
-                  onClick={() => stepZoom(1)}
-                  disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-                  aria-label="Zoom in"
-                >
-                  +
-                </button>
+                <div className="viewer-tool-group" role="group" aria-label="Zoom">
+                  <button
+                    type="button"
+                    className="viewer-tool"
+                    onClick={() => stepZoom(-1)}
+                    disabled={zoom === 1}
+                    aria-label="Zoom out"
+                  >
+                    <ToolIcon name="minus" />
+                  </button>
+                  <button
+                    type="button"
+                    className="viewer-tool viewer-tool-wide"
+                    onClick={() => setZoom(1)}
+                    aria-label="Reset zoom"
+                  >
+                    {Math.round(zoom * 100)}%
+                  </button>
+                  <button
+                    type="button"
+                    className="viewer-tool"
+                    onClick={() => stepZoom(1)}
+                    disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+                    aria-label="Zoom in"
+                  >
+                    <ToolIcon name="plus" />
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="viewer-tool"
                   onClick={toggleFullscreen}
                   aria-label="Toggle fullscreen"
                   aria-pressed={false}
+                  title="Fullscreen (F)"
                 >
-                  ⛶
+                  <ToolIcon name="fullscreen" />
                 </button>
                 <button
                   type="button"
@@ -437,36 +432,72 @@ export function ViewerModal({
                   onClick={() => setSlideshowWanted((v) => !v)}
                   disabled={siblings.length < 2}
                   aria-pressed={slideshow}
+                  aria-label={slideshow ? 'Stop slideshow' : 'Start slideshow'}
+                  title="Slideshow (S)"
                   data-testid="slideshow-toggle"
                 >
-                  ▶
+                  <ToolIcon name={slideshow ? 'pause' : 'play'} />
                 </button>
               </>
             )}
             <button
               type="button"
-              className="viewer-tool"
+              className={panelOpen ? 'viewer-tool active' : 'viewer-tool'}
               onClick={() => setPanelOpen((v) => !v)}
               aria-expanded={panelOpen}
               aria-controls="viewer-panel"
+              aria-label="Details"
+              title="Details (T)"
               data-testid="toggle-panel"
             >
-              ⓘ
+              <ToolIcon name="info" />
             </button>
           </div>
         </div>
 
-        {slideshow && (
-          <p className="viewer-slideshow-note" role="status">
-            Slideshow is playing — press S to stop.
-          </p>
-        )}
-
         <div className="viewer-body">
-          {stage}
+          <div className="viewer-stage-wrap">
+            {stage}
 
-          {/* Scrollable area below the image: note (caption) then detail panel */}
-          <div className="viewer-scroll-area">
+            {slideshow && (
+              <p className="viewer-slideshow-note" role="status">
+                Slideshow is playing — press S to stop.
+              </p>
+            )}
+
+            {hasPrev && (
+              <button
+                type="button"
+                className="viewer-nav viewer-nav-prev"
+                onClick={goPrev}
+                aria-label="Previous item"
+              >
+                <ToolIcon name="prev" />
+              </button>
+            )}
+            {hasNext && (
+              <button
+                type="button"
+                className="viewer-nav viewer-nav-next"
+                onClick={goNext}
+                aria-label="Next item"
+              >
+                <ToolIcon name="next" />
+              </button>
+            )}
+
+            {siblings.length > 1 && (
+              <Filmstrip
+                libraryId={libraryId}
+                siblings={siblings}
+                index={index}
+                onNavigate={onNavigate}
+              />
+            )}
+          </div>
+
+          {/* Beside the image: the note (caption), then the detail panel */}
+          <div className="viewer-scroll-area" hidden={!panelOpen}>
             {/* Keyed by file so navigating remounts it with a clean note. */}
             <FileNote key={file.id} libraryId={libraryId} fileId={file.id} />
 
@@ -610,12 +641,96 @@ export function ViewerModal({
             )}
           </div>
         </div>
-
-        <p className="viewer-hint muted">
-          ← → move · + − zoom · 0 reset · F fullscreen · S slideshow · T details · Esc close
-        </p>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------ chrome ------------------------------- */
+
+const TOOL_PATHS = {
+  close: 'M6 6l12 12M18 6 6 18',
+  minus: 'M5 12h14',
+  plus: 'M12 5v14M5 12h14',
+  fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+  play: 'M8 5.5v13l11-6.5z',
+  pause: 'M8 5v14M16 5v14',
+  info: 'M12 11v6M12 7.5v.01M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
+  prev: 'm15 5-7 7 7 7',
+  next: 'm9 5 7 7-7 7',
+} as const;
+
+/** A stroke icon for the viewer's toolbar and navigation buttons. */
+function ToolIcon({ name }: { name: keyof typeof TOOL_PATHS }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill={name === 'play' ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={TOOL_PATHS[name]} />
+    </svg>
+  );
+}
+
+/** How many neighbours the filmstrip shows on each side of the open file. */
+const FILMSTRIP_REACH = 20;
+
+/**
+ * A strip of thumbnails under the stage, so a person can see where they are in
+ * the list and jump several files at once. Only the files around the current
+ * one are rendered, so a 100k-item library never mounts 100k images.
+ */
+function Filmstrip({
+  libraryId,
+  siblings,
+  index,
+  onNavigate,
+}: {
+  libraryId: string;
+  siblings: FileSummary[];
+  index: number;
+  onNavigate: (file: FileSummary) => void;
+}) {
+  const currentRef = useRef<HTMLButtonElement | null>(null);
+  const from = Math.max(0, index - FILMSTRIP_REACH);
+  const items = siblings.slice(from, index + FILMSTRIP_REACH + 1);
+
+  useEffect(() => {
+    currentRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+  }, [index]);
+
+  return (
+    <ul className="viewer-filmstrip" aria-label="Files in this view">
+      {items.map((item) => {
+        const current = item.id === siblings[index]?.id;
+        return (
+          <li key={item.id}>
+            <button
+              type="button"
+              ref={current ? currentRef : undefined}
+              className={current ? 'viewer-film active' : 'viewer-film'}
+              onClick={() => onNavigate(item)}
+              aria-current={current ? 'true' : undefined}
+              aria-label={`Open ${item.name}`}
+              title={item.name}
+            >
+              {item.media_type === 'photo' || item.media_type === 'video' ? (
+                <img src={thumbnailUrl(libraryId, item)} alt="" loading="lazy" />
+              ) : (
+                <span aria-hidden="true">{mediaGlyph(item)}</span>
+              )}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
