@@ -5,6 +5,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-7);
   min-width: 0;
 }
 
@@ -86,6 +87,12 @@
   cursor: default;
 }
 
+.crumb.drag-over {
+  background: var(--accent-soft);
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
 /* ------------------------------- folders ------------------------------ */
 
 .folder-grid {
@@ -102,17 +109,28 @@
   gap: var(--space-1);
   width: 100%;
   text-align: left;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
+  padding: var(--space-3) var(--space-3);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-elevated);
   color: var(--text-primary);
   font: inherit;
+  font-size: 14px;
   cursor: pointer;
+  transition:
+    border-color 100ms ease,
+    box-shadow 100ms ease;
 }
 
 .folder-card:hover {
   border-color: var(--primary);
+  box-shadow: var(--shadow-1);
+}
+
+.folder-card.drag-over {
+  border-color: var(--primary);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--primary);
 }
 
 .folder-glyph {
@@ -174,6 +192,9 @@
 /* ---------------------------- selection bar ---------------------------- */
 
 .selection-bar {
+  position: sticky;
+  top: 64px;
+  z-index: 10;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -406,4 +427,19 @@
     width: 100%;
     justify-content: flex-end;
   }
+}
+
+.type-filter-select {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.type-filter-select:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }

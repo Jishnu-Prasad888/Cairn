@@ -62,13 +62,12 @@ describe('HomePage', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the Cairn brand and greets the signed-in account', async () => {
+  it('greets the signed-in account', async () => {
     setup();
 
-    // The brand and the dashboard only appear once a library is selected, so
-    // the gate resolves first.
-    expect(await screen.findByRole('heading', { name: 'Cairn' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Welcome back, jishnu' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Welcome back, jishnu' }),
+    ).toBeInTheDocument();
   });
 
   it('counts each collection into a shortcut tile', async () => {
@@ -76,13 +75,15 @@ describe('HomePage', () => {
 
     // The tiles render immediately with a placeholder; the counts land when the
     // dashboard's parallel listing resolves.
-    const photos = await screen.findByTestId('home-tile-/photos');
+    const photos = await screen.findByTestId('home-tile-/media?type=photo');
     expect(await within(photos).findByText('128')).toBeInTheDocument();
     expect(within(photos).getByText('Photos')).toBeInTheDocument();
     expect(
-      await within(screen.getByTestId('home-tile-/videos')).findByText('4'),
+      await within(screen.getByTestId('home-tile-/media?type=video')).findByText('4'),
     ).toBeInTheDocument();
-    expect(within(screen.getByTestId('home-tile-/files')).getByText('7')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('home-tile-/media?type=other')).getByText('7'),
+    ).toBeInTheDocument();
     expect(within(screen.getByTestId('home-tile-/albums')).getByText('1')).toBeInTheDocument();
     expect(within(screen.getByTestId('home-tile-/people')).getByText('2')).toBeInTheDocument();
   });
@@ -92,19 +93,19 @@ describe('HomePage', () => {
 
     // The tile is only dropped once the people listing has actually failed, so
     // wait for the rest of the dashboard to settle first.
-    const photos = await screen.findByTestId('home-tile-/photos');
+    const photos = await screen.findByTestId('home-tile-/media?type=photo');
     await within(photos).findByText('2');
     expect(screen.queryByTestId('home-tile-/people')).not.toBeInTheDocument();
     expect(screen.getByTestId('home-tile-/tags')).toBeInTheDocument();
   });
 
-  it('links each recent photo into the photos browser', async () => {
+  it('links each recent photo into the media browser', async () => {
     setup();
 
     const strip = await screen.findByTestId('home-recent');
     const links = within(strip).getAllByRole('link');
     expect(links).toHaveLength(2);
-    expect(links[0]).toHaveAttribute('href', '/photos?file=f1');
+    expect(links[0]).toHaveAttribute('href', '/media?type=photo');
   });
 
   it('shows an empty state when the library has no photos yet', async () => {
@@ -160,7 +161,7 @@ describe('HomePage', () => {
     renderPage(<HomePage />);
 
     expect(await screen.findByText('Libraries are unavailable.')).toBeInTheDocument();
-    expect(screen.queryByTestId('home-tile-/photos')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('home-tile-/media?type=photo')).not.toBeInTheDocument();
   });
 
   it('offers the library picker and a way out when there are no libraries', async () => {
