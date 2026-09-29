@@ -419,6 +419,46 @@ describe('MediaPage', () => {
     });
   });
 
+  it('jumps to a file from the filmstrip and marks the current one', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+
+    const strip = within(viewer).getByRole('list', { name: 'Files in this view' });
+    const items = within(strip).getAllByRole('button');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveAttribute('aria-current', 'true');
+
+    fireEvent.click(within(strip).getByRole('button', { name: 'Open clip.mp4' }));
+    await waitFor(() => {
+      expect(screen.getByText('2 of 2')).toBeInTheDocument();
+    });
+    expect(within(strip).getByRole('button', { name: 'Open clip.mp4' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+  });
+
+  it('toggles zoom with a double-click on the photo', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+    const stage = within(viewer).getByTestId('viewer-stage');
+
+    fireEvent.doubleClick(stage);
+    await waitFor(() => {
+      expect(stage).toHaveAttribute('data-zoomed', 'true');
+    });
+    fireEvent.doubleClick(stage);
+    await waitFor(() => {
+      expect(stage).toHaveAttribute('data-zoomed', 'false');
+    });
+  });
+
   it('zooms in, resets, and zooms out again', async () => {
     setup();
 
