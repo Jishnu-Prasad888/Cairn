@@ -130,7 +130,7 @@ describe('App routing', () => {
 
     expect(await screen.findByTestId('app-shell')).toBeInTheDocument();
     expect(
-      screen.getByText('Your personal place for files, photos, videos, and memories.'),
+      await screen.findByText('Your personal place for files, photos, videos, and memories.'),
     ).toBeInTheDocument();
   });
 });
