@@ -6,7 +6,7 @@
  * separately from Tags: an album is a curated set, a tag is a label.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
@@ -17,10 +17,12 @@ import {
   deleteAlbum,
   listAlbums,
   listAlbumFiles,
+  listFiles,
+  listFolders,
   removeAlbumFile,
   searchFiles,
 } from '../api/queries';
-import type { Album, FileSummary } from '../api/types';
+import type { Album, FileSummary, Folder } from '../api/types';
 import { ConfirmDialog, Dialog, PromptDialog } from '../components/Dialog';
 import { FileGrid } from '../components/FileGrid';
 import { useFileOperations } from '../components/FileOperations';
@@ -37,7 +39,7 @@ import {
 import { ViewerModal } from '../components/ViewerModal';
 import './AlbumsPage.css';
 
-/** Adding files to an album: search, tick, confirm. */
+/** Adding files to an album: browse folders or search, tick, confirm. */
 function AddFilesDialog({
   libraryId,
   album,
@@ -51,18 +53,59 @@ function AddFilesDialog({
   onClose: () => void;
   onAdded: () => void;
 }) {
+  // Tabs: 'browse' = folder tree, 'search' = free-text search
+  const [tab, setTab] = useState<'browse' | 'search'>('browse');
+
+  // ---- browse state ----
+  const [folderPath, setFolderPath] = useState('');
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [browseFiles, setBrowseFiles] = useState<FileSummary[]>([]);
+  // Loading is derived from which folder the shown listing belongs to, so the
+  // effect below never has to set it synchronously.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const browseKey = `${libraryId}|${folderPath}`;
+  const browseLoading = tab === 'browse' && loadedKey !== browseKey;
+
+  // ---- search state ----
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<FileSummary[]>([]);
+  const [searchResults, setSearchResults] = useState<FileSummary[]>([]);
+
+  // ---- shared state ----
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Load folders + files for the current folder path.
+  useEffect(() => {
+    if (tab !== 'browse') return;
+    let cancelled = false;
+    void Promise.all([
+      listFolders(libraryId, folderPath || undefined),
+      listFiles(libraryId, { folder: folderPath, limit: 100 }),
+    ])
+      .then(([dirs, listing]) => {
+        if (cancelled) return;
+        setFolders(dirs.folders ?? []);
+        setBrowseFiles(listing.files ?? []);
+        setLoadedKey(browseKey);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setLoadedKey(browseKey);
+        setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryId, folderPath, tab, browseKey]);
 
   const runSearch = useCallback(
     async (q: string) => {
       setError(null);
       try {
         const resp = await searchFiles(libraryId, { q, limit: 50 });
-        setResults(resp.files ?? []);
+        setSearchResults(resp.files ?? []);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -90,11 +133,22 @@ function AddFilesDialog({
       .finally(() => setBusy(false));
   };
 
+  const displayFiles = tab === 'browse' ? browseFiles : searchResults;
+
+  // Build breadcrumb segments for the browse tab.
+  const crumbs = folderPath
+    ? folderPath.split('/').reduce<Array<{ label: string; path: string }>>((acc, part) => {
+        const prev = acc[acc.length - 1]?.path ?? '';
+        acc.push({ label: part, path: prev ? `${prev}/${part}` : part });
+        return acc;
+      }, [])
+    : [];
+
   return (
     <Dialog
       open
       size="medium"
-      title={`Add files to “${album.name}”`}
+      title={`Add files to "${album.name}"`}
       onClose={onClose}
       dismissible={!busy}
       testId="add-files-dialog"
@@ -110,42 +164,115 @@ function AddFilesDialog({
             disabled={busy || selected.size === 0}
             data-testid="confirm-add-files"
           >
-            {busy ? 'Adding…' : `Add ${selected.size || ''}`.trim()}
+            {busy ? 'Adding…' : `Add ${selected.size > 0 ? selected.size : ''}`.trim()}
           </button>
         </>
       }
     >
       <div className="album-picker">
-        <label className="visually-hidden" htmlFor="album-picker-search">
-          Search library files
-        </label>
-        <input
-          id="album-picker-search"
-          className="search-input"
-          type="search"
-          placeholder="Search library files…"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            if (e.target.value.trim() === '') setResults([]);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && query.trim() !== '') void runSearch(query.trim());
-          }}
-          data-testid="album-picker-search"
-        />
-        <button
-          type="button"
-          className="button"
-          onClick={() => void runSearch(query.trim())}
-          disabled={query.trim() === ''}
-        >
-          Search
-        </button>
+        {/* Tab switcher */}
+        <div className="album-picker-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'browse'}
+            className={tab === 'browse' ? 'album-picker-tab active' : 'album-picker-tab'}
+            onClick={() => setTab('browse')}
+          >
+            Browse folders
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'search'}
+            className={tab === 'search' ? 'album-picker-tab active' : 'album-picker-tab'}
+            onClick={() => setTab('search')}
+          >
+            Search
+          </button>
+        </div>
 
-        {results.length > 0 && (
+        {tab === 'browse' && (
+          <>
+            {/* Breadcrumb navigation */}
+            <nav className="album-picker-breadcrumbs" aria-label="Folders">
+              <button type="button" className="crumb" onClick={() => setFolderPath('')}>
+                Library root
+              </button>
+              {crumbs.map((crumb, i) => (
+                <span key={crumb.path} className="crumb-segment">
+                  <span className="crumb-sep" aria-hidden="true">
+                    /
+                  </span>
+                  <button
+                    type="button"
+                    className="crumb"
+                    onClick={() => setFolderPath(crumb.path)}
+                    aria-current={i === crumbs.length - 1 ? 'page' : undefined}
+                  >
+                    {crumb.label}
+                  </button>
+                </span>
+              ))}
+            </nav>
+
+            {browseLoading && <p className="muted">Loading…</p>}
+
+            {/* Subfolders */}
+            {folders.length > 0 && (
+              <ul className="album-picker-folders">
+                {folders.map((folder) => (
+                  <li key={folder.id}>
+                    <button
+                      type="button"
+                      className="album-picker-folder"
+                      onClick={() => setFolderPath(folder.rel_path)}
+                    >
+                      📁 {folder.name}
+                      <span className="muted"> ({folder.file_count})</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+
+        {tab === 'search' && (
+          <div className="album-picker-search-row">
+            <label className="visually-hidden" htmlFor="album-picker-search">
+              Search library files
+            </label>
+            <input
+              id="album-picker-search"
+              className="search-input"
+              type="search"
+              placeholder="Search library files…"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (e.target.value.trim() === '') setSearchResults([]);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && query.trim() !== '') void runSearch(query.trim());
+              }}
+              data-testid="album-picker-search"
+            />
+            <button
+              type="button"
+              className="button"
+              onClick={() => void runSearch(query.trim())}
+              disabled={query.trim() === ''}
+            >
+              Search
+            </button>
+          </div>
+        )}
+
+        {/* Files list */}
+        {displayFiles.length > 0 && (
           <ul className="picker-results">
-            {results.map((f) => {
+            {displayFiles.map((f) => {
               const inAlbum = alreadyIn.includes(f.id);
               return (
                 <li key={f.id} className="picker-row">
@@ -175,8 +302,12 @@ function AddFilesDialog({
           </ul>
         )}
 
-        {query.trim() !== '' && results.length === 0 && (
-          <p className="muted">No files match “{query.trim()}”.</p>
+        {tab === 'browse' && !browseLoading && folders.length === 0 && browseFiles.length === 0 && (
+          <p className="muted">This folder is empty.</p>
+        )}
+
+        {tab === 'search' && query.trim() !== '' && searchResults.length === 0 && (
+          <p className="muted">No files match "{query.trim()}".</p>
         )}
 
         {error && (

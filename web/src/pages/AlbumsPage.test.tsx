@@ -67,6 +67,16 @@ function setup(overrides: { albums?: typeof albums; albumFiles?: typeof albumFil
         : undefined,
     (url) => (url.endsWith('/api/v1/libraries/lib1/albums') ? json(albumList) : undefined),
     (url) => (url.includes('/search?q=') ? json(searchHit) : undefined),
+    // Browse-tab requests: folders + files listing
+    (url) => (url.includes('/folders') ? json({ folders: [] }) : undefined),
+    (url) =>
+      url.includes('/files') &&
+      !url.includes('/albums') &&
+      !url.includes('/metadata') &&
+      !url.includes('/note') &&
+      !url.includes('/favorites')
+        ? json({ files: [], total: 0 })
+        : undefined,
     (url) =>
       url.includes('/files/f1/note') ? json({ note: { file_id: 'f1', body: '' } }) : undefined,
     (url) => (url.includes('/favorites') ? json({ files: [] }) : undefined),
@@ -216,6 +226,9 @@ describe('AlbumsPage', () => {
     fireEvent.click(screen.getByTestId('add-files-button'));
     const dialog = await screen.findByTestId('add-files-dialog');
 
+    // Switch to the search tab
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Search' }));
+
     const search = screen.getByLabelText('Search library files') as HTMLInputElement;
     fireEvent.change(search, { target: { value: 'beach' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Search' }));
@@ -246,6 +259,10 @@ describe('AlbumsPage', () => {
 
     fireEvent.click(screen.getByTestId('add-files-button'));
     const dialog = await screen.findByTestId('add-files-dialog');
+
+    // Switch to the search tab
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Search' }));
+
     fireEvent.change(screen.getByLabelText('Search library files'), { target: { value: 'beach' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Search' }));
 
@@ -269,6 +286,11 @@ describe('AlbumsPage', () => {
       (url) => (url.endsWith('/api/v1/libraries/lib1/albums') ? json(albums) : undefined),
       (url) =>
         url.endsWith('/api/v1/libraries/lib1/albums/a1/files') ? json(albumFiles) : undefined,
+      (url) => (url.includes('/folders') ? json({ folders: [] }) : undefined),
+      (url) =>
+        url.includes('/files') && !url.includes('/albums')
+          ? json({ files: [], total: 0 })
+          : undefined,
     ]);
     renderPage(<AlbumsPage />);
 
@@ -278,6 +300,10 @@ describe('AlbumsPage', () => {
 
     fireEvent.click(screen.getByTestId('add-files-button'));
     const dialog = await screen.findByTestId('add-files-dialog');
+
+    // Switch to the search tab
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Search' }));
+
     fireEvent.change(screen.getByLabelText('Search library files'), {
       target: { value: 'nothing' },
     });
