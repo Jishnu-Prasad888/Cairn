@@ -17,14 +17,7 @@ import { useAuth } from '../auth/authContext';
 import { apiGet } from '../api/client';
 import { useLibraryGate } from '../api/libraries';
 import { useLibraryResource, useResource } from '../api/resources';
-import {
-  listAlbums,
-  listFavorites,
-  listFiles,
-  listMemories,
-  listPeople,
-  listTags,
-} from '../api/queries';
+import { getFileCounts, listFiles, listMemories, listPeople } from '../api/queries';
 import type {
   FileListResponse,
   FileSummary,
@@ -70,50 +63,41 @@ interface HomeData {
   recentMemories: Memory[];
 }
 
-async function countByType(libraryId: string, type: 'photo' | 'video' | 'other'): Promise<number> {
-  const resp = await listFiles(libraryId, { type, limit: 1 });
-  return resp.total ?? 0;
-}
-
 export default function HomePage() {
   const gate = useLibraryGate();
   const { user } = useAuth();
 
   const home = useLibraryResource<HomeData>(
     useCallback(async (libraryId: string) => {
-      const [photos, videos, files, albums, tags, memories, favorites, people, recentPage] =
-        await Promise.all([
-          countByType(libraryId, 'photo'),
-          countByType(libraryId, 'video'),
-          countByType(libraryId, 'other'),
-          listAlbums(libraryId).then((r) => r.albums?.length ?? 0),
-          listTags(libraryId).then((r) => r.tags?.length ?? 0),
-          listMemories(libraryId).then((r) => r.memories ?? []),
-          listFavorites(libraryId).then((r) => r.files?.length ?? 0),
-          // A server without face support 404s this route; that is "not
-          // available", not "zero people", so it resolves to null.
-          listPeople(libraryId)
-            .then((r) => r.people?.length ?? 0)
-            .catch(() => null),
-          listFiles(libraryId, {
-            type: 'photo',
-            sort: 'mod_time',
-            order: 'desc',
-            limit: 12,
-          }),
-        ]);
+      const [summary, memories, people, recentPage] = await Promise.all([
+        getFileCounts(libraryId),
+        listMemories(libraryId).then((r) => r.memories ?? []),
+        // A server without face support 404s this route; that is "not
+        // available", not "zero people", so it resolves to null.
+        listPeople(libraryId)
+          .then((r) => r.people?.length ?? 0)
+          .catch(() => null),
+        listFiles(libraryId, {
+          type: 'photo',
+          recursive: true,
+          sort: 'mod_time',
+          order: 'desc',
+          limit: 12,
+        }),
+      ]);
 
+      const counts = summary.counts ?? {};
       return {
-        photoCount: photos,
-        videoCount: videos,
-        fileCount: files,
-        albumCount: albums,
-        tagCount: tags,
+        photoCount: counts.photo ?? 0,
+        videoCount: counts.video ?? 0,
+        fileCount: counts.other ?? 0,
+        albumCount: summary.albums ?? 0,
+        tagCount: summary.tags ?? 0,
         memoryCount: memories.length,
         recentMemories: [...memories]
           .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
           .slice(0, 4),
-        favoriteCount: favorites,
+        favoriteCount: summary.favorites ?? 0,
         personCount: people,
         recent: (recentPage as FileListResponse).files ?? [],
       };

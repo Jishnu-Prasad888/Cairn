@@ -2,10 +2,13 @@ package media
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/sanitize"
@@ -52,6 +55,77 @@ func WithMaxUploadBytes(n int64) Option {
 
 // Store returns the underlying FileStore for direct queries.
 func (svc *Service) Store() *FileStore { return svc.store }
+
+// ListFolders returns the direct sub-folders of parent as they exist on disk.
+//
+// The folders table is only a cache of file counts and is never populated by
+// the indexer, so listing from it alone hid every folder — including ones just
+// created and still empty. The filesystem is the source of truth; counts are
+// counted from the index (files in the folder and everything beneath it). Hidden folders (which
+// includes the .cairn metadata directory) and symlinks are skipped.
+func (svc *Service) ListFolders(ctx context.Context, parent string) ([]*Folder, error) {
+	if parent == "." {
+		parent = ""
+	}
+	dir := svc.libraryRoot
+	if parent != "" {
+		var err error
+		if dir, err = svc.absPath(parent); err != nil {
+			return nil, err
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		// A folder that is not on disk (yet) simply has no sub-folders.
+		return []*Folder{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Folder, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		rel := e.Name()
+		if parent != "" {
+			rel = parent + "/" + e.Name()
+		}
+		f := &Folder{ID: rel, RelPath: rel, Name: e.Name()}
+		if n, err := svc.store.CountPresentUnder(ctx, rel); err == nil {
+			f.FileCount = n
+		}
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out, nil
+}
+
+// CreateFolder makes the directory at relPath, with any missing parents, so a
+// folder exists on disk as soon as it is created rather than only once a file
+// is put in it. Creating a folder that already exists succeeds. Hidden
+// segments are refused: they are not listed, so the folder would vanish.
+func (svc *Service) CreateFolder(relPath string) (*Folder, error) {
+	safe, err := SafeRelPath(relPath)
+	if err != nil {
+		return nil, err
+	}
+	for _, seg := range strings.Split(safe, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return nil, fmt.Errorf("%w: hidden folder names are not allowed", ErrPathTraversal)
+		}
+	}
+	abs, err := svc.absPath(safe)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return nil, fmt.Errorf("create folder: %w", err)
+	}
+	return &Folder{ID: safe, RelPath: safe, Name: filepath.Base(abs)}, nil
+}
 
 // absPath resolves a relative path to an absolute path under the library root.
 // It rejects traversal attempts.
