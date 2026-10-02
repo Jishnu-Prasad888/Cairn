@@ -95,3 +95,16 @@
   border-color: var(--color-primary-ink);
   background: var(--color-fill-active);
 }
+
+.album-card-cover {
+  transition:
+    box-shadow var(--duration-base) var(--ease-standard),
+    transform var(--duration-base) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .album-card:hover .album-card-cover {
+    box-shadow: var(--shadow-2);
+    transform: translateY(-2px);
+  }
+}

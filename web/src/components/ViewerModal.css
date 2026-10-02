@@ -805,3 +805,40 @@ video.viewer-media {
   content: '·';
   margin-left: var(--space-3);
 }
+
+/* ------------------------------ motion -------------------------------- */
+
+/* Opening: the photo settles into place as the surround fades up. Moving to
+   the next photo crossfades the same way, because each photo is a new element. */
+.viewer-stage .viewer-media:not(.viewer-preview) {
+  animation: viewer-media-in var(--duration-slow) var(--ease-out) backwards;
+}
+
+@keyframes viewer-media-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+.viewer-modal .viewer-toolbar,
+.viewer-modal .viewer-bottom {
+  animation: viewer-chrome-in var(--duration-slow) var(--ease-out) backwards;
+}
+
+@keyframes viewer-chrome-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The photo slides over as the details panel opens and closes. */
+.viewer-stage-wrap,
+.viewer-toolbar,
+.viewer-bottom,
+.viewer-nav-next {
+  transition:
+    margin var(--duration-slow) var(--ease-standard),
+    right var(--duration-slow) var(--ease-standard),
+    opacity var(--duration-slow) var(--ease-standard);
+}
