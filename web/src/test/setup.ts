@@ -10,3 +10,27 @@ import { configure } from '@testing-library/react';
  * which a longer budget still catches.
  */
 configure({ asyncUtilTimeout: 5000 });
+
+import { afterEach, beforeEach } from 'vitest';
+
+/**
+ * Per-browser preferences (grid or list, the viewer's details panel, recent
+ * searches) live in localStorage, which jsdom shares across tests in a file.
+ * Starting each test clean keeps one test's choice from becoming another's
+ * precondition.
+ */
+beforeEach(() => {
+  try {
+    localStorage.clear();
+  } catch {
+    // No storage in this environment.
+  }
+});
+
+afterEach(() => {
+  try {
+    localStorage.clear();
+  } catch {
+    // No storage in this environment.
+  }
+});

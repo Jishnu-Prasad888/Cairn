@@ -12,12 +12,15 @@ import {
   ApiError,
   apiDelete,
   apiGet,
+  apiPatch,
   apiPost,
   apiPut,
   apiRequest,
   apiUpload,
+  apiUploadWithProgress,
   query,
 } from './client';
+import type { UploadProgress } from './client';
 import type {
   Album,
   AlbumListResponse,
@@ -164,6 +167,20 @@ export const listDuplicates = (libraryId: string, cursor?: string, limit = 50) =
 export const uploadFile = (libraryId: string, file: File, destPath?: string) =>
   apiUpload<{ file: FileSummary }>(`/libraries/${libraryId}/files/upload`, file, destPath);
 
+/** The same upload, with progress events and cancellation, for the upload tray. */
+export const uploadFileWithProgress = (
+  libraryId: string,
+  file: File,
+  destPath: string | undefined,
+  options: { onProgress?: (p: UploadProgress) => void; signal?: AbortSignal } = {},
+) =>
+  apiUploadWithProgress<{ file: FileSummary }>(
+    `/libraries/${libraryId}/files/upload`,
+    file,
+    destPath,
+    options,
+  );
+
 /**
  * Soft-delete (move to trash).
  *
@@ -275,6 +292,13 @@ export const createAlbum = (libraryId: string, name: string, description?: strin
     `/libraries/${libraryId}/albums`,
     description ? { name, description } : { name },
   );
+
+/** Rename, describe, or set the cover of an album. An empty cover clears it. */
+export const updateAlbum = (
+  libraryId: string,
+  albumId: string,
+  input: { name?: string; description?: string; cover_file_id?: string },
+) => apiPatch<{ album: Album }>(`/libraries/${libraryId}/albums/${albumId}`, input);
 
 export const deleteAlbum = (libraryId: string, albumId: string) =>
   apiDelete<void>(`/libraries/${libraryId}/albums/${albumId}`);
