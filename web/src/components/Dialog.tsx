@@ -13,6 +13,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { FOCUSABLE, trapTab } from '../lib/focusTrap';
+import { Icon } from './ui/Icon';
 import './Dialog.css';
 
 export interface DialogProps {
@@ -102,7 +103,7 @@ export function Dialog({
               onClick={onClose}
               aria-label={`Close ${title}`}
             >
-              ×
+              <Icon name="close" />
             </button>
           )}
         </header>
