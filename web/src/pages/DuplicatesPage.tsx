@@ -118,7 +118,7 @@ export default function DuplicatesPage() {
 
   if (gate.kind === 'loading') {
     return (
-      <main className="duplicates-page">
+      <main className="page duplicates-page">
         <LoadingState label="Loading libraries…" />
       </main>
     );
@@ -146,7 +146,7 @@ export default function DuplicatesPage() {
 
   if (gate.kind === 'error') {
     return (
-      <main className="duplicates-page">
+      <main className="page duplicates-page">
         {header}
         <ErrorState message={gate.message} onRetry={duplicates.reload} />
       </main>
@@ -155,7 +155,7 @@ export default function DuplicatesPage() {
 
   if (gate.kind === 'empty') {
     return (
-      <main className="duplicates-page">
+      <main className="page duplicates-page">
         {header}
         <NoLibrariesState isAdmin={user?.role === 'admin'} />
       </main>
@@ -166,7 +166,7 @@ export default function DuplicatesPage() {
   const total = duplicates.data?.total ?? 0;
 
   return (
-    <main className="duplicates-page">
+    <main className="page duplicates-page">
       {header}
       {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
 
