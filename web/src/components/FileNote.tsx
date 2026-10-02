@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiDelete, apiGet, apiPut } from '../api/client';
 import type { FileNote as FileNoteData } from '../api/types';
 import { renderMarkdown } from '../lib/markdown';
-import './views.css';
 
 interface FileNoteProps {
   libraryId: string;
