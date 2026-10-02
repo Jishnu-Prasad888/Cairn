@@ -249,10 +249,17 @@ the file between the typed pages.
 | DELETE | `/libraries/{libraryID}/files/{fileID}/tags/{tagID}`        | Detach a tag                     | cap  |
 | GET    | `/libraries/{libraryID}/albums`                             | List albums                      | cap  |
 | POST   | `/libraries/{libraryID}/albums`                             | Create an album                  | cap  |
+| PATCH  | `/libraries/{libraryID}/albums/{albumID}`                   | Rename, describe, or set cover   | cap  |
 | DELETE | `/libraries/{libraryID}/albums/{albumID}`                   | Delete an album                  | cap  |
 | GET    | `/libraries/{libraryID}/albums/{albumID}/files`             | Album contents                   | cap  |
 | POST   | `/libraries/{libraryID}/albums/{albumID}/files/{fileID}`    | Add file to album (204)          | cap  |
 | DELETE | `/libraries/{libraryID}/albums/{albumID}/files/{fileID}`    | Remove file from album (204)     | cap  |
+
+An album in a response also carries `file_count` and `preview_file_id` — the
+chosen cover, otherwise the album's first photo — so a grid of albums needs one
+request rather than one per album. `PATCH` takes any of `name`, `description`,
+and `cover_file_id` (an empty string clears the cover; a non-empty one must be a
+file already in the album, else 404). It requires the `edit` capability.
 
 ### Search and memories
 
