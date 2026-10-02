@@ -268,3 +268,40 @@
   min-width: 180px;
   font-size: 13px;
 }
+
+/* ---- Memories ---- */
+
+.memory-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.memory-setting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.memory-setting select {
+  max-width: 260px;
+}
+
+.memory-setting-label {
+  font-weight: 500;
+  padding: 0;
+}
+
+.memory-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.memory-radio input {
+  margin-top: 4px;
+}

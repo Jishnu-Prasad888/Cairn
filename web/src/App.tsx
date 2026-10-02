@@ -49,6 +49,7 @@ export default function App() {
             <Route path="/files" element={<Navigate to="/media?type=other" replace />} />
 
             <Route path="/memories" element={<MemoriesPage />} />
+            <Route path="/memories/:memoryId" element={<MemoriesPage />} />
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/people" element={<PeoplePage />} />
             <Route path="/tags" element={<TagsPage />} />

@@ -21,6 +21,7 @@ import type { User, UserRole } from '../api/types';
 import Brand from '../components/Brand';
 import { ConfirmDialog } from '../components/Dialog';
 import { PageHeader } from '../components/States';
+import { MemorySettingsSection } from '../memories/MemorySettingsSection';
 import { type ThemePreference, readStoredTheme, storeTheme } from '../lib/theme';
 import './SettingsPage.css';
 
@@ -152,6 +153,8 @@ export default function SettingsPage() {
           ))}
         </div>
       </section>
+
+      <MemorySettingsSection />
 
       <section className="settings-card" aria-labelledby="settings-tools">
         <h2 id="settings-tools">Organize</h2>
