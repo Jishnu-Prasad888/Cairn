@@ -51,6 +51,7 @@ Server-level applied migrations:
 | `0004_library_db_schema.sql` | adds `lib_db_schema_version` to `libraries` |
 | `0005_permissions.sql`   | `permission_grants`, `shares`                  |
 | `0006_backups.sql`       | `backups`                                      |
+| `0007_user_settings.sql` | `user_settings` (per-user preferences, e.g. Memories) |
 
 Library-level applied migrations (`internal/librarydb/migrations/`):
 
@@ -60,6 +61,9 @@ Library-level applied migrations (`internal/librarydb/migrations/`):
 | `0006_search_organization.sql` | `organizations` and FTS5 search support   |
 | `0007_memories.sql`      | `memories` and wikilink support                |
 | `0008_ml_signatures.sql` | `ml_signatures` (derived perceptual signatures) |
+| `0009_faces.sql`         | `faces`, `people`, `person_faces`              |
+| `0010_notes.sql`         | `file_notes`                                   |
+| `0011_memory_blocks.sql` | `memory_blocks`, `memory_images`, `memory_derived_media`, `memory_tags`; memory metadata/revision columns (schema v8, see [memories.md](memories.md)) |
 
 `users` stores argon2id `password_hash`, `role`, and enabled state; `sessions`
 stores only the SHA-256 digest (`token_hash`) of each opaque session token;

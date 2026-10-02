@@ -329,22 +329,40 @@ password still gated. For your mobile app:
 
 ## Memories and Markdown
 
-Memories are Markdown documents inside a library
-([memories.md](memories.md)):
+Memories are block documents inside a library ([memories.md](memories.md)).
+Everything a native client needs to reproduce the web experience is in the
+API — no semantics live only in the web UI:
 
-- List/create/read/update/soft-delete/restore under
-  `/api/v1/libraries/{libraryID}/memories[...]`.
-- Update is `PUT` and **versioned**: every save appends a revision; the latest
-  is the current content. Versions are listed/fetched at
-  `.../memories/{memoryID}/versions` and `.../versions/{version}`. Autosave in
-  a mobile editor maps perfectly onto this: save on debounce, show a restoring
-  picker from the versions list.
-- Bodies are Markdown with `[[type:id]]` wikilinks (`media`, `memory`,
-  `album`, `person`, `tag`) — render them client-side with the object id and
-  resolve to screen navigation; `GET .../memories/{memoryID}/refs` lists
-  parsed references for "references in" navigation.
-- Render Markdown locally with a standard CommonMark renderer; no server-side
-  rendering exists for previews.
+- `GET .../memories/{memoryID}` returns `blocks[]` in order. A text block has
+  `markdown`; an image block has `layout` (`grid`, `hero`, `masonry`,
+  `two_column`, `filmstrip`, `featured`), `slideshow {enabled,
+  interval_seconds}` (`null` = use the user's `slideshow_interval` from
+  `GET /settings/memories`) and `images[]`.
+- Each image has `file_id`, `caption`, `crop` (normalized, in the rotated
+  frame, or `null`), `rotation`, `filter`, `adjustments`, `edited`, a
+  `media` view (`available`, `status`, `width`, `height`, `thumbnail_url`,
+  `original_url`) and `derived` (an already-edited JPEG when present — show it
+  as-is). Without `derived`, apply the edits yourself in the documented
+  order (orientation → rotation → crop → filter → adjustments); the filter
+  primitives are listed in `internal/memories/edits.go`.
+- Unavailable media (`available: false`) must keep its caption and place and
+  show "Image unavailable".
+- Save with `PUT .../document` (the full ordered block list, client-minted
+  ids allowed) and `PATCH` for metadata, always sending `base_revision`. A
+  `409` carries `details.current_revision`: ask the user, never overwrite.
+  Debounce autosave (≈1 s) and keep an on-device draft until the server
+  confirms. Granular block/image endpoints exist when a full save is
+  inconvenient.
+- Versions are listed/fetched at `.../versions` and `.../versions/{version}`
+  (the latter includes that version's `blocks`).
+- Text is Markdown with `[[type:id]]` wikilinks (`media`, `memory`,
+  `album`, `person`, `tag`) — resolve them to screen navigation;
+  `GET .../refs` lists them plus every photo the memory uses.
+- Render Markdown locally following [markdown.md](markdown.md) (no raw HTML,
+  images as links, safe link schemes).
+- Layouts on phones: grid and two-column become one column, masonry a simple
+  stack, featured a full-width lead over a two-up grid. Use long-press menus
+  or bottom sheets for the actions the web exposes on right-click.
 
 ## Error handling
 

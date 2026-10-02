@@ -43,6 +43,8 @@ tags:
     description: Resource-based permissions and public share administration
   - name: Shares
     description: Anonymous access to public shares
+  - name: Settings
+    description: Per-user preferences, such as the Memories section.
 security:
   - cookieAuth: []
 paths:
@@ -268,6 +270,42 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+
+  /settings/memories:
+    get:
+      tags: [Settings]
+      operationId: getMemorySettings
+      summary: The caller's Memories preferences
+      responses:
+        '200':
+          description: Preferences with defaults filled in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySettingsEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Settings]
+      operationId: updateMemorySettings
+      summary: Update the caller's Memories preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemorySettings'
+      responses:
+        '200':
+          description: The updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySettingsEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /users:
     get:
       tags: [Users]
@@ -1792,7 +1830,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Full-text search query over memory titles and bodies.
+          description: Full-text search over titles, text blocks, image captions, descriptions, locations and tags.
           schema:
             type: string
         - name: limit
@@ -1858,8 +1896,12 @@ paths:
     get:
       tags: [Memories]
       operationId: getMemory
-      summary: Fetch one memory
-      description: Returns the latest saved revision of the memory.
+      summary: Fetch one memory with its blocks
+      description: >
+        Returns the memory with its ordered blocks. Each image carries a
+        permission-checked `media` view and, when present, its edited copy.
+        For callers who may edit it, images whose original went missing are
+        first re-attached to a present file with the same content hash.
       parameters:
         - $ref: '#/components/parameters/LibraryID'
         - $ref: '#/components/parameters/MemoryID'
@@ -1879,11 +1921,11 @@ paths:
     put:
       tags: [Memories]
       operationId: updateMemory
-      summary: Save a new revision of a memory
+      summary: Legacy single-body save
       description: >
-        Appends a new version rather than overwriting in place, so every save is
-        retained and recoverable. References are re-parsed and the reference
-        index is updated to match the new body.
+        Kept for older clients. Replaces the memory's single text block with
+        `body` and records a version. A memory with image blocks or several
+        text blocks answers 409; use the document endpoint instead.
       parameters:
         - $ref: '#/components/parameters/LibraryID'
         - $ref: '#/components/parameters/MemoryID'
@@ -1908,6 +1950,46 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Memories]
+      operationId: patchMemory
+      summary: Update memory metadata
+      description: >
+        Updates title, description, location, memory_date (null clears),
+        cover_file_id (a library file reference; null clears) and tags (names;
+        missing tags are created).
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryMetaPatchRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags: [Memories]
       operationId: deleteMemory
@@ -1951,7 +2033,7 @@ paths:
       tags: [Memories]
       operationId: listMemoryVersions
       summary: List the saved revisions of a memory
-      description: Revisions are returned oldest first; the last entry is the current content.
+      description: Revisions are returned newest first. Rapid autosaves within two minutes are coalesced into the latest version.
       parameters:
         - $ref: '#/components/parameters/LibraryID'
         - $ref: '#/components/parameters/MemoryID'
@@ -1974,6 +2056,7 @@ paths:
       tags: [Memories]
       operationId: getMemoryVersion
       summary: Fetch one saved revision by number
+      description: Includes the revision's blocks so it can be previewed and restored.
       parameters:
         - $ref: '#/components/parameters/LibraryID'
         - $ref: '#/components/parameters/MemoryID'
@@ -2016,6 +2099,426 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MemoryRefListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /libraries/{libraryID}/memories/{memoryID}/document:
+    put:
+      tags: [Memories]
+      operationId: saveMemoryDocument
+      summary: Save all blocks of a memory
+      description: >
+        Replaces the memory's ordered blocks in one atomic write (what editor
+        autosave sends). Blocks and images keep their ids; ids may be minted by the
+        client (8-64 of [A-Za-z0-9_-]) and an id owned by another memory is rejected.
+        Unchanged images keep their edited copies. Referencing a new library file
+        requires read permission on it. Send base_revision to get a 409 instead of
+        overwriting a newer save.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryDocumentRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/blocks:
+    post:
+      tags: [Memories]
+      operationId: createMemoryBlock
+      summary: Insert a block
+      description: >
+        Inserts a text or image block at `index` (default: the end). For an image
+        block, `file_ids` become its images (references, never copies) and an
+        omitted layout uses the caller's default layout setting.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryBlockCreateRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/blocks/order:
+    put:
+      tags: [Memories]
+      operationId: reorderMemoryBlocks
+      summary: Reorder blocks
+      description: >
+        `block_ids` must list every block of the memory exactly once.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryBlockOrderRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}:
+    patch:
+      tags: [Memories]
+      operationId: patchMemoryBlock
+      summary: Change a block
+      description: >
+        Text blocks take `markdown`; image blocks take `layout` and `slideshow`
+        (`interval_seconds: null` inherits the viewer's setting).
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/BlockID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryBlockPatchRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Memories]
+      operationId: deleteMemoryBlock
+      summary: Delete a block
+      description: >
+        Removes the block and its image references. Library files are never touched.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/BlockID'
+        - $ref: '#/components/parameters/BaseRevisionQuery'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}/duplicate:
+    post:
+      tags: [Memories]
+      operationId: duplicateMemoryBlock
+      summary: Duplicate a block
+      description: >
+        Inserts a copy right after the block. Image blocks copy their references,
+        captions, edits, layout and slideshow - never the media.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/BlockID'
+        - $ref: '#/components/parameters/BaseRevisionQuery'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}/images:
+    post:
+      tags: [Memories]
+      operationId: addMemoryImages
+      summary: Add photos to an image block
+      description: >
+        Adds library files to an existing image block by reference, at `index` (default: the end).
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/BlockID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryImagesAddRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}/images/order:
+    put:
+      tags: [Memories]
+      operationId: reorderMemoryImages
+      summary: Reorder an image block's photos
+      description: >
+        `image_ids` must list every image of the block exactly once. This order is also the slideshow order.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/BlockID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryImageOrderRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/images/{imageID}:
+    patch:
+      tags: [Memories]
+      operationId: patchMemoryImage
+      summary: Change a memory image
+      description: >
+        Sets the caption, edits (crop - null clears -, rotation, filter,
+        adjustments) or source file (replace) of one memory image. All of this
+        belongs to the memory; the library file and its metadata are never
+        modified.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/ImageID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryImagePatchRequest'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Memories]
+      operationId: deleteMemoryImage
+      summary: Remove an image from the memory
+      description: >
+        Deletes the reference only. The library file is never deleted, moved or modified.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/ImageID'
+        - $ref: '#/components/parameters/BaseRevisionQuery'
+      responses:
+        '200':
+          description: The whole memory after the change, with its new revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Stale `base_revision` (details.current_revision holds the current
+            one), the memory is deleted, or the library is offline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /libraries/{libraryID}/memories/{memoryID}/images/{imageID}/derived:
+    get:
+      tags: [Memories]
+      operationId: getMemoryImageDerived
+      summary: Fetch the edited copy of a memory image
+      description: >
+        Serves the JPEG rendered into .cairn/memory-media when the owner's
+        "create edited copies" setting was on. Requires read on the memory and on
+        the source file.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+        - $ref: '#/components/parameters/ImageID'
+      responses:
+        '200':
+          description: The edited copy
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3060,6 +3563,27 @@ components:
       description: Library id (returned by the library endpoints).
       schema:
         type: string
+    BlockID:
+      name: blockID
+      in: path
+      required: true
+      description: Memory block id
+      schema:
+        type: string
+    ImageID:
+      name: imageID
+      in: path
+      required: true
+      description: Memory image id (the reference, not the library file id)
+      schema:
+        type: string
+    BaseRevisionQuery:
+      name: base_revision
+      in: query
+      required: false
+      description: Expected current revision; a mismatch returns 409.
+      schema:
+        type: integer
     MemoryID:
       name: memoryID
       in: path
@@ -3303,7 +3827,7 @@ components:
           example: linux/amd64
     Memory:
       type: object
-      required: [id, title, body, deleted, created_at, updated_at]
+      required: [id, title, body, description, location, tags, revision, deleted, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3315,11 +3839,34 @@ components:
           example: Summer in Rye
         body:
           type: string
-          description: Markdown body. See docs/markdown.md for the dialect.
+          description: >
+            Markdown of all text blocks joined by a blank line (legacy view).
+            See docs/markdown.md for the dialect.
         memory_date:
           type: string
           format: date-time
           description: Optional date the memory is about.
+        description:
+          type: string
+        location:
+          type: string
+        cover_file_id:
+          type: string
+          description: Library file used as the cover (a reference, not a copy).
+        cover:
+          $ref: '#/components/schemas/MemoryMediaView'
+        tags:
+          type: array
+          items:
+            type: string
+        revision:
+          type: integer
+          description: Incremented by every write; send it back as base_revision.
+        blocks:
+          type: array
+          description: Ordered blocks. Present on single-memory responses, omitted in lists.
+          items:
+            $ref: '#/components/schemas/MemoryBlock'
         deleted:
           type: boolean
           description: True after a soft delete and before a restore.
@@ -3335,6 +3882,293 @@ components:
       properties:
         memory:
           $ref: '#/components/schemas/Memory'
+        warnings:
+          type: array
+          description: Non-fatal problems, e.g. an edited copy could not be written.
+          items:
+            type: string
+    MemoryBlock:
+      type: object
+      required: [id, type, position]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [text, image]
+        position:
+          type: integer
+        markdown:
+          type: string
+          description: Text blocks only.
+        layout:
+          $ref: '#/components/schemas/MemoryLayout'
+        slideshow:
+          $ref: '#/components/schemas/MemorySlideshow'
+        images:
+          type: array
+          description: Image blocks only, in display and slideshow order.
+          items:
+            $ref: '#/components/schemas/MemoryImage'
+    MemoryLayout:
+      type: string
+      enum: [grid, hero, masonry, two_column, filmstrip, featured]
+    MemorySlideshow:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+        interval_seconds:
+          type: integer
+          nullable: true
+          minimum: 3
+          maximum: 3600
+          description: Per-section override; null inherits the viewer's slideshow_interval setting.
+    MemoryCrop:
+      type: object
+      description: Normalized rectangle in the rotated image. null means no crop.
+      required: [x, y, width, height]
+      properties:
+        x: {type: number, minimum: 0, maximum: 1}
+        y: {type: number, minimum: 0, maximum: 1}
+        width: {type: number, minimum: 0.01, maximum: 1}
+        height: {type: number, minimum: 0.01, maximum: 1}
+    MemoryAdjustments:
+      type: object
+      properties:
+        brightness: {type: integer, minimum: -100, maximum: 100}
+        contrast: {type: integer, minimum: -100, maximum: 100}
+        saturation: {type: integer, minimum: -100, maximum: 100}
+    MemoryImage:
+      type: object
+      description: >
+        A memory's reference to a library file. Caption and edits belong to
+        this memory only. Edits apply in order: EXIF orientation, rotation,
+        crop, filter preset, adjustments.
+      required: [id, position, file_id, caption, rotation, filter, adjustments, edited, media]
+      properties:
+        id:
+          type: string
+        position:
+          type: integer
+        file_id:
+          type: string
+        caption:
+          type: string
+        crop:
+          allOf:
+            - $ref: '#/components/schemas/MemoryCrop'
+          nullable: true
+        rotation:
+          type: integer
+          enum: [0, 90, 180, 270]
+        filter:
+          type: string
+          enum: [original, warm, cool, bw, soft, contrast]
+        adjustments:
+          $ref: '#/components/schemas/MemoryAdjustments'
+        edited:
+          type: boolean
+          description: True when any edit is set; false means the original is shown as-is.
+        media:
+          $ref: '#/components/schemas/MemoryMediaView'
+        derived:
+          type: object
+          nullable: true
+          description: The server-rendered edited copy, when one exists.
+          properties:
+            id: {type: string}
+            url: {type: string}
+            width: {type: integer}
+            height: {type: integer}
+    MemoryMediaView:
+      type: object
+      description: >
+        What the viewer may know about a referenced file. Only present,
+        permitted files carry name and URLs.
+      required: [available, status]
+      properties:
+        available:
+          type: boolean
+        status:
+          type: string
+          enum: [present, missing, deleted, forbidden, unknown]
+        name: {type: string}
+        media_type: {type: string}
+        mime_type: {type: string}
+        width: {type: integer}
+        height: {type: integer}
+        thumbnail_url: {type: string}
+        original_url:
+          type: string
+          description: Present only with the download capability.
+    MemoryBlockInput:
+      type: object
+      required: [type]
+      properties:
+        id:
+          type: string
+          description: Optional client-minted id (8-64 of [A-Za-z0-9_-]).
+        type:
+          type: string
+          enum: [text, image]
+        markdown:
+          type: string
+        layout:
+          $ref: '#/components/schemas/MemoryLayout'
+        slideshow:
+          $ref: '#/components/schemas/MemorySlideshow'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryImageInput'
+    MemoryImageInput:
+      type: object
+      required: [file_id]
+      properties:
+        id: {type: string}
+        file_id: {type: string}
+        caption: {type: string}
+        crop:
+          allOf:
+            - $ref: '#/components/schemas/MemoryCrop'
+          nullable: true
+        rotation:
+          type: integer
+          enum: [0, 90, 180, 270]
+        filter:
+          type: string
+          enum: [original, warm, cool, bw, soft, contrast]
+        adjustments:
+          $ref: '#/components/schemas/MemoryAdjustments'
+    MemoryDocumentRequest:
+      type: object
+      required: [blocks]
+      properties:
+        base_revision: {type: integer}
+        blocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryBlockInput'
+    MemoryMetaPatchRequest:
+      type: object
+      properties:
+        base_revision: {type: integer}
+        title: {type: string, minLength: 1, maxLength: 500}
+        description: {type: string}
+        location: {type: string}
+        memory_date:
+          type: string
+          format: date-time
+          nullable: true
+        cover_file_id:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+    MemoryBlockCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/MemoryBlockInput'
+        - type: object
+          properties:
+            base_revision: {type: integer}
+            index: {type: integer, description: Insert position; default the end.}
+            file_ids:
+              type: array
+              items:
+                type: string
+    MemoryBlockPatchRequest:
+      type: object
+      properties:
+        base_revision: {type: integer}
+        markdown: {type: string}
+        layout:
+          $ref: '#/components/schemas/MemoryLayout'
+        slideshow:
+          type: object
+          properties:
+            enabled: {type: boolean}
+            interval_seconds:
+              type: integer
+              nullable: true
+    MemoryBlockOrderRequest:
+      type: object
+      required: [block_ids]
+      properties:
+        base_revision: {type: integer}
+        block_ids:
+          type: array
+          items:
+            type: string
+    MemoryImagesAddRequest:
+      type: object
+      required: [file_ids]
+      properties:
+        base_revision: {type: integer}
+        index: {type: integer}
+        file_ids:
+          type: array
+          items:
+            type: string
+    MemoryImageOrderRequest:
+      type: object
+      required: [image_ids]
+      properties:
+        base_revision: {type: integer}
+        image_ids:
+          type: array
+          items:
+            type: string
+    MemoryImagePatchRequest:
+      type: object
+      properties:
+        base_revision: {type: integer}
+        caption: {type: string}
+        file_id:
+          type: string
+          description: Replace the referenced file, keeping caption and position.
+        crop:
+          allOf:
+            - $ref: '#/components/schemas/MemoryCrop'
+          nullable: true
+        rotation:
+          type: integer
+          enum: [0, 90, 180, 270]
+        filter:
+          type: string
+          enum: [original, warm, cool, bw, soft, contrast]
+        adjustments:
+          $ref: '#/components/schemas/MemoryAdjustments'
+    MemorySettings:
+      type: object
+      properties:
+        slideshow_interval:
+          type: integer
+          minimum: 3
+          maximum: 3600
+          default: 15
+        edited_copies:
+          type: boolean
+          default: false
+          description: Render edited memory photos into .cairn/memory-media/.
+        default_layout:
+          $ref: '#/components/schemas/MemoryLayout'
+        default_mode:
+          type: string
+          enum: [edit, preview]
+          default: edit
+        autosave:
+          type: boolean
+          default: true
+    MemorySettingsEnvelope:
+      type: object
+      required: [settings]
+      properties:
+        settings:
+          $ref: '#/components/schemas/MemorySettings'
     MemoryListEnvelope:
       type: object
       required: [memories]
@@ -3350,7 +4184,7 @@ components:
             `cursor` to fetch the next page.
     MemoryRequest:
       type: object
-      required: [title, body]
+      required: [title]
       properties:
         title:
           type: string
@@ -3358,7 +4192,12 @@ components:
           description: Leading/trailing whitespace is trimmed; must not be empty.
         body:
           type: string
-          description: Markdown body.
+          description: Markdown body, stored as a single text block.
+        blocks:
+          type: array
+          description: Create only. Ordered blocks; takes precedence over body.
+          items:
+            $ref: '#/components/schemas/MemoryBlockInput'
         memory_date:
           type: string
           format: date-time
@@ -3380,6 +4219,11 @@ components:
         saved_at:
           type: string
           format: date-time
+        blocks:
+          type: array
+          description: The version's blocks (single-version responses only).
+          items:
+            $ref: '#/components/schemas/MemoryBlock'
     MemoryVersionEnvelope:
       type: object
       required: [version]
