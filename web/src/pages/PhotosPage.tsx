@@ -1,9 +1,6 @@
 /**
- * Photos — the media browser with a fixed `photo` filter.
- *
- * The browser is one component configured three ways; see MediaPage. Keeping
- * the configuration here means the route, the heading, and the wording stay
- * separate from the behaviour.
+ * Photos — the timeline: every photo in the library, newest first, grouped by
+ * day. Folders do not matter here; that is what Files is for.
  */
 
 import MediaPage from './MediaPage';
@@ -12,10 +9,11 @@ import type { MediaPageConfig } from './MediaPage';
 const CONFIG: MediaPageConfig = {
   title: 'Photos',
   type: 'photo',
-  showFolders: true,
-  subtitle: 'Every photo in the library, in the order your files already live.',
-  emptyTitle: 'No photos here',
-  emptyBody: 'This folder has no photos. Upload some, or step into a subfolder.',
+  grouping: 'day',
+  showTypeFilter: false,
+  emptyTitle: 'No photos yet',
+  emptyBody: "Once Cairn finds photos in your library, they'll appear here.",
+  emptyIcon: 'photo',
 };
 
 export default function PhotosPage() {
