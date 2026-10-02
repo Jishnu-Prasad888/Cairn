@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractRefs, renderMarkdown } from './markdown';
+import { extractRefs, highlightMarkdown, renderMarkdown } from './markdown';
 
 const REF_TYPES = ['media', 'memory', 'album', 'person', 'tag'] as const;
 
@@ -59,7 +59,7 @@ describe('renderMarkdown', () => {
   it('renders a horizontal rule and code fence', () => {
     const out = renderMarkdown('---\n\n```go\nfmt.Println("hi")\n```');
     expect(out.html).toContain('<hr>');
-    expect(out.html).toContain('<pre><code>');
+    expect(out.html).toContain('<pre><code class="language-go">');
     expect(out.html).toContain('fmt.Println');
   });
 
@@ -88,5 +88,98 @@ describe('extractRefs', () => {
     const body = REF_TYPES.map((t) => `[[${t}:id]]`).join(' ');
     const refs = extractRefs(body);
     expect(refs.map((r) => r.type)).toEqual(REF_TYPES);
+  });
+});
+
+describe('renderMarkdown (extended syntax)', () => {
+  it('renders strikethrough, task lists and nested lists', () => {
+    const out = renderMarkdown('~~gone~~\n\n- [ ] pack\n- [x] book\n  - train\n- done');
+    expect(out.html).toContain('<del>gone</del>');
+    expect(out.html).toContain('<input type="checkbox" disabled> pack');
+    expect(out.html).toContain('<input type="checkbox" disabled checked> book');
+    expect(out.html).toMatch(/book<ul><li>train<\/li><\/ul><\/li>/);
+  });
+
+  it('renders tables with alignment', () => {
+    const out = renderMarkdown('| Day | Place |\n|:--|--:|\n| 1 | **Kochi** |');
+    expect(out.html).toContain('<table>');
+    expect(out.html).toContain('<th style="text-align:left">Day</th>');
+    expect(out.html).toContain('<td style="text-align:right"><strong>Kochi</strong></td>');
+  });
+
+  it('keeps emphasis out of code spans and escapes their content', () => {
+    const out = renderMarkdown('`**not bold** <b>`');
+    expect(out.html).toContain('<code>**not bold** &lt;b&gt;</code>');
+    expect(out.html).not.toContain('<strong>');
+  });
+
+  it('escapes a fenced code info string instead of injecting it', () => {
+    const out = renderMarkdown('```<img src=x onerror=alert(1)>\ncode\n```');
+    expect(out.html).not.toContain('<img');
+    expect(out.html).toContain('code');
+  });
+
+  it('renders markdown images as safe links, never as remote <img>', () => {
+    const out = renderMarkdown(
+      '![tracker](https://evil.example/pixel.gif) ![x](javascript:alert(1))',
+    );
+    expect(out.html).not.toContain('<img');
+    expect(out.html).toContain('class="md-image-link"');
+    expect(out.html).not.toContain('javascript:');
+  });
+
+  it('escapes reference labels', () => {
+    const out = renderMarkdown('[[media:abc|<b>hi</b>]]');
+    expect(out.html).not.toContain('<b>');
+  });
+
+  it('keeps single newlines as line breaks inside a paragraph', () => {
+    expect(renderMarkdown('one\ntwo').html).toBe('<p>one<br>two</p>');
+  });
+
+  it('does not treat snake_case as italic', () => {
+    expect(renderMarkdown('file_name_here').html).not.toContain('<em>');
+  });
+});
+
+describe('highlightMarkdown', () => {
+  const textOf = (html: string) => {
+    const el = document.createElement('div');
+    el.innerHTML = html;
+    return el.textContent;
+  };
+
+  const samples = [
+    '',
+    '# My Trip to Kerala\n\nWe arrived at **Kochi** early.\n\n> The weather was perfect.',
+    '- [ ] pack\n- [x] book\n  1. nested\n\n---\n\n```js\nconst a = `x` < 3 && "q";\n```\n',
+    '| a | b |\n|---|---|\n| [link](https://x.y) | [[media:abc|cove]] ~~s~~ *i* _j_ `c` |',
+    '<script>alert(1)</script> & "quotes" \'single\'',
+    'trailing newline\n',
+  ];
+
+  it.each(samples)('preserves the exact source text: %j', (src) => {
+    expect(textOf(highlightMarkdown(src))).toBe(src);
+  });
+
+  it('wraps markers so CSS can hide them', () => {
+    const html = highlightMarkdown('## Title with **bold**');
+    expect(html).toContain('md-h2');
+    expect(html).toContain('<span class="md-mark">## </span>');
+    expect(html).toContain(
+      '<strong><span class="md-mark">**</span>bold<span class="md-mark">**</span></strong>',
+    );
+  });
+
+  it('never emits raw markup from the source', () => {
+    const el = document.createElement('div');
+    el.innerHTML = highlightMarkdown('<img src=x onerror=alert(1)>');
+    expect(el.querySelector('img')).toBeNull();
+  });
+
+  it('marks code fence content as code, not inline syntax', () => {
+    const html = highlightMarkdown('```\n**x**\n```');
+    expect(html).toContain('md-codeline');
+    expect(html).not.toContain('<strong>');
   });
 });

@@ -1,246 +1,378 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { Route, Routes } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { called, json, mockApi, noContent, originalFetch, renderPage } from '../test/harness';
+import {
+  apiError,
+  bodyOf,
+  called,
+  json,
+  mockApi,
+  noContent,
+  originalFetch,
+  renderPage,
+} from '../test/harness';
+import type { MemoryDocument } from '../memories/types';
 import MemoriesPage from './MemoriesPage';
 
-const memory = {
-  id: 'mem1',
-  title: 'Trip to Rye',
-  body: 'We saw **the pier** and [[album:a1|Rye]]!',
-  deleted: false,
-  created_at: '2026-09-01T10:00:00Z',
-  updated_at: '2026-09-02T10:00:00Z',
-};
+const photo = (id: string, caption = '') => ({
+  id: `img-${id}`,
+  position: 0,
+  file_id: id,
+  caption,
+  crop: null,
+  rotation: 0,
+  filter: 'original',
+  adjustments: { brightness: 0, contrast: 0, saturation: 0 },
+  edited: false,
+  media: {
+    available: true,
+    status: 'present',
+    name: `${id}.jpg`,
+    media_type: 'photo',
+    thumbnail_url: `/api/v1/libraries/lib1/files/${id}/thumbnail`,
+    original_url: `/api/v1/libraries/lib1/files/${id}/download`,
+    width: 400,
+    height: 300,
+  },
+  derived: null,
+});
 
-const versions = {
-  versions: [
-    {
-      memory_id: 'mem1',
-      version: 1,
-      title: 'Trip to Rye',
-      body: 'Draft one.',
-      saved_at: '2026-09-01T10:00:00Z',
-    },
-  ],
-};
+function memoryDoc(overrides: Partial<MemoryDocument> = {}): MemoryDocument {
+  return {
+    id: 'mem1',
+    title: 'My Trip to Kerala',
+    body: 'We left **early**.',
+    description: '',
+    location: 'Kochi',
+    memory_date: '2026-09-01T00:00:00Z',
+    tags: [],
+    revision: 4,
+    deleted: false,
+    created_at: '2026-09-01T10:00:00Z',
+    updated_at: '2026-09-02T10:00:00Z',
+    blocks: [
+      { id: 'blk-text-1', type: 'text', markdown: 'We left **early**.' },
+      {
+        id: 'blk-img-1',
+        type: 'image',
+        layout: 'grid',
+        slideshow: { enabled: false, interval_seconds: null },
+        images: [photo('p1', 'The road to Munnar'), photo('p2')],
+      },
+    ],
+    ...overrides,
+  } as MemoryDocument;
+}
 
-function setup(overrides: { memories?: unknown[] } = {}) {
-  const list = overrides.memories ?? [memory];
+interface Setup {
+  memory?: MemoryDocument;
+  list?: unknown[];
+  saveResponse?: (body: { base_revision?: number; blocks: unknown[] }) => Response;
+}
+
+function setup(options: Setup = {}) {
+  let current = options.memory ?? memoryDoc();
+  const list = options.list ?? [current];
   const fn = mockApi([
-    (url, init) =>
-      /\/libraries\/lib1\/memories\/mem1$/.test(url) && init?.method === 'PUT'
-        ? json({ memory: { ...memory, updated_at: '2026-09-03T10:00:00Z' } })
-        : undefined,
-    (url, init) =>
-      /\/libraries\/lib1\/memories$/.test(url) && init?.method === 'POST'
-        ? json(
-            {
-              memory: {
-                ...memory,
-                id: 'mem2',
-                title: 'Untitled memory',
-                body: '# New memory\n\nWrite something worth remembering…',
-              },
+    (url) =>
+      url.endsWith('/api/v1/settings/memories')
+        ? json({
+            settings: {
+              slideshow_interval: 15,
+              edited_copies: false,
+              default_layout: 'grid',
+              default_mode: 'edit',
+              autosave: true,
             },
-            201,
-          )
+          })
         : undefined,
-    (url) => (/\/memories\/mem1\/versions$/.test(url) ? json(versions) : undefined),
+    (url, init) => {
+      if (!/\/memories\/mem1\/document$/.test(url) || init?.method !== 'PUT') return undefined;
+      const body = JSON.parse(String(init.body)) as { base_revision?: number; blocks: unknown[] };
+      if (options.saveResponse) return options.saveResponse(body);
+      current = {
+        ...current,
+        revision: current.revision + 1,
+        blocks: body.blocks as MemoryDocument['blocks'],
+      };
+      return json({ memory: current });
+    },
+    (url, init) => {
+      if (!/\/memories\/mem1$/.test(url) || init?.method !== 'PATCH') return undefined;
+      const patch = JSON.parse(String(init.body)) as Partial<MemoryDocument>;
+      current = { ...current, ...patch, revision: current.revision + 1 } as MemoryDocument;
+      return json({ memory: current });
+    },
     (url, init) =>
       /\/memories\/mem1$/.test(url) && init?.method === 'DELETE' ? noContent() : undefined,
-    (url) => (/\/libraries\/lib1\/memories$/.test(url) ? json({ memories: list }) : undefined),
+    (url) => (/\/memories\/mem1$/.test(url) ? json({ memory: current }) : undefined),
+    (url, init) =>
+      /\/libraries\/lib1\/memories$/.test(url) && init?.method === 'POST'
+        ? json({ memory: memoryDoc({ id: 'mem2', title: 'Untitled memory', blocks: [] }) }, 201)
+        : undefined,
+    (url) =>
+      /\/libraries\/lib1\/memories(\?.*)?$/.test(url) ? json({ memories: list }) : undefined,
   ]);
-  renderPage(<MemoriesPage />);
   return fn;
 }
 
-async function openEditor() {
-  fireEvent.click(await screen.findByRole('button', { name: /Trip to Rye/ }));
-  return screen.findByTestId('memory-editor');
+function renderMemories(route = '/memories/mem1') {
+  return renderPage(
+    <Routes>
+      <Route path="/memories" element={<MemoriesPage />} />
+      <Route path="/memories/:memoryId" element={<MemoriesPage />} />
+    </Routes>,
+    { route },
+  );
 }
 
-describe('MemoriesPage', () => {
+const documentPuts = (fn: ReturnType<typeof vi.fn>) =>
+  fn.mock.calls.filter(([url, init]) => /\/document$/.test(String(url)) && init?.method === 'PUT');
+
+describe('MemoriesPage (notebook)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it('loads libraries and lists memories', async () => {
+  it('lists memories and opens one as a notebook of blocks', async () => {
     setup();
-
-    expect(await screen.findByText('Trip to Rye')).toBeInTheDocument();
-    expect(screen.getByLabelText('Library')).toBeInTheDocument();
+    renderMemories();
+    expect(await screen.findByTestId('memory-editor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Memory title')).toHaveValue('My Trip to Kerala');
+    const text = screen.getByTestId('text-block-editor');
+    expect(text.textContent).toBe('We left **early**.\n');
+    expect(text.querySelector('strong')).not.toBeNull();
+    expect(
+      screen.getByRole('group', { name: /Image section 2 of 2, 2 photos/ }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '+ Text' }).length).toBe(3);
   });
 
   it('shows an empty state and creates a memory', async () => {
-    const fetchMock = setup({ memories: [] });
-
+    const fn = setup({ list: [] });
+    renderMemories('/memories');
     expect(await screen.findByTestId('memories-empty')).toBeInTheDocument();
-
     fireEvent.click(screen.getByTestId('new-memory'));
-
-    expect(await screen.findByTestId('memory-editor')).toBeInTheDocument();
-    expect(screen.getByLabelText('Memory title')).toHaveValue('Untitled memory');
-    expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/memories')).toBe(true);
+    await waitFor(() => expect(called(fn, 'POST', '/api/v1/libraries/lib1/memories')).toBe(true));
+    const body = bodyOf(fn, 'POST', '/api/v1/libraries/lib1/memories') as {
+      blocks: Array<{ type: string }>;
+    };
+    expect(body.blocks[0]?.type).toBe('text');
   });
 
-  it('opens the editor and renders a markdown preview', async () => {
-    setup();
-    await openEditor();
-
-    const preview = screen.getByLabelText('Markdown preview');
-    expect(preview.innerHTML).toContain('<strong>the pier</strong>');
-    expect(preview.innerHTML).toContain('md-ref md-ref-album');
-  });
-
-  it('autosaves on edit and reflects the save status', async () => {
-    const fetchMock = setup();
-    await openEditor();
-
-    const body = await screen.findByLabelText('Memory body');
-    fireEvent.change(body, { target: { value: 'Edited body with **changes**.' } });
-
-    const status = await screen.findByText('Saved', undefined, { timeout: 3000 });
-    expect(status).toBeInTheDocument();
-
-    const put = fetchMock.mock.calls.find(
-      ([url, init]) =>
-        String(url).endsWith('/api/v1/libraries/lib1/memories/mem1') && init?.method === 'PUT',
-    );
-    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
-      title: 'Trip to Rye',
-      body: 'Edited body with **changes**.',
+  it('autosaves edits once, debounced, with the base revision', async () => {
+    const fn = setup();
+    renderMemories();
+    const text = await screen.findByTestId('text-block-editor');
+    for (const value of ['We', 'We left', 'We left at dawn.']) {
+      text.textContent = `${value}\n`;
+      fireEvent.input(text);
+    }
+    await waitFor(() => expect(screen.getByTestId('save-status')).toHaveTextContent('Saved'), {
+      timeout: 4000,
+    });
+    const puts = documentPuts(fn);
+    expect(puts).toHaveLength(1);
+    const sent = JSON.parse(String(puts[0]![1]!.body)) as {
+      base_revision: number;
+      blocks: Array<Record<string, unknown>>;
+    };
+    expect(sent.base_revision).toBe(4);
+    expect(sent.blocks[0]).toEqual({
+      id: 'blk-text-1',
+      type: 'text',
+      markdown: 'We left at dawn.',
+    });
+    // Image references are sent as references with their edits, never as media.
+    expect(sent.blocks[1]).toMatchObject({ id: 'blk-img-1', type: 'image', layout: 'grid' });
+    expect((sent.blocks[1]!.images as Array<Record<string, unknown>>)[0]).toEqual({
+      id: 'img-p1',
+      file_id: 'p1',
+      caption: 'The road to Munnar',
+      crop: null,
+      rotation: 0,
+      filter: 'original',
+      adjustments: { brightness: 0, contrast: 0, saturation: 0 },
     });
   });
 
-  it('reports a failed autosave instead of claiming the draft is safe', async () => {
-    mockApi([
-      (url, init) =>
-        /\/memories\/mem1$/.test(url) && init?.method === 'PUT'
-          ? json(
-              {
-                error: { code: 'CONFLICT', message: 'Someone else edited this.', request_id: '1' },
-              },
-              409,
-            )
-          : undefined,
-      (url) =>
-        /\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined,
-    ]);
-    renderPage(<MemoriesPage />);
-    await screen.findByText('Trip to Rye');
-    fireEvent.click(screen.getByRole('button', { name: /Trip to Rye/ }));
-    const body = await screen.findByLabelText('Memory body');
-
-    fireEvent.change(body, { target: { value: 'Conflicting edit.' } });
-
+  it('keeps a local draft and recovers it after a refresh', async () => {
+    setup({ saveResponse: () => apiError(500, 'INTERNAL', 'boom') });
+    const { unmount } = renderMemories();
+    const text = await screen.findByTestId('text-block-editor');
+    text.textContent = 'Unsaved thought\n';
+    fireEvent.input(text);
     expect(
-      await screen.findByText('Save failed: Someone else edited this.', undefined, {
-        timeout: 3000,
-      }),
+      await screen.findByText('Save failed', undefined, { timeout: 4000 }),
     ).toBeInTheDocument();
-  });
+    unmount();
 
-  it('lists version history and restores a draft', async () => {
+    // Same revision on the server: the draft is restored silently.
     setup();
-    await openEditor();
+    renderMemories();
+    const again = await screen.findByTestId('text-block-editor');
+    await waitFor(() => expect(again.textContent).toBe('Unsaved thought\n'));
+    expect(screen.getByText(/Restored changes that had not been saved/)).toBeInTheDocument();
+  });
 
-    const versionSelect = await screen.findByLabelText(/Restore an earlier version/);
-    await waitFor(() => {
-      expect(versionSelect).toHaveTextContent('v1');
+  it('never overwrites newer server content with an old draft without asking', async () => {
+    localStorage.setItem(
+      'cairn.memory.draft.lib1.mem1',
+      JSON.stringify({
+        base_revision: 2,
+        blocks: [{ id: 'blk-text-1', type: 'text', markdown: 'Old draft' }],
+        meta: {},
+        saved_at: '2026-09-01T00:00:00Z',
+      }),
+    );
+    const fn = setup();
+    renderMemories();
+    expect(await screen.findByText(/were found on this device/)).toBeInTheDocument();
+    expect(screen.getByTestId('text-block-editor').textContent).toBe('We left **early**.\n');
+    expect(documentPuts(fn)).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore my changes' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('text-block-editor').textContent).toBe('Old draft\n'),
+    );
+  });
+
+  it('shows a conflict instead of overwriting a newer revision', async () => {
+    setup({
+      saveResponse: () =>
+        json(
+          {
+            error: {
+              code: 'CONFLICT',
+              message: 'changed',
+              details: { current_revision: 9 },
+              request_id: 't',
+            },
+          },
+          409,
+        ),
     });
-
-    fireEvent.change(versionSelect, { target: { value: '1' } });
-    expect(screen.getByLabelText('Memory body')).toHaveValue('Draft one.');
+    renderMemories();
+    const text = await screen.findByTestId('text-block-editor');
+    text.textContent = 'Mine\n';
+    fireEvent.input(text);
+    expect(
+      await screen.findByText(/changed somewhere else/, undefined, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep mine' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Load the other version' })).toBeInTheDocument();
   });
 
-  it('deletes a memory after confirming the dialog', async () => {
-    const fetchMock = setup();
-    const confirmSpy = vi.spyOn(window, 'confirm');
-    await openEditor();
-
-    fireEvent.click(screen.getByTestId('delete-memory'));
-    const dialog = await screen.findByTestId('delete-memory-dialog');
-    expect(within(dialog).getByText('Trip to Rye')).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
-
-    await waitFor(() => {
-      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/memories/mem1')).toBe(true);
-    });
-    await waitFor(() => {
-      expect(screen.queryByText('Trip to Rye')).not.toBeInTheDocument();
-    });
-    expect(confirmSpy).not.toHaveBeenCalled();
-  });
-
-  it('keeps the memory when the delete dialog is cancelled', async () => {
-    const fetchMock = setup();
-    await openEditor();
-
-    fireEvent.click(screen.getByTestId('delete-memory'));
-    const dialog = await screen.findByTestId('delete-memory-dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('delete-memory-dialog')).not.toBeInTheDocument();
-    });
-    expect(called(fetchMock, 'DELETE', '/memories/mem1')).toBe(false);
-    expect(screen.getByTestId('memory-editor')).toBeInTheDocument();
-  });
-});
-
-describe('MemoryEditor ref picker', () => {
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.restoreAllMocks();
-  });
-
-  it('inserts a picked reference at the caret', async () => {
-    mockApi([
-      (url) =>
-        /\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined,
-      (url) => (/\/memories\/mem1\/versions$/.test(url) ? json(versions) : undefined),
-      (url) =>
-        url.includes('/search?q=beach')
-          ? json({
-              files: [
-                { id: 'f9', name: 'beach.jpg', folder_path: 'Rye', rel_path: 'Rye/beach.jpg' },
-              ],
-            })
-          : undefined,
-    ]);
-    renderPage(<MemoriesPage />);
-    await screen.findByText('Trip to Rye');
-    fireEvent.click(screen.getByRole('button', { name: /Trip to Rye/ }));
-    const body = (await screen.findByLabelText('Memory body')) as HTMLTextAreaElement;
-
-    fireEvent.change(body, { target: { value: 'See: ' } });
-    body.focus();
-    body.setSelectionRange(5, 5);
-
-    fireEvent.change(screen.getByTestId('ref-search'), { target: { value: 'beach' } });
-    const result = await screen.findByTestId('ref-result-f9');
-    fireEvent.click(result);
-
-    expect(body.value).toBe('See: [[media:f9|beach.jpg]]');
-  });
-
-  it('searches the kind that is selected, and says when nothing matches', async () => {
-    mockApi([
-      (url) =>
-        /\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined,
-      (url) => (/\/memories\/mem1\/versions$/.test(url) ? json(versions) : undefined),
-      (url) => (url.endsWith('/api/v1/libraries/lib1/tags') ? json({ tags: [] }) : undefined),
-    ]);
-    renderPage(<MemoriesPage />);
-    await screen.findByText('Trip to Rye');
-    fireEvent.click(screen.getByRole('button', { name: /Trip to Rye/ }));
+  it('inserts a text block between blocks and moves blocks from the menu', async () => {
+    const fn = setup();
+    renderMemories();
     await screen.findByTestId('memory-editor');
+    fireEvent.click(screen.getAllByRole('button', { name: '+ Text' })[1]!);
+    expect(screen.getAllByTestId('text-block-editor')).toHaveLength(2);
 
-    fireEvent.click(screen.getByTestId('ref-kind-tag'));
-    fireEvent.change(screen.getByTestId('ref-search'), { target: { value: 'zzz' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Image section actions' }));
+    const menu = await screen.findByTestId('context-menu');
+    fireEvent.click(within(menu).getByText('Move up'));
+    await waitFor(() => expect(documentPuts(fn).length).toBeGreaterThan(0), { timeout: 4000 });
+    const last = documentPuts(fn).at(-1)!;
+    const ids = (
+      JSON.parse(String(last[1]!.body)) as { blocks: Array<{ id: string; type: string }> }
+    ).blocks.map((b) => b.type);
+    expect(ids).toEqual(['text', 'image', 'text']);
+  });
 
-    expect(await screen.findByTestId('ref-empty')).toHaveTextContent('No tag match “zzz”.');
+  it('removes a photo from the memory without touching the library file', async () => {
+    const fn = setup();
+    renderMemories();
+    await screen.findByTestId('memory-editor');
+    const figure = document.querySelector('[data-image-id="img-p1"]')!;
+    fireEvent.contextMenu(figure);
+    const menu = await screen.findByTestId('context-menu');
+    expect(within(menu).getByText('Edit image')).toBeInTheDocument();
+    expect(within(menu).getByText('Add photos')).toBeInTheDocument();
+    fireEvent.click(within(menu).getByText('Remove from memory'));
+    expect(await screen.findByText(/original stays in your library/)).toBeInTheDocument();
+    await waitFor(() => expect(documentPuts(fn).length).toBe(1), { timeout: 4000 });
+    const sent = JSON.parse(String(documentPuts(fn)[0]![1]!.body)) as {
+      blocks: Array<{ images?: Array<{ file_id: string }> }>;
+    };
+    expect(sent.blocks[1]!.images!.map((i) => i.file_id)).toEqual(['p2']);
+    // No file endpoint was ever called with a destructive method.
+    expect(
+      fn.mock.calls.some(
+        ([url, init]) => /\/files\//.test(String(url)) && init?.method === 'DELETE',
+      ),
+    ).toBe(false);
+  });
+
+  it('shows unavailable media in place, keeping its caption', async () => {
+    const doc = memoryDoc();
+    const block = doc.blocks[1] as unknown as { images: Array<ReturnType<typeof photo>> };
+    block.images[0] = {
+      ...block.images[0]!,
+      media: { available: false, status: 'missing' } as never,
+    };
+    setup({ memory: doc });
+    renderMemories();
+    expect(await screen.findByText('Image unavailable')).toBeInTheDocument();
+    expect(screen.getByText('The original is missing from the library.')).toBeInTheDocument();
+    expect(screen.getByText('The road to Munnar')).toBeInTheDocument();
+  });
+
+  it('switches to Preview, which hides every editing control', async () => {
+    setup();
+    renderMemories();
+    await screen.findByTestId('memory-editor');
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    const reader = await screen.findByTestId('memory-reader');
+    expect(within(reader).getByRole('heading', { level: 1 })).toHaveTextContent(
+      'My Trip to Kerala',
+    );
+    expect(reader.innerHTML).toContain('<strong>early</strong>');
+    expect(screen.queryByRole('button', { name: '+ Text' })).toBeNull();
+    expect(screen.queryByTestId('text-block-editor')).toBeNull();
+    expect(screen.getByText('Kochi')).toBeInTheDocument();
+  });
+
+  it('deletes a memory after confirming', async () => {
+    const fn = setup();
+    renderMemories();
+    await screen.findByTestId('memory-editor');
+    fireEvent.click(screen.getByTestId('delete-memory'));
+    const dialog = await screen.findByTestId('delete-memory-dialog');
+    expect(dialog).toHaveTextContent('none of its photos are touched');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(called(fn, 'DELETE', '/memories/mem1')).toBe(true));
+  });
+
+  it('saves title changes through the metadata endpoint', async () => {
+    const fn = setup();
+    renderMemories();
+    const title = await screen.findByLabelText('Memory title');
+    fireEvent.change(title, { target: { value: 'Kerala, 2026' } });
+    await waitFor(() => expect(called(fn, 'PATCH', '/memories/mem1')).toBe(true), {
+      timeout: 4000,
+    });
+    expect(bodyOf(fn, 'PATCH', '/memories/mem1')).toEqual({
+      title: 'Kerala, 2026',
+      base_revision: 4,
+    });
+  });
+
+  it('does not send a blank title', async () => {
+    const fn = setup();
+    renderMemories();
+    const title = await screen.findByLabelText('Memory title');
+    fireEvent.change(title, { target: { value: '   ' } });
+    expect(await screen.findByText(/A memory needs a title/)).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(called(fn, 'PATCH', '/memories/mem1')).toBe(false);
   });
 });
