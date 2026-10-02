@@ -11,10 +11,9 @@
 
 .library-row {
   padding: var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--border-subtle);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
 }
 
 .library-row-main {
@@ -36,19 +35,19 @@
   align-items: center;
   gap: var(--space-2);
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--font-size-lg);
   font-weight: 600;
 }
 
 .library-row-path {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   overflow-wrap: anywhere;
 }
 
 .library-row-index {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
 }
 
 .library-row-actions {
@@ -72,23 +71,23 @@
 
 .library-field > span,
 .library-field > label {
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
 }
 
 .library-input {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   font: inherit;
-  color: var(--text-primary);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
 .library-input:focus-visible {
-  border-color: var(--primary);
+  border-color: var(--color-primary-ink);
 }
 
 .library-path-row {
@@ -114,8 +113,8 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
@@ -131,8 +130,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
 }
 
 .folder-browser-list {
@@ -155,7 +154,7 @@
   padding: var(--space-2) var(--space-3);
   font: inherit;
   text-align: left;
-  color: var(--text-primary);
+  color: var(--color-text-primary);
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
@@ -164,7 +163,7 @@
 
 .folder-browser-item:hover,
 .folder-browser-item:focus-visible {
-  background: var(--selection);
+  background: var(--color-selection);
 }
 
 .folder-browser-actions {
@@ -175,16 +174,16 @@
 
 .library-hint {
   margin: 0;
-  font-size: 0.82rem;
-  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
   line-height: 1.5;
 }
 
 .library-probe {
   padding: var(--space-3);
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   line-height: 1.5;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
@@ -197,32 +196,32 @@
 }
 
 .library-probe-ok {
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--green) 12%, var(--surface));
-  border-color: color-mix(in srgb, var(--green) 34%, var(--border));
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-green) 12%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-green) 34%, var(--color-border));
 }
 
 .library-probe-warn {
-  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
-  border-color: color-mix(in srgb, var(--warning) 34%, var(--border));
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-warning) 34%, var(--color-border));
 }
 
 .library-probe-error {
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
-  border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-danger) 32%, var(--color-border));
 }
 
 .library-form code {
   padding: 1px 5px;
   font-size: 0.85em;
-  background: var(--border-subtle);
+  background: var(--color-border-subtle);
   border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
 }
 
 .libraries-note {
   margin-top: var(--space-5);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
 }
 
 .library-picker {
@@ -231,7 +230,7 @@
   gap: var(--space-2);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 899px) {
   .library-row-main {
     flex-direction: column;
   }

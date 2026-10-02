@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractRefs, renderMarkdown } from './markdown';
+import { extractExcerpt, extractRefs, renderMarkdown } from './markdown';
 
 const REF_TYPES = ['media', 'memory', 'album', 'person', 'tag'] as const;
 
@@ -88,5 +88,23 @@ describe('extractRefs', () => {
     const body = REF_TYPES.map((t) => `[[${t}:id]]`).join(' ');
     const refs = extractRefs(body);
     expect(refs.map((r) => r.type)).toEqual(REF_TYPES);
+  });
+});
+
+describe('extractExcerpt', () => {
+  it('strips formatting, links, and references', () => {
+    expect(
+      extractExcerpt('# Title\n\nWe saw **the pier** and [[album:a1|Rye]] [a link](http://x).'),
+    ).toBe('Title We saw the pier and a link.');
+  });
+
+  it('cuts long text at a word boundary with an ellipsis', () => {
+    const out = extractExcerpt('word '.repeat(100), 30);
+    expect(out.endsWith('…')).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(31);
+  });
+
+  it('leaves short text alone', () => {
+    expect(extractExcerpt('short')).toBe('short');
   });
 });
