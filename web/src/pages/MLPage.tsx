@@ -122,7 +122,7 @@ export default function MLPage() {
 
   if (gate.kind === 'loading') {
     return (
-      <main className="ml-page">
+      <main className="page ml-page">
         <LoadingState label="Loading libraries…" />
       </main>
     );
@@ -138,7 +138,7 @@ export default function MLPage() {
 
   if (gate.kind === 'error') {
     return (
-      <main className="ml-page">
+      <main className="page ml-page">
         {header}
         <ErrorState message={gate.message} onRetry={status.reload} />
       </main>
@@ -147,7 +147,7 @@ export default function MLPage() {
 
   if (gate.kind === 'empty') {
     return (
-      <main className="ml-page">
+      <main className="page ml-page">
         {header}
         <NoLibrariesState isAdmin={user?.role === 'admin'} />
       </main>
@@ -157,7 +157,7 @@ export default function MLPage() {
   const offline = gate.library.status === 'offline';
 
   return (
-    <main className="ml-page">
+    <main className="page ml-page">
       {header}
 
       {offline && <LibraryOfflineNotice library={gate.library} />}

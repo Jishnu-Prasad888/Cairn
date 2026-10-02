@@ -19,7 +19,8 @@ import { ApiError } from '../api/client';
 import { downloadPublicShareFile, getPublicShare, listPublicShareFiles } from '../api/queries';
 import type { FileSummary, PublicShareInfo } from '../api/types';
 import { formatBytes } from '../api/types';
-import { mediaGlyph } from '../components/media';
+import { mediaTypeIcon } from '../components/media';
+import { Icon } from '../components/ui/Icon';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import './PublicSharePage.css';
 
@@ -170,7 +171,7 @@ export default function PublicSharePage() {
   return (
     <main className="share-view" data-testid="public-share-page">
       <header className="share-view-header">
-        <span className="app-brand-text">Cairn</span>
+        <span className="brand share-brand">Cairn</span>
         {state.kind === 'unlocked' && state.share.library && (
           <p className="muted">Shared from {state.share.library}</p>
         )}
@@ -244,7 +245,7 @@ export default function PublicSharePage() {
               {files.map((file) => (
                 <li key={file.id} className="share-file">
                   <span className="share-file-glyph" aria-hidden="true">
-                    {mediaGlyph(file)}
+                    <Icon name={mediaTypeIcon(file.media_type)} />
                   </span>
                   <div className="share-file-meta">
                     <span className="share-file-name">{file.name}</span>

@@ -281,7 +281,7 @@ export default function PermissionsPage() {
 
   if (gate.kind === 'loading') {
     return (
-      <main className="permissions-page">
+      <main className="page permissions-page">
         <LoadingState label="Loading libraries…" />
       </main>
     );
@@ -310,7 +310,7 @@ export default function PermissionsPage() {
 
   if (gate.kind === 'error') {
     return (
-      <main className="permissions-page">
+      <main className="page permissions-page">
         {header}
         <ErrorState message={gate.message} onRetry={grants.reload} />
       </main>
@@ -319,7 +319,7 @@ export default function PermissionsPage() {
 
   if (gate.kind === 'empty') {
     return (
-      <main className="permissions-page">
+      <main className="page permissions-page">
         {header}
         <NoLibrariesState isAdmin={user?.role === 'admin'} />
       </main>
@@ -327,7 +327,7 @@ export default function PermissionsPage() {
   }
 
   return (
-    <main className="permissions-page">
+    <main className="page permissions-page">
       {header}
 
       {grants.error && <ErrorState message={grants.error} onRetry={grants.reload} />}
