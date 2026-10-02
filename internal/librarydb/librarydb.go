@@ -31,7 +31,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 7
+	SchemaVersion = 8
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.
@@ -106,7 +106,10 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(schema); err != nil {
 		return err
 	}
-	return addIndexedFileMediaType(db)
+	if err := addIndexedFileMediaType(db); err != nil {
+		return err
+	}
+	return upgradeMemories(db)
 }
 
 // addIndexedFileMediaType backfills indexed_files.media_type on a library
@@ -444,6 +447,89 @@ END;
 CREATE TRIGGER IF NOT EXISTS fts_memories_delete AFTER DELETE ON memories BEGIN
 	DELETE FROM fts_memories WHERE memory_id = old.id;
 END;
+
+-- memory_blocks is the ordered list of blocks that make up a memory
+-- (notebook model, schema v8). A text block carries Markdown; an image block
+-- carries a layout and slideshow settings and owns memory_images rows.
+-- slideshow_interval NULL means "inherit the viewer's setting".
+CREATE TABLE IF NOT EXISTS memory_blocks (
+	id                 TEXT PRIMARY KEY,
+	memory_id          TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+	position           INTEGER NOT NULL,
+	type               TEXT NOT NULL CHECK (type IN ('text', 'image')),
+	markdown           TEXT NOT NULL DEFAULT '',
+	layout             TEXT NOT NULL DEFAULT '',
+	slideshow          INTEGER NOT NULL DEFAULT 0,
+	slideshow_interval INTEGER,
+	created_at         TEXT NOT NULL,
+	updated_at         TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS memory_blocks_memory_idx ON memory_blocks (memory_id, position);
+
+-- memory_images are references from an image block to library media. They
+-- carry Memory-specific presentation (caption, crop, rotation, filter,
+-- adjustments) so the same photo can appear in many memories independently.
+-- source_file_id deliberately has no foreign key: a missing or re-indexed
+-- original must not cascade away the reference, its caption, or its position.
+-- source_rel_path/source_hash let the store re-attach a moved original.
+CREATE TABLE IF NOT EXISTS memory_images (
+	id              TEXT PRIMARY KEY,
+	memory_id       TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+	block_id        TEXT NOT NULL REFERENCES memory_blocks(id) ON DELETE CASCADE,
+	position        INTEGER NOT NULL,
+	source_file_id  TEXT NOT NULL,
+	source_rel_path TEXT NOT NULL DEFAULT '',
+	source_hash     TEXT NOT NULL DEFAULT '',
+	caption         TEXT NOT NULL DEFAULT '',
+	crop_x          REAL,
+	crop_y          REAL,
+	crop_w          REAL,
+	crop_h          REAL,
+	rotation        INTEGER NOT NULL DEFAULT 0 CHECK (rotation IN (0, 90, 180, 270)),
+	filter          TEXT NOT NULL DEFAULT 'original',
+	brightness      INTEGER NOT NULL DEFAULT 0,
+	contrast        INTEGER NOT NULL DEFAULT 0,
+	saturation      INTEGER NOT NULL DEFAULT 0,
+	derived_id      TEXT,
+	created_at      TEXT NOT NULL,
+	updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS memory_images_block_idx  ON memory_images (block_id, position);
+CREATE INDEX IF NOT EXISTS memory_images_memory_idx ON memory_images (memory_id);
+CREATE INDEX IF NOT EXISTS memory_images_source_idx ON memory_images (source_file_id);
+
+-- memory_derived_media records edited copies rendered for a memory image when
+-- the "create edited copies" setting is on. Files live under
+-- .cairn/memory-media/<memory-id>/ (rel_path is relative to .cairn/), which
+-- the indexer never scans. Rows are regenerable and are garbage collected only
+-- once no memory_images row references them.
+CREATE TABLE IF NOT EXISTS memory_derived_media (
+	id              TEXT PRIMARY KEY,
+	memory_id       TEXT NOT NULL,
+	memory_image_id TEXT NOT NULL,
+	source_file_id  TEXT NOT NULL,
+	rel_path        TEXT NOT NULL UNIQUE,
+	edit_signature  TEXT NOT NULL,
+	width           INTEGER NOT NULL,
+	height          INTEGER NOT NULL,
+	size_bytes      INTEGER NOT NULL,
+	created_at      TEXT NOT NULL,
+	updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS memory_derived_image_idx ON memory_derived_media (memory_image_id);
+
+-- memory_tags attaches library tags to memories (metadata panel).
+CREATE TABLE IF NOT EXISTS memory_tags (
+	memory_id  TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+	tag_id     TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (memory_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS memory_tags_tag_idx ON memory_tags (tag_id);
 
 -- ml_signatures stores per-file similarity signatures produced by the local
 -- ML subsystem (Phase 11). Derived, removable data: purging the table never
