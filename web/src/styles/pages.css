@@ -1,47 +1,109 @@
-/* Shared page chrome for pages rendered inside the app shell. */
+/*
+ * The page frame. Every routed page renders `<main className="page …">`, so
+ * gutters, vertical rhythm, and the header treatment are identical everywhere.
+ * Pages that are mostly reading or forms add `.page-narrow` to keep line
+ * lengths sane on wide monitors; media pages use the full width.
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+  padding: var(--space-4) var(--content-gutter) var(--space-7);
+}
+
+.page-narrow {
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+}
+
+/* ------------------------------ headers ------------------------------ */
 
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
   flex-wrap: wrap;
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: var(--space-1);
+  gap: var(--space-3) var(--space-4);
+  min-height: var(--control-height-md);
+}
+
+.page-header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .page-header h1 {
-  margin: 0 0 2px;
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.3px;
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
 }
 
 .page-header-subtitle {
   margin: 0;
-  font-size: 13px;
-  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 
 .header-controls {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
   flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
+/* A titled block inside a page: "Recently added", "Albums", "Danger zone". */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+/* A quiet raised surface, for forms and lists that need a boundary. Media
+   never sits on one of these. */
+.surface {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+/* ------------------------------ text roles ----------------------------- */
+
 .muted {
-  color: var(--text-muted);
+  color: var(--color-text-secondary);
+}
+
+.secondary-text {
+  color: var(--color-text-secondary);
 }
 
 .error-text {
-  color: var(--danger);
+  color: var(--color-danger-ink);
 }
 
 .page-muted {
   padding: var(--space-6);
-  color: var(--text-muted);
+  color: var(--color-text-secondary);
   text-align: center;
 }

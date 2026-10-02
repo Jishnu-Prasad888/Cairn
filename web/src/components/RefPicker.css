@@ -5,9 +5,9 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--color-surface);
 }
 
 .ref-picker-kinds {
@@ -18,24 +18,24 @@
 
 .ref-kind {
   padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
-  background: var(--surface-elevated);
-  color: var(--text-secondary);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   cursor: pointer;
 }
 
 .ref-kind:hover {
-  border-color: var(--primary);
-  color: var(--text-primary);
+  border-color: var(--color-primary-ink);
+  color: var(--color-text-primary);
 }
 
 .ref-kind.active {
-  background: var(--accent-soft);
-  border-color: var(--primary);
-  color: var(--primary);
+  background: var(--color-accent-soft);
+  border-color: var(--color-primary-ink);
+  color: var(--color-primary-ink);
   font-weight: 600;
 }
 
@@ -50,20 +50,20 @@
   min-width: 0;
   padding: var(--space-2) var(--space-3);
   font: inherit;
-  color: var(--text-primary);
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
 .ref-picker-input:focus-visible {
-  border-color: var(--primary);
+  border-color: var(--color-primary-ink);
 }
 
 .ref-picker-status,
 .ref-picker-empty {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
 }
 
 .ref-picker-results {
@@ -86,7 +86,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--text-primary);
+  color: var(--color-text-primary);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -94,14 +94,14 @@
 
 .ref-result:hover,
 .ref-result:focus-visible {
-  background: var(--border-subtle);
+  background: var(--color-border-subtle);
 }
 
 .ref-result-label {
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   overflow-wrap: anywhere;
 }
 
 .ref-result-detail {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
 }

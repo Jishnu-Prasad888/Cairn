@@ -207,3 +207,24 @@ export function renderMarkdown(body: string): { html: string; refs: RefLink[] } 
 
   return { html: paragraphs.join('\n'), refs };
 }
+
+/**
+ * A plain-text excerpt of a Markdown body for cards and lists: formatting,
+ * links, and `[[ref:id]]` markers are stripped, whitespace is collapsed, and
+ * the result is cut at a word boundary.
+ */
+export function extractExcerpt(body: string, maxLength = 160): string {
+  const text = body
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\[\[[a-z]+:[^\]]*\]\]/gi, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, '')
+    .replace(/[*_`~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length <= maxLength) return text;
+  const cut = text.slice(0, maxLength);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > maxLength * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}

@@ -1,10 +1,3 @@
-.duplicates-page {
-  padding: var(--space-3) var(--space-3) var(--space-7);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
 .duplicates-page select {
   font: inherit;
   border-radius: var(--radius-sm);
@@ -17,7 +10,7 @@
 
 .duplicates-summary {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--color-text-secondary);
 }
 
 .duplicate-groups {
@@ -27,10 +20,9 @@
 }
 
 .dup-group {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
+  background: var(--color-surface);
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
@@ -47,13 +39,13 @@
 
 .dup-group-header h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--font-size-md);
   font-weight: 600;
 }
 
 .dup-group-header code {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }
 
 .dup-members {
@@ -70,9 +62,9 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  background: var(--border-subtle);
+  background: var(--color-border-subtle);
 }
 
 .dup-thumb {
@@ -81,14 +73,14 @@
   border-radius: var(--radius-sm);
   object-fit: cover;
   flex-shrink: 0;
-  background: var(--surface);
+  background: var(--color-surface);
 }
 
 .dup-thumb-placeholder {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   font-weight: 600;
 }
 
@@ -108,41 +100,41 @@
 }
 
 .dup-member-path {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .dup-member-size {
-  color: var(--text-muted);
-  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
 .dup-member-action {
   white-space: nowrap;
   padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--primary);
+  background: var(--color-surface);
+  color: var(--color-primary-ink);
   text-decoration: none;
 }
 
 .dup-member-action:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
 }
 
 .dup-group-hint {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .dup-members-removable .dup-member {
-  background: var(--surface);
+  background: var(--color-surface);
 }
 
 .duplicates-more {
@@ -151,5 +143,5 @@
 }
 
 .duplicates-footnote {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
