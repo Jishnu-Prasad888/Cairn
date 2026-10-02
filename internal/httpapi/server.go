@@ -142,6 +142,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.requireSession(s.handleLogout))
 	mux.Handle("GET /api/v1/auth/me", s.withAuth(allowAny, s.handleMe))
 
+	// Per-user preferences.
+	mux.Handle("GET /api/v1/settings/memories", s.withAuth(allowAny, s.handleGetMemorySettings))
+	mux.Handle("PATCH /api/v1/settings/memories", s.withAuth(allowAny, s.handleUpdateMemorySettings))
+
 	// Admin surface.
 	mux.Handle("GET /api/v1/users", s.withAuth(allowAdmin, s.handleListUsers))
 	mux.Handle("POST /api/v1/users", s.withAuth(allowAdmin, s.handleCreateUser))
@@ -275,6 +279,18 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions", s.withAuth(allowAny, s.handleListMemoryVersions))
 		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/versions/{version}", s.withAuth(allowAny, s.handleGetMemoryVersion))
 		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/refs", s.withAuth(allowAny, s.handleListMemoryRefs))
+		mux.Handle("PATCH /api/v1/libraries/{id}/memories/{memoryID}", s.withAuth(allowAny, s.handlePatchMemory))
+		mux.Handle("PUT /api/v1/libraries/{id}/memories/{memoryID}/document", s.withAuth(allowAny, s.handlePutMemoryDocument))
+		mux.Handle("POST /api/v1/libraries/{id}/memories/{memoryID}/blocks", s.withAuth(allowAny, s.handleCreateMemoryBlock))
+		mux.Handle("PUT /api/v1/libraries/{id}/memories/{memoryID}/blocks/order", s.withAuth(allowAny, s.handleReorderMemoryBlocks))
+		mux.Handle("PATCH /api/v1/libraries/{id}/memories/{memoryID}/blocks/{blockID}", s.withAuth(allowAny, s.handlePatchMemoryBlock))
+		mux.Handle("DELETE /api/v1/libraries/{id}/memories/{memoryID}/blocks/{blockID}", s.withAuth(allowAny, s.handleDeleteMemoryBlock))
+		mux.Handle("POST /api/v1/libraries/{id}/memories/{memoryID}/blocks/{blockID}/duplicate", s.withAuth(allowAny, s.handleDuplicateMemoryBlock))
+		mux.Handle("POST /api/v1/libraries/{id}/memories/{memoryID}/blocks/{blockID}/images", s.withAuth(allowAny, s.handleAddMemoryImages))
+		mux.Handle("PUT /api/v1/libraries/{id}/memories/{memoryID}/blocks/{blockID}/images/order", s.withAuth(allowAny, s.handleReorderMemoryImages))
+		mux.Handle("PATCH /api/v1/libraries/{id}/memories/{memoryID}/images/{imageID}", s.withAuth(allowAny, s.handlePatchMemoryImage))
+		mux.Handle("DELETE /api/v1/libraries/{id}/memories/{memoryID}/images/{imageID}", s.withAuth(allowAny, s.handleDeleteMemoryImage))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/images/{imageID}/derived", s.withAuth(allowAny, s.handleGetMemoryImageDerived))
 
 		// Public shares read content without a session. The token/password
 		// authenticate the share; capability evaluation still governs access.
