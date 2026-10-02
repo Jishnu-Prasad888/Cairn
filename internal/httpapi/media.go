@@ -78,6 +78,43 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, u *auth
 	})
 }
 
+// handleFileCounts — GET /api/v1/libraries/{id}/files/counts
+func (s *Server) handleFileCounts(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeLibraryError(w, r, err)
+		return
+	}
+	svc, cleanup, ok := s.openMediaService(w, r, lib)
+	if !ok {
+		return
+	}
+	defer cleanup()
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapRead) {
+		return
+	}
+	counts, err := svc.Store().CountsByType(r.Context())
+	if err != nil {
+		s.logger.Error("count files", "error", err)
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to count files.")
+		return
+	}
+	coll, err := svc.Store().CountCollections(r.Context())
+	if err != nil {
+		s.logger.Error("count collections", "error", err)
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to count files.")
+		return
+	}
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{
+		"counts":    counts,
+		"albums":    coll.Albums,
+		"tags":      coll.Tags,
+		"favorites": coll.Favorites,
+	})
+}
+
 // handleListDuplicates — GET /api/v1/libraries/{id}/files/duplicates
 func (s *Server) handleListDuplicates(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
@@ -459,7 +496,7 @@ func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request, u *au
 	if !s.requireCap(w, r, u, folderKeyFromParent(lib.ID, parent), authz.CapRead) {
 		return
 	}
-	folders, err := svc.Store().ListFolders(r.Context(), parent)
+	folders, err := svc.ListFolders(r.Context(), parent)
 	if err != nil {
 		s.logger.Error("list folders", "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
@@ -467,6 +504,37 @@ func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request, u *au
 		return
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"folders": toFolderResponses(folders)})
+}
+
+// handleCreateFolder — POST /api/v1/libraries/{id}/folders
+func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeLibraryError(w, r, err)
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := readJSON(w, r, &body); err != nil {
+		writeDomainError(w, s.logger, requestIDOrEmpty(r), err)
+		return
+	}
+	if !s.requireCap(w, r, u, parentFolderKey(lib.ID, body.Path), authz.CapCreate) {
+		return
+	}
+	svc, cleanup, ok := s.openMediaService(w, r, lib)
+	if !ok {
+		return
+	}
+	defer cleanup()
+
+	folder, err := svc.CreateFolder(body.Path)
+	if err != nil {
+		s.writeMediaError(w, r, err)
+		return
+	}
+	writeJSON(w, s.logger, http.StatusCreated, map[string]any{"folder": toFolderResponse(folder)})
 }
 
 // handleListTrash — GET /api/v1/libraries/{id}/trash

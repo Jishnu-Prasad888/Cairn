@@ -40,7 +40,12 @@ import './LibrariesPage.css';
 /** What a probe found, phrased for a person choosing whether to open a path. */
 function describeProbe(probe: LibraryProbe): { tone: 'ok' | 'warn' | 'error'; lines: string[] } {
   if (!probe.path_exists) {
-    return { tone: 'error', lines: ['That path does not exist on this server.'] };
+    // Registering creates the folder (and any missing parents), so a path that
+    // does not exist yet is a valid choice, not an error.
+    return {
+      tone: 'ok',
+      lines: ['That folder does not exist yet. Adding the library will create it.'],
+    };
   }
   if (!probe.is_directory) {
     return { tone: 'error', lines: ['That path is a file, not a directory.'] };
@@ -233,7 +238,8 @@ function AddLibraryDialog({ onClose }: { onClose: () => void }) {
   };
 
   const described = probe ? describeProbe(probe) : null;
-  const blocked = probe !== null && (!probe.is_directory || probe.registered);
+  const blocked =
+    probe !== null && ((probe.path_exists && !probe.is_directory) || probe.registered);
 
   return (
     <Dialog

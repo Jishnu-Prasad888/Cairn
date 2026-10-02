@@ -207,6 +207,7 @@ func (s *Server) Handler() http.Handler {
 		// Media/files surface. Capabilities are enforced per resource inside
 		// each handler via requireCap.
 		mux.Handle("GET /api/v1/libraries/{id}/files", s.withAuth(allowAny, s.handleListFiles))
+		mux.Handle("GET /api/v1/libraries/{id}/files/counts", s.withAuth(allowAny, s.handleFileCounts))
 		mux.Handle("GET /api/v1/libraries/{id}/files/duplicates", s.withAuth(allowAny, s.handleListDuplicates))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAny, s.handleGetFile))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/download", s.withAuth(allowAny, s.handleDownloadFile))
@@ -227,6 +228,7 @@ func (s *Server) Handler() http.Handler {
 
 		// Folders and trash.
 		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAny, s.handleListFolders))
+		mux.Handle("POST /api/v1/libraries/{id}/folders", s.withAuth(allowAny, s.handleCreateFolder))
 		mux.Handle("GET /api/v1/libraries/{id}/trash", s.withAuth(allowAny, s.handleListTrash))
 
 		// Search.

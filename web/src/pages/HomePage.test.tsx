@@ -32,6 +32,13 @@ function setup(options: Options = {}) {
     (url) => (url.endsWith('/api/v1/health') ? json(health) : undefined),
     (url) => (url.endsWith('/api/v1/version') ? json(version) : undefined),
     (url) => {
+      if (url.endsWith('/api/v1/libraries/lib1/files/counts'))
+        return json({
+          counts: { photo: totals.photo ?? 2, video: totals.video ?? 0, other: totals.other ?? 7 },
+          albums: 1,
+          tags: 0,
+          favorites: 0,
+        });
       if (!url.includes('/api/v1/libraries/lib1/files')) return undefined;
       if (url.includes('type=photo')) {
         return json({ ...recentFiles, total: totals.photo ?? 2 });

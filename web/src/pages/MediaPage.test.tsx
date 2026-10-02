@@ -969,4 +969,53 @@ describe('MediaPage', () => {
     expect(await screen.findByTestId('file-grid')).toBeInTheDocument();
     expect(called(fetchMock, 'GET', '/api/v1/libraries/lib1/files?')).toBe(true);
   });
+
+  it('opens the new-folder dialog from the keyboard', async () => {
+    setup();
+    await screen.findByTestId('file-grid');
+    fireEvent.keyDown(window, { key: 'N', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId('new-folder-dialog')).toBeInTheDocument();
+  });
+
+  it('cuts with Ctrl+X and pastes with Ctrl+V into the current folder', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'POST' && url.includes('/files/f1/move')
+          ? json({ file: photo })
+          : undefined,
+    ]);
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.keyDown(window, { key: 'x', ctrlKey: true });
+    expect(await screen.findByTestId('clipboard-bar')).toHaveTextContent('1 file ready to move');
+
+    // Same folder: nothing to move. Go into a folder first.
+    fireEvent.click(screen.getByRole('button', { name: /2024/ }));
+    await waitFor(() => expect(called(fetchMock, 'GET', 'folder=2024')).toBe(true));
+    fireEvent.keyDown(window, { key: 'v', ctrlKey: true });
+    await waitFor(() => expect(called(fetchMock, 'POST', '/files/f1/move')).toBe(true));
+    expect(bodyOf(fetchMock, 'POST', '/files/f1/move')).toMatchObject({
+      new_path: '2024/IMG_0001.png',
+    });
+  });
+
+  it('focuses the search box with "/" and Ctrl+K', async () => {
+    setup();
+    await screen.findByTestId('file-grid');
+    const box = screen.getByTestId('media-search');
+    fireEvent.keyDown(window, { key: '/' });
+    expect(box).toHaveFocus();
+    box.blur();
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    expect(box).toHaveFocus();
+  });
+
+  it('clears the search with Escape', async () => {
+    setup();
+    await screen.findByTestId('file-grid');
+    const box = screen.getByTestId('media-search') as HTMLInputElement;
+    fireEvent.change(box, { target: { value: 'IMG' } });
+    fireEvent.keyDown(box, { key: 'Escape' });
+    await waitFor(() => expect(box.value).toBe(''));
+  });
 });
