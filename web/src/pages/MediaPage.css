@@ -1,435 +1,125 @@
-/* The shared media browser: toolbar, breadcrumbs, folders, grid/list, and the
-   selection bar. Photos, Videos, and Files all render this. */
+/* The media browser: toolbar, footer, and the drop target. */
 
 .media-page {
-  display: flex;
-  flex-direction: column;
+  position: relative;
   gap: var(--space-4);
-  padding: var(--space-5) var(--space-5) var(--space-7);
-  min-width: 0;
 }
 
 .media-toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--space-3);
+  min-height: var(--control-height-md);
+}
+
+.media-toolbar-spacer {
+  flex: 1;
 }
 
 .media-toolbar-actions {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
-.search-input {
-  min-width: 200px;
-  flex: 1 1 200px;
-  max-width: 320px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-  font: inherit;
-}
-
-.view-toggle {
-  display: inline-flex;
-  gap: var(--space-1);
-}
-
-.sort-control select {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-  font: inherit;
-}
-
-/* ----------------------------- breadcrumbs ---------------------------- */
-
-.breadcrumbs {
+.media-search {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.crumb-segment {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.crumb-sep {
-  color: var(--text-muted);
-}
-
-.crumb {
-  border: 0;
-  background: none;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  color: var(--primary);
-  font: inherit;
-  cursor: pointer;
-}
-
-.crumb[aria-current='page'] {
-  color: var(--text-primary);
-  font-weight: 600;
-  cursor: default;
-}
-
-.crumb.drag-over {
-  background: var(--accent-soft);
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
-}
-
-/* ------------------------------- folders ------------------------------ */
-
-.folder-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: var(--space-3);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.folder-card {
-  display: grid;
-  gap: var(--space-1);
-  width: 100%;
-  text-align: left;
-  padding: var(--space-3) var(--space-3);
-  border: 1px solid var(--border-subtle);
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding: 0 var(--space-3);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
   transition:
-    border-color 100ms ease,
-    box-shadow 100ms ease;
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.folder-card:hover {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-1);
+.media-search:focus-within {
+  border-color: var(--color-primary-ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 
-.folder-card.drag-over {
-  border-color: var(--primary);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--primary);
+.media-search input {
+  width: 180px;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none !important;
 }
 
-.folder-glyph {
-  font-size: 28px;
-  line-height: 1;
-}
-
-.folder-name {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.folder-count {
-  color: var(--text-muted);
-  font-size: 0.875rem;
-}
-
-/* ----------------------------- filter panel --------------------------- */
-
-.media-filters {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  padding: var(--space-4);
-  margin: 0;
-}
-
-.media-filters legend {
-  padding: 0 var(--space-2);
-  font-weight: 600;
-}
-
-.media-filter-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--space-3);
-}
-
-.media-filter-fields label {
-  display: grid;
-  gap: var(--space-1);
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-}
-
-.media-filter-fields input {
-  padding: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-  font: inherit;
-}
-
-.media-filters .button {
-  margin-top: var(--space-3);
-}
-
-/* ---------------------------- selection bar ---------------------------- */
-
-.selection-bar {
-  position: sticky;
-  top: 64px;
-  z-index: 10;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--selection);
-}
-
-.selection-count {
-  font-weight: 600;
-}
-
-.selection-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-/* -------------------------- upload affordance ------------------------- */
-
-.upload-label {
+.upload-button {
   position: relative;
-  overflow: hidden;
-  cursor: pointer;
 }
 
-.upload-input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  font-size: 0;
-}
-
-/* Focus the hidden input should still show a visible ring on the label. */
-.upload-label:focus-within {
-  outline: 2px solid var(--primary);
+.upload-button:focus-within {
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
-/* -------------------------------- list --------------------------------- */
-
-.file-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9375rem;
-}
-
-.file-table th,
-.file-table td {
-  text-align: left;
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
-  vertical-align: middle;
-}
-
-.file-table thead th {
-  color: var(--text-muted);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.file-row.selected {
-  background: var(--selection);
-}
-
-.file-table-name {
-  font-weight: 400;
-}
-
-.file-row-main {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  border: 0;
-  background: none;
-  padding: 0;
-  color: var(--text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.file-row-thumb {
-  width: 40px;
-  height: 40px;
-  flex: none;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--border-subtle);
-  display: grid;
-  place-items: center;
-  font-size: 20px;
-}
-
-.file-row-name {
-  overflow-wrap: anywhere;
-}
-
-/* ----------------------------- pagination ------------------------------ */
-
-.media-pagination {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-4) 0;
-}
-
-/* --------------------------------- trash -------------------------------- */
-
-/* The trash is a list, not a grid: the decision on each row is restore or erase
-   and both need to be reachable without opening anything. */
-.trash-list {
+.media-footer {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+.media-count {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 
-.trash-row {
+/* Dropping files from the desktop: a quiet outline, not a flash. */
+.media-page.is-dropping::after {
+  content: '';
+  position: absolute;
+  inset: var(--space-2);
+  border: 2px dashed var(--color-primary);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+  pointer-events: none;
+}
+
+.drop-overlay {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-7);
+  z-index: var(--z-dropdown);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.drop-overlay-card {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.trash-thumb {
-  width: 48px;
-  height: 48px;
-  flex: none;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--border-subtle);
-}
-
-.trash-glyph {
-  display: grid;
-  place-items: center;
-  font-size: 22px;
-}
-
-.trash-meta {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.trash-name {
-  border: 0;
-  background: none;
-  padding: 0;
-  color: var(--text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-
-.trash-name:hover {
-  color: var(--primary);
-  text-decoration: underline;
-}
-
-.trash-sub {
-  font-size: 0.8125rem;
-}
-
-.trash-actions {
-  display: flex;
-  flex: none;
-  gap: var(--space-2);
-}
-
-/* ------------------------- right-side actions ------------------------- */
-
-/* The viewer asks the browser to handle a file operation; the browser owns the
-   dialog because it is the one that knows the current selection. */
-.viewer-action-button {
-  flex: none;
-}
-
-@media (max-width: 640px) {
-  .search-input {
-    max-width: none;
-  }
-
-  .file-table thead {
-    display: none;
-  }
-
-  .file-table tbody tr {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--space-1) var(--space-3);
-  }
-
-  .file-table td,
-  .file-table th {
-    border: 0;
-    padding: 0;
-  }
-
-  .file-table td:nth-child(3),
-  .file-table td:nth-child(4),
-  .file-table td:nth-child(5) {
-    grid-column: 2;
-    color: var(--text-muted);
-    font-size: 0.875rem;
-  }
-
-  .trash-row {
-    flex-wrap: wrap;
-  }
-
-  .trash-actions {
-    width: 100%;
-    justify-content: flex-end;
-  }
-}
-
-.type-filter-select {
+  padding: var(--space-3) var(--space-5);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-on-primary);
+  background: var(--color-primary-strong);
   border-radius: var(--radius-pill);
-  padding-left: var(--space-4);
+  box-shadow: var(--shadow-3);
+}
+
+@media (max-width: 599px) {
+  .media-toolbar-actions {
+    width: 100%;
+  }
+
+  .media-search {
+    flex: 1;
+  }
+
+  .media-search input {
+    width: 100%;
+  }
 }
