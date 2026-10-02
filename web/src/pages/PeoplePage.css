@@ -1,257 +1,141 @@
-.people-page {
-  padding: var(--space-3) var(--space-3) var(--space-7);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
+/* People: round faces, names beneath, the way a photo library shows them. */
 
-.page-muted {
-  padding: var(--space-6);
-  color: var(--text-muted);
-  text-align: center;
-}
-
-.people-page select,
-.people-page button {
-  font: inherit;
-  border-radius: var(--radius-sm);
-}
-
-.people-page select {
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-}
-
-/* The circular person cover is a button too — exclude it so the filled
-   button style (and its padding) never leaks onto the avatar. */
-.people-page button:not(.link-button):not(.danger-button):not(.person-cover) {
-  padding: var(--space-2) var(--space-4);
-  background: var(--primary);
-  border: 1px solid transparent;
-  color: #fff;
-  cursor: pointer;
-}
-
-.people-page button:not(.link-button):not(.danger-button):not(.person-cover):hover {
-  background: var(--primary-hover);
-}
-
-.people-page button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.people-page .danger-button {
-  padding: var(--space-2) var(--space-4);
-  background: transparent;
-  border: 1px solid var(--danger, #b00020);
-  color: var(--danger, #b00020);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-
-.error-text {
-  color: var(--danger, #b00020);
-}
-
-.people-page .muted {
-  color: var(--text-muted);
-}
-
-.people-empty {
-  padding: var(--space-6);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-md, 8px);
-  color: var(--text-muted);
-}
-
-.people-empty code {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 var(--space-1);
-}
-
-.people-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.people-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.people-stats {
-  color: var(--text-muted);
-  font-size: 14px;
-}
-
-/* Google Photos–style people view: circular face avatars with the name
-   centered underneath and no card chrome. */
 .people-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: var(--space-4) var(--space-3);
-  padding-top: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--space-5) var(--space-4);
 }
 
 .person-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   text-align: center;
 }
 
-/* Scoped under .people-page so the avatar's shape/padding/background win
-   over the page-level button rules above. */
-.people-page .person-cover {
+.person-face {
+  display: grid;
+  place-items: center;
   width: 100%;
+  max-width: 132px;
   aspect-ratio: 1;
-  padding: 0;
-  background: var(--border-subtle);
-  border: none;
-  border-radius: 50%;
   overflow: hidden;
-  cursor: pointer;
-  transition: box-shadow 120ms ease;
+  color: var(--color-primary-ink);
+  text-decoration: none;
+  background: var(--color-fill-active);
+  border-radius: 50%;
+  transition: transform var(--duration-base) var(--ease-standard);
 }
 
-.people-page .person-cover:hover {
-  box-shadow: var(--shadow-2);
+.person-face:hover {
+  transform: scale(1.03);
 }
 
-.person-cover img {
+.person-face:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 3px;
+}
+
+.person-face img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
 }
 
-.person-cover-fallback {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
+.person-face-fallback {
   font-size: 40px;
-  color: var(--text-muted);
-  background: var(--border-subtle);
+  font-weight: var(--font-weight-medium);
 }
 
 .person-meta {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  max-width: 100%;
+  line-height: 1.3;
+}
+
+.person-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .person-count {
-  color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 
-.person-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-1);
+/* The options button sits on the face's corner and appears on hover. */
+.person-options {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-1);
+  opacity: 0;
 }
 
-.person-actions button {
-  font-size: 13px;
-  padding: var(--space-1) var(--space-2);
+.person-card:hover .person-options,
+.person-options:focus-visible,
+.person-options[aria-expanded='true'] {
+  opacity: 1;
 }
 
-.person-detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+@media (hover: none) {
+  .person-options {
+    opacity: 1;
+  }
 }
 
-.person-detail h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
+.person-skeleton {
+  aspect-ratio: 1;
+  border-radius: 50%;
 }
+
+/* ------------------------------ faces -------------------------------- */
 
 .face-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: var(--space-4);
 }
 
 .face-tile {
-  margin: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
+  margin: 0;
 }
 
-/* Faces are circular, matching the people avatars above. */
 .face-tile img {
-  width: 100%;
-  aspect-ratio: 1;
+  width: 96px;
+  height: 96px;
   object-fit: cover;
+  background: var(--color-fill-subtle);
   border-radius: 50%;
-  border: none;
-  background: var(--border-subtle);
 }
 
 .face-tile figcaption {
   display: flex;
-  justify-content: center;
-}
-
-.face-tile figcaption button,
-.face-tile figcaption select {
-  font-size: 12px;
-}
-
-.face-tile figcaption select {
-  padding: var(--space-1) var(--space-2);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
   width: 100%;
+}
+
+.face-tile select {
+  width: 100%;
+  font-size: var(--font-size-sm);
 }
 
 .people-notice {
-  color: var(--success);
-}
-
-/* Face tiles live inside a person card, so they span the whole card rather
-   than sitting in a page-level grid. */
-.person-faces {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  font-size: 13px;
-}
-
-.person-faces .face-grid {
-  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
-}
-
-.person-faces .face-tile figcaption {
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.person-faces .face-tile figcaption button {
-  font-size: 11px;
-  padding: 2px var(--space-1);
-}
-
-.people-page h2 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  color: var(--color-text-secondary);
 }

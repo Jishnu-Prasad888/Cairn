@@ -57,17 +57,15 @@ describe('TrashPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('lists what was removed, with the folder it came from', async () => {
+  it('shows what was removed as a grid, with a note that it is recoverable', async () => {
     setup();
 
     expect(await screen.findByRole('heading', { name: 'Trash' })).toBeInTheDocument();
-    const list = await screen.findByTestId('trash-list');
-    const rows = within(list).getAllByRole('listitem');
-    // A file at the root says so rather than showing an empty path.
-    expect(rows[0]).toHaveTextContent('IMG_0001.png');
-    expect(rows[0]).toHaveTextContent('Library root · 2.0 KB');
-    expect(rows[1]).toHaveTextContent('clip.mp4');
-    expect(rows[1]).toHaveTextContent('clips · 4.0 MB');
+    const grid = await screen.findByTestId('trash-list');
+    expect(within(grid).getByRole('button', { name: 'IMG_0001.png' })).toBeInTheDocument();
+    expect(within(grid).getByRole('button', { name: 'clip.mp4' })).toBeInTheDocument();
+    expect(screen.getByText('2 items')).toBeInTheDocument();
+    expect(screen.getByText(/still on disk/)).toBeInTheDocument();
   });
 
   it('says the trash is empty rather than showing a bare list', async () => {
@@ -87,7 +85,8 @@ describe('TrashPage', () => {
     ]);
 
     const list = await screen.findByTestId('trash-list');
-    fireEvent.click(within(list).getByTestId('restore-f1'));
+    fireEvent.click(within(list).getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.click(await screen.findByTestId('selection-restore'));
 
     await waitFor(() => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/files/f1/restore')).toBe(true);
@@ -107,10 +106,12 @@ describe('TrashPage', () => {
     ]);
 
     const list = await screen.findByTestId('trash-list');
-    fireEvent.click(within(list).getByTestId('restore-f1'));
+    fireEvent.click(within(list).getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.click(await screen.findByTestId('selection-restore'));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The file is no longer on disk.');
-    expect(screen.getByTestId('trash-list')).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn't restore/)).toBeInTheDocument();
+    // The row is still there once the list has been re-read.
+    expect(await screen.findByTestId('trash-list')).toBeInTheDocument();
   });
 
   it('asks before erasing for good, and names the file', async () => {
@@ -122,11 +123,12 @@ describe('TrashPage', () => {
     ]);
 
     const list = await screen.findByTestId('trash-list');
-    fireEvent.click(within(list).getByTestId('erase-f2'));
+    fireEvent.click(within(list).getByRole('button', { name: 'Select clip.mp4' }));
+    fireEvent.click(await screen.findByTestId('selection-erase'));
 
     const dialog = await screen.findByTestId('erase-dialog');
     // The one irreversible action in the product says so, and names its target.
-    expect(within(dialog).getByText('clip.mp4')).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: /clip\.mp4/ })).toBeInTheDocument();
     expect(within(dialog).getByText(/cannot be undone/)).toBeInTheDocument();
     expect(called(fetchMock, 'DELETE', '/permanent')).toBe(false);
 
@@ -146,7 +148,8 @@ describe('TrashPage', () => {
     ]);
 
     const list = await screen.findByTestId('trash-list');
-    fireEvent.click(within(list).getByTestId('erase-f2'));
+    fireEvent.click(within(list).getByRole('button', { name: 'Select clip.mp4' }));
+    fireEvent.click(await screen.findByTestId('selection-erase'));
     const dialog = await screen.findByTestId('erase-dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete forever' }));
 
@@ -165,7 +168,8 @@ describe('TrashPage', () => {
     ]);
 
     const list = await screen.findByTestId('trash-list');
-    fireEvent.click(within(list).getByTestId('erase-f2'));
+    fireEvent.click(within(list).getByRole('button', { name: 'Select clip.mp4' }));
+    fireEvent.click(await screen.findByTestId('selection-erase'));
     const dialog = await screen.findByTestId('erase-dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete forever' }));
 

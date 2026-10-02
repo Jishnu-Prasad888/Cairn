@@ -66,11 +66,10 @@ describe('MemoriesPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('loads libraries and lists memories', async () => {
+  it('lists memories as cards', async () => {
     setup();
 
     expect(await screen.findByText('Trip to Rye')).toBeInTheDocument();
-    expect(screen.getByLabelText('Library')).toBeInTheDocument();
   });
 
   it('shows an empty state and creates a memory', async () => {
@@ -83,6 +82,31 @@ describe('MemoriesPage', () => {
     expect(await screen.findByTestId('memory-editor')).toBeInTheDocument();
     expect(screen.getByLabelText('Memory title')).toHaveValue('Untitled memory');
     expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/memories')).toBe(true);
+  });
+
+  it('offers write, split, and preview layouts', async () => {
+    setup();
+    await openEditor();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Write' }));
+    expect(screen.getByLabelText('Memory body')).toBeVisible();
+    expect(screen.getByLabelText('Markdown preview')).not.toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(screen.getByLabelText('Memory body')).not.toBeVisible();
+    expect(screen.getByLabelText('Markdown preview')).toBeVisible();
+  });
+
+  it('opens a memory straight from its address', async () => {
+    mockApi([
+      (url) => (/\/memories\/mem1\/versions$/.test(url) ? json(versions) : undefined),
+      (url) =>
+        /\/libraries\/lib1\/memories$/.test(url) ? json({ memories: [memory] }) : undefined,
+    ]);
+    renderPage(<MemoriesPage />, { route: '/memories/mem1' });
+
+    expect(await screen.findByTestId('memory-editor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Memory title')).toHaveValue('Trip to Rye');
   });
 
   it('opens the editor and renders a markdown preview', async () => {
@@ -136,7 +160,7 @@ describe('MemoriesPage', () => {
     fireEvent.change(body, { target: { value: 'Conflicting edit.' } });
 
     expect(
-      await screen.findByText('Save failed: Someone else edited this.', undefined, {
+      await screen.findByText("Couldn't save: Someone else edited this.", undefined, {
         timeout: 3000,
       }),
     ).toBeInTheDocument();
@@ -146,12 +170,10 @@ describe('MemoriesPage', () => {
     setup();
     await openEditor();
 
-    const versionSelect = await screen.findByLabelText(/Restore an earlier version/);
-    await waitFor(() => {
-      expect(versionSelect).toHaveTextContent('v1');
-    });
-
-    fireEvent.change(versionSelect, { target: { value: '1' } });
+    const history = screen.getByRole('button', { name: 'History' });
+    await waitFor(() => expect(history).toBeEnabled());
+    fireEvent.click(history);
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Version 1/ }));
     expect(screen.getByLabelText('Memory body')).toHaveValue('Draft one.');
   });
 
@@ -219,6 +241,7 @@ describe('MemoryEditor ref picker', () => {
     body.focus();
     body.setSelectionRange(5, 5);
 
+    fireEvent.click(screen.getByRole('button', { name: /Link photos/ }));
     fireEvent.change(screen.getByTestId('ref-search'), { target: { value: 'beach' } });
     const result = await screen.findByTestId('ref-result-f9');
     fireEvent.click(result);
@@ -238,6 +261,7 @@ describe('MemoryEditor ref picker', () => {
     fireEvent.click(screen.getByRole('button', { name: /Trip to Rye/ }));
     await screen.findByTestId('memory-editor');
 
+    fireEvent.click(screen.getByRole('button', { name: /Link photos/ }));
     fireEvent.click(screen.getByTestId('ref-kind-tag'));
     fireEvent.change(screen.getByTestId('ref-search'), { target: { value: 'zzz' } });
 

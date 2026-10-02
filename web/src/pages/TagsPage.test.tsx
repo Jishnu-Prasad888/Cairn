@@ -85,12 +85,11 @@ describe('TagsPage', () => {
     expect(await screen.findByTestId('tags-empty')).toBeInTheDocument();
   });
 
-  it('offers the library picker and prompts for a name instead of window.prompt', async () => {
+  it('prompts for a name in a dialog instead of window.prompt', async () => {
     const fetchMock = setup();
     const promptSpy = vi.spyOn(window, 'prompt');
 
     await screen.findByTestId('tags-grid');
-    expect(screen.getByLabelText('Library')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New tag' }));
     const dialog = await screen.findByTestId('new-tag-dialog');
@@ -161,7 +160,8 @@ describe('TagsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /vacation/ }));
     await screen.findByTestId('file-grid');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove tag vacation from IMG_0001.png' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.click(await screen.findByTestId('selection-untag'));
 
     await waitFor(() => {
       expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f1/tags/t1')).toBe(true);

@@ -1,254 +1,170 @@
+/* Home: the newest photos first, then what has been made from them. */
+
 .home {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: var(--space-4) var(--space-4) var(--space-6);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-4);
-  text-align: left;
+  gap: var(--space-6);
 }
 
-.home-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
+.home-hello {
+  padding-top: var(--space-2);
 }
 
-.home-section-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.home-heading {
+/* The greeting is a branded moment, so it is set in the brand hand. */
+.home-greeting {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-family: var(--font-brand);
+  font-size: var(--font-size-3xl);
+  font-weight: 400;
+  color: var(--color-text-primary);
 }
 
-.home-section-head .link-button {
-  font-size: 0.85rem;
+.home-skeleton-title {
+  width: 160px;
+  height: 18px;
 }
 
-/* -------------------------------- tiles ------------------------------- */
+/* ------------------------------- people ------------------------------- */
 
-.tone-clay {
-  --tone: var(--primary);
-}
-.tone-blue {
-  --tone: var(--blue);
-}
-.tone-green {
-  --tone: var(--green);
-}
-.tone-yellow {
-  --tone: var(--yellow);
-}
-.tone-pink {
-  --tone: var(--pink);
-}
-
-.home-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
-  gap: var(--space-2);
-}
-
-.home-tile {
+.home-people {
   display: flex;
+  gap: var(--space-5);
+  margin: 0;
+  padding: var(--space-1) 2px var(--space-2);
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.home-person {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  color: var(--text-primary);
+  width: 96px;
+  color: var(--color-text-primary);
   text-decoration: none;
-  background: var(--surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  transition: border-color 120ms ease;
 }
 
-.home-tile:hover,
-.home-tile:focus-visible {
-  border-color: var(--tone, var(--primary));
-}
-
-.home-tile-icon {
+.home-person-face {
   display: grid;
   place-items: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  color: var(--tone, var(--primary));
-  background: color-mix(in srgb, var(--tone, var(--primary)) 16%, var(--surface));
-  border-radius: var(--radius-sm);
-}
-
-.home-tile-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.home-tile-label {
-  flex: 1;
-  min-width: 0;
+  width: 88px;
+  height: 88px;
   overflow: hidden;
-  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  background: var(--color-fill-subtle);
+  border-radius: 50%;
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+
+.home-person:hover .home-person-face {
+  transform: scale(1.04);
+}
+
+.home-person-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-person-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.home-tile-count {
-  font-size: 0.95rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
-}
+/* ------------------------------- albums ------------------------------- */
 
-/* ------------------------------- columns ------------------------------ */
-
-.home-columns {
+.home-albums {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: var(--space-5);
-  align-items: start;
-}
-
-/* ------------------------------- recent ------------------------------- */
-
-.home-recent {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.home-recent a {
-  display: block;
+@media (max-width: 599px) {
+  .home-albums {
+    grid-auto-flow: column;
+    grid-auto-columns: 42%;
+    grid-template-columns: none;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
 }
 
-.home-recent img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--border-subtle);
-  transition: filter 120ms ease;
-}
+/* ------------------------------ memories ------------------------------ */
 
-.home-recent a:hover img {
-  filter: brightness(0.92);
-}
-
-.home-memory-list {
-  display: flex;
-  flex-direction: column;
+.home-memories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* A memory is a note, not a file: warm paper with a soft edge. */
 .home-memory {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-1);
-  color: var(--text-primary);
+  flex-direction: column;
+  gap: var(--space-1);
+  height: 100%;
+  padding: var(--space-4);
+  color: var(--color-text-primary);
   text-decoration: none;
-  border-bottom: 1px solid var(--border-subtle);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
 }
 
-.home-memory:hover .home-memory-title {
-  color: var(--primary);
-}
-
-.home-memory-title {
-  overflow: hidden;
-  font-size: 0.9rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.home-memory:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+  border-color: var(--color-border);
 }
 
 .home-memory-date {
-  flex-shrink: 0;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.02em;
+  color: var(--color-primary-ink);
 }
 
-/* ------------------------------- server ------------------------------- */
-
-.home-server {
-  padding-top: var(--space-3);
-  font-size: 0.8rem;
-  border-top: 1px solid var(--border-subtle);
+.home-memory-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
 }
 
-.home-server p {
-  margin: 0;
+.home-memory-excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
-.home-server-rows {
+.home-memory-invite {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-5);
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.home-memory-invite p {
   margin: 0;
-}
-
-.status-row {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.status-row dt {
-  color: var(--text-muted);
-}
-
-.status-row dd {
-  margin: 0;
-  font-weight: 500;
-}
-
-.muted {
-  color: var(--text-muted);
-}
-
-.error-text {
-  color: var(--danger);
-}
-
-.link-button {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--primary);
-  font: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.home-footer p {
-  margin: 0;
-  font-size: 14px;
-  text-align: center;
-}
-
-@media (max-width: 860px) {
-  .home-columns {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 640px) {
-  .home {
-    padding: var(--space-5) var(--space-3) var(--space-6);
-  }
-
-  .home-recent {
-    grid-template-columns: repeat(3, 1fr);
-  }
+  color: var(--color-text-secondary);
 }

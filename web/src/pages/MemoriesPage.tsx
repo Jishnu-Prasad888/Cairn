@@ -10,9 +10,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 
-import { useAuth } from '../auth/authContext';
-import { useLibraryGate } from '../api/libraries';
 import { useLibraryResource } from '../api/resources';
 import {
   createMemory,
@@ -21,20 +20,23 @@ import {
   listMemoryVersions,
   updateMemory,
 } from '../api/queries';
-import type { Memory, MemoryVersion } from '../api/types';
+import type { Library, Memory, MemoryVersion } from '../api/types';
 import { ConfirmDialog } from '../components/Dialog';
-import LibraryPicker from '../components/LibraryPicker';
+import { LibraryGatePage } from '../components/LibraryGatePage';
+import { thumbnailUrl } from '../components/media';
 import { RefPicker } from '../components/RefPicker';
 import {
   EmptyState,
   ErrorState,
   LibraryOfflineNotice,
-  LoadingState,
-  NoLibrariesState,
+  ListSkeleton,
   PageHeader,
 } from '../components/States';
+import { Icon } from '../components/ui/Icon';
+import { Menu, useMenuButton } from '../components/ui/Menu';
 import { insertRefAtCursor } from '../lib/editor';
-import { extractRefs, renderMarkdown } from '../lib/markdown';
+import { formatDate as formatDay } from '../lib/dates';
+import { extractExcerpt, extractRefs, renderMarkdown } from '../lib/markdown';
 import './MemoriesPage.css';
 
 function formatDate(iso?: string): string {
@@ -49,17 +51,43 @@ interface SaveStatus {
   message?: string | undefined;
 }
 
+type EditorMode = 'write' | 'split' | 'preview';
+
+const MODE_KEY = 'cairn.memory.mode';
+
+function readMode(): EditorMode {
+  try {
+    const stored = localStorage.getItem(MODE_KEY);
+    return stored === 'write' || stored === 'preview' ? stored : 'split';
+  } catch {
+    return 'split';
+  }
+}
+
 function MemoryEditor({
   libraryId,
   memory,
   onDeleted,
   onChanged,
+  onBack,
 }: {
   libraryId: string;
   memory: Memory;
   onDeleted: (id: string) => void;
   onChanged: (memory: Memory) => void;
+  onBack: () => void;
 }) {
+  const [mode, setModeState] = useState<EditorMode>(readMode);
+  const setMode = (next: EditorMode) => {
+    setModeState(next);
+    try {
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      // Not remembered.
+    }
+  };
+  const versionsMenu = useMenuButton();
+  const [linking, setLinking] = useState(false);
   const [draft, setDraft] = useState({ title: memory.title, body: memory.body });
   const [saved, setSaved] = useState<SaveStatus>({ kind: 'idle' });
   const [versions, setVersions] = useState<MemoryVersion[]>([]);
@@ -137,6 +165,14 @@ function MemoryEditor({
   return (
     <div className="editor" data-testid="memory-editor">
       <div className="editor-bar">
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onBack}
+          aria-label="Back to memories"
+        >
+          <Icon name="arrow-left" />
+        </button>
         <input
           className="editor-title"
           aria-label="Memory title"
@@ -147,74 +183,114 @@ function MemoryEditor({
         <span className={`save-status save-status-${saved.kind}`} role="status" aria-live="polite">
           {saved.kind === 'saving' && 'Saving…'}
           {saved.kind === 'saved' && 'Saved'}
-          {saved.kind === 'error' && `Save failed: ${saved.message ?? ''}`}
+          {saved.kind === 'error' && `Couldn't save: ${saved.message ?? ''}`}
           {saved.kind === 'idle' && 'Draft'}
-        </span>
-        <span className="save-status" title="Keyboard shortcuts">
-          ⌘S saves · ⌃Z undoes
         </span>
       </div>
 
-      <RefPicker libraryId={libraryId} onInsert={insertRef} />
+      <div className="editor-toolbar">
+        <div className="segmented" role="group" aria-label="Editor layout">
+          {(['write', 'split', 'preview'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={mode === m ? 'segmented-item active' : 'segmented-item'}
+              aria-pressed={mode === m}
+              onClick={() => setMode(m)}
+            >
+              {m === 'write' ? 'Write' : m === 'split' ? 'Split' : 'Preview'}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className={linking ? 'button active' : 'button'}
+          aria-expanded={linking}
+          aria-controls="memory-ref-picker"
+          onClick={() => setLinking((v) => !v)}
+        >
+          <Icon name="link" />
+          Link photos, albums, people
+        </button>
+        <div className="editor-toolbar-end">
+          <button
+            type="button"
+            className="button ghost-button"
+            aria-haspopup="menu"
+            aria-expanded={versionsMenu.open}
+            onClick={versionsMenu.toggle}
+            disabled={versions.length === 0}
+          >
+            <Icon name="clock" />
+            History
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => setConfirmingDelete(true)}
+            aria-label="Delete memory"
+            title="Delete memory"
+            data-testid="delete-memory"
+          >
+            <Icon name="trash" />
+          </button>
+        </div>
+      </div>
 
-      <div className="editor-split">
+      {linking && (
+        <div id="memory-ref-picker">
+          <RefPicker libraryId={libraryId} onInsert={insertRef} />
+        </div>
+      )}
+
+      <div className={`editor-split mode-${mode}`}>
         <textarea
           ref={textareaRef}
           className="editor-source"
           aria-label="Memory body"
+          hidden={mode === 'preview'}
           value={draft.body}
           onChange={(e) => setDraft({ ...draft, body: e.target.value })}
           placeholder={
-            'Write in Markdown…\n\nUse the picker above to link to photos, albums, or people.'
+            'Write in Markdown…\n\nLink photos, albums, and people with the button above.'
           }
         />
         <div
-          className="editor-preview"
+          className="editor-preview markdown"
           aria-label="Markdown preview"
+          hidden={mode === 'write'}
           dangerouslySetInnerHTML={{ __html: preview.html }}
         />
       </div>
-      <p className="word-count">{wordCount} words</p>
 
       <div className="editor-footer">
-        <div className="ref-chips">
+        <div className="ref-chips" aria-label="Linked">
           {refs.map((ref) => (
             <span className={`ref-chip ref-chip-${ref.type}`} key={`${ref.type}:${ref.id}`}>
               {ref.label || `${ref.type}:${ref.id}`}
             </span>
           ))}
-          {refs.length === 0 && <span className="muted">No references yet.</span>}
+          {refs.length === 0 && <span className="muted">Nothing linked yet.</span>}
         </div>
-
-        <div className="editor-actions">
-          <span className="versions-label">Versions</span>
-          <select
-            aria-label="Restore an earlier version"
-            value=""
-            onChange={(e) => {
-              const v = versions.find((x) => String(x.version) === e.target.value);
-              if (v) setDraft({ title: v.title, body: v.body });
-            }}
-          >
-            <option value="" disabled>
-              Restore… ({versions.length})
-            </option>
-            {versions.map((v) => (
-              <option key={v.version} value={String(v.version)}>
-                v{v.version} · {formatDate(v.saved_at)}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="danger-button"
-            onClick={() => setConfirmingDelete(true)}
-            data-testid="delete-memory"
-          >
-            Delete
-          </button>
-        </div>
+        <p className="word-count">
+          {wordCount} {wordCount === 1 ? 'word' : 'words'}
+        </p>
       </div>
+
+      {versionsMenu.anchor && (
+        <Menu
+          anchor={versionsMenu.anchor}
+          align="end"
+          label="Restore an earlier version"
+          onClose={versionsMenu.close}
+          items={versions.map((v) => ({
+            id: String(v.version),
+            label: `Version ${v.version} · ${formatDate(v.saved_at)}`,
+            icon: 'restore',
+            onSelect: () => setDraft({ title: v.title, body: v.body }),
+          }))}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmingDelete}
@@ -238,169 +314,231 @@ function MemoryEditor({
 }
 
 export default function MemoriesPage() {
-  const gate = useLibraryGate();
-  const { user } = useAuth();
+  return (
+    <LibraryGatePage title="Memories" className="memories-page">
+      {(library) => <Memories library={library} />}
+    </LibraryGatePage>
+  );
+}
+
+/** The memory id in `/memories/:id`, read from the path so the page works in or out of `<Routes>`. */
+function useMemoryIdFromPath(): string | null {
+  const { pathname } = useLocation();
+  return matchPath('/memories/:memoryId', pathname)?.params.memoryId ?? null;
+}
+
+function Memories({ library }: { library: Library }) {
+  const libraryId = library.id;
+  const navigate = useNavigate();
+  const memoryId = useMemoryIdFromPath();
 
   /**
-   * The open memory is held, not derived by id alone. A memory created here is
-   * not in the list until the list reloads, and resolving purely by id made the
-   * editor close the instant you created something — the exact moment you most
-   * want it open. The list copy still wins once it arrives, so an external edit
-   * shows up.
+   * A memory created here is not in the list until it reloads; holding it
+   * keeps the editor open at the exact moment you most want it. The list copy
+   * wins once it arrives, so an edit made elsewhere shows up.
    */
-  const [active, setActive] = useState<Memory | null>(null);
+  const [created, setCreated] = useState<Memory | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [memFilter, setMemFilter] = useState('');
+  const [filter, setFilter] = useState('');
 
   const memories = useLibraryResource<Memory[]>(
-    useCallback(async (libraryId: string) => (await listMemories(libraryId)).memories ?? [], []),
+    useCallback(async (id: string) => (await listMemories(id)).memories ?? [], []),
   );
 
-  const activeId = active?.id ?? null;
-  const activeMemory = useMemo(
-    () => (activeId ? (memories.data?.find((m) => m.id === activeId) ?? active) : null),
-    [active, activeId, memories.data],
-  );
+  const activeMemory = useMemo(() => {
+    if (!memoryId) return null;
+    return (
+      memories.data?.find((m) => m.id === memoryId) ?? (created?.id === memoryId ? created : null)
+    );
+  }, [memoryId, memories.data, created]);
 
-  const visibleMemories =
-    memories.data?.filter(
-      (m) => memFilter === '' || m.title.toLowerCase().includes(memFilter.toLowerCase()),
-    ) ?? [];
+  const sorted = useMemo(
+    () =>
+      [...(memories.data ?? [])]
+        .filter((m) => filter === '' || m.title.toLowerCase().includes(filter.toLowerCase()))
+        .sort((a, b) =>
+          (b.memory_date ?? b.updated_at).localeCompare(a.memory_date ?? a.updated_at),
+        ),
+    [memories.data, filter],
+  );
 
   const create = () => {
-    if (gate.kind !== 'ready') return;
     setCreating(true);
     setCreateError(null);
-    createMemory(gate.libraryId, {
+    createMemory(libraryId, {
       title: 'Untitled memory',
       body: '# New memory\n\nWrite something worth remembering…',
     })
       .then((resp) => {
-        setActive(resp.memory);
+        setCreated(resp.memory);
         memories.reload();
+        navigate(`/memories/${resp.memory.id}`);
       })
       .catch((e: unknown) => setCreateError(e instanceof Error ? e.message : String(e)))
       .finally(() => setCreating(false));
   };
 
-  if (gate.kind === 'loading') {
-    return (
-      <main className="memories-page">
-        <LoadingState label="Loading libraries…" />
-      </main>
-    );
-  }
+  const offline = library.status === 'offline';
 
-  const header = (
-    <PageHeader
-      title="Memories"
-      subtitle="Long-form notes written in Markdown, with links to the media they are about."
-      controls={
-        <>
-          <LibraryPicker />
-          <button
-            type="button"
-            className="button primary-button"
-            onClick={create}
-            disabled={creating || gate.kind !== 'ready'}
-            data-testid="new-memory"
-          >
-            {creating ? 'Creating…' : 'New memory'}
-          </button>
-        </>
-      }
-    />
-  );
-
-  if (gate.kind === 'error') {
+  if (memoryId && activeMemory) {
     return (
-      <main className="memories-page">
-        {header}
-        <ErrorState message={gate.message} onRetry={memories.reload} />
-      </main>
-    );
-  }
-
-  if (gate.kind === 'empty') {
-    return (
-      <main className="memories-page">
-        {header}
-        <NoLibrariesState isAdmin={user?.role === 'admin'} />
+      <main className="page memories-page memories-editing">
+        <MemoryEditor
+          key={activeMemory.id}
+          libraryId={libraryId}
+          memory={activeMemory}
+          onBack={() => navigate('/memories')}
+          onDeleted={() => {
+            setCreated(null);
+            memories.reload();
+            navigate('/memories');
+          }}
+          onChanged={(memory) => {
+            setCreated(memory);
+            memories.reload();
+          }}
+        />
       </main>
     );
   }
 
   return (
-    <main className="memories-page">
-      {header}
+    <main className="page memories-page">
+      <PageHeader
+        title="Memories"
+        subtitle={
+          memories.data && memories.data.length > 0
+            ? `${memories.data.length} ${memories.data.length === 1 ? 'memory' : 'memories'}`
+            : undefined
+        }
+        controls={
+          !offline && (
+            <button
+              type="button"
+              className="button primary-button"
+              onClick={create}
+              disabled={creating}
+              data-testid="new-memory"
+            >
+              <Icon name="edit" />
+              {creating ? 'Creating…' : 'New memory'}
+            </button>
+          )
+        }
+      />
 
-      {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
-      {memories.error && <ErrorState message={memories.error} onRetry={memories.reload} />}
+      {offline && <LibraryOfflineNotice library={library} />}
+      {memories.error && (
+        <ErrorState
+          message={memories.error}
+          onRetry={memories.reload}
+          title="Couldn't load memories"
+        />
+      )}
       {createError && (
         <p className="error-text" role="alert">
           {createError}
         </p>
       )}
-      {memories.loading && <LoadingState label="Loading memories…" />}
+      {memories.loading && <ListSkeleton rows={4} />}
 
-      <div className="memories-layout" data-testid="memories-layout">
-        <nav className="memory-list" aria-label="Memories">
-          <div className="memory-list-header">
-            <span className="memory-list-count">{memories.data?.length ?? 0} memories</span>
+      {memoryId && memories.data && !activeMemory && (
+        <EmptyState title="Memory not found" icon="memory" testId="memory-missing">
+          <p>It may have been deleted.</p>
+        </EmptyState>
+      )}
+
+      {memories.data !== null && memories.data.length === 0 && (
+        <EmptyState
+          title="No memories yet"
+          testId="memories-empty"
+          icon="memory"
+          action={
+            !offline && (
+              <button type="button" className="button primary-button" onClick={create}>
+                Write your first memory
+              </button>
+            )
+          }
+        >
+          <p>
+            A memory is a note about something that mattered — a trip, a year, a person — with the
+            photos it is about.
+          </p>
+        </EmptyState>
+      )}
+
+      {memories.data !== null && memories.data.length > 0 && (
+        <>
+          <div className="memory-filter">
+            <Icon name="search" size={18} />
             <input
-              className="memory-filter-input"
               type="search"
-              placeholder="Filter memories…"
-              value={memFilter}
-              onChange={(e) => setMemFilter(e.target.value)}
+              aria-label="Filter memories"
+              placeholder="Filter memories"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
             />
           </div>
-          {visibleMemories.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className={m.id === activeId ? 'memory-row active' : 'memory-row'}
-              aria-current={m.id === activeId ? 'true' : undefined}
-              onClick={() => setActive(m)}
-            >
-              <span className="memory-row-title">{m.title}</span>
-              <span className="memory-row-date">{formatDate(m.updated_at)}</span>
-            </button>
-          ))}
-          {memories.data !== null && memories.data.length === 0 && (
-            <EmptyState title="No memories yet" testId="memories-empty">
-              <p className="muted">
-                A memory is a note you write about something — a trip, a year, a person. Write it in
-                Markdown and link to the photos it is about.
-              </p>
-            </EmptyState>
-          )}
-        </nav>
-
-        <section className="editor-pane">
-          {activeMemory && (
-            <MemoryEditor
-              key={activeMemory.id}
-              libraryId={gate.libraryId}
-              memory={activeMemory}
-              onDeleted={() => {
-                setActive(null);
-                memories.reload();
-              }}
-              onChanged={(memory) => {
-                setActive(memory);
-                memories.reload();
-              }}
-            />
-          )}
-          {!activeMemory && (
-            <div className="editor-empty">
-              <p className="muted">Select a memory to edit, or create a new one.</p>
-            </div>
-          )}
-        </section>
-      </div>
+          <ul className="memory-grid" data-testid="memories-layout" aria-label="Memories">
+            {sorted.map((m) => (
+              <li key={m.id}>
+                <MemoryCard
+                  libraryId={libraryId}
+                  memory={m}
+                  onOpen={() => navigate(`/memories/${m.id}`)}
+                />
+              </li>
+            ))}
+          </ul>
+          {sorted.length === 0 && <p className="muted">No memory titles match “{filter}”.</p>}
+        </>
+      )}
     </main>
+  );
+}
+
+/** A memory as a page from a journal: its first photo, date, title, and opening lines. */
+function MemoryCard({
+  libraryId,
+  memory,
+  onOpen,
+}: {
+  libraryId: string;
+  memory: Memory;
+  onOpen: () => void;
+}) {
+  const refs = useMemo(() => extractRefs(memory.body), [memory.body]);
+  const media = refs.filter((r) => r.type === 'media');
+  const cover = media[0]?.id;
+  return (
+    <button type="button" className="memory-card" onClick={onOpen}>
+      {cover && (
+        <span className="memory-card-cover">
+          <img
+            src={thumbnailUrl(libraryId, { id: cover })}
+            alt=""
+            loading="lazy"
+            onError={(event) => {
+              (event.currentTarget.parentElement as HTMLElement).hidden = true;
+            }}
+          />
+        </span>
+      )}
+      <span className="memory-card-body">
+        <span className="memory-card-date">
+          {formatDay(memory.memory_date ?? memory.updated_at)}
+        </span>
+        <span className="memory-card-title">{memory.title || 'Untitled memory'}</span>
+        <span className="memory-card-excerpt">{extractExcerpt(memory.body, 180)}</span>
+        {media.length > 0 && (
+          <span className="memory-card-meta">
+            <Icon name="photo" size={14} />
+            {media.length} {media.length === 1 ? 'photo' : 'photos'}
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
