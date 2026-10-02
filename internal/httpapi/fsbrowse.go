@@ -140,10 +140,7 @@ func parseMounts(sc *bufio.Scanner, have []fsDir) []fsDir {
 func hiddenMount(p string) bool {
 	for _, prefix := range []string{"/proc", "/sys", "/dev", "/snap", "/boot", "/var/lib", "/run"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
-			if strings.HasPrefix(p, "/run/media") {
-				return false
-			}
-			return true
+			return !strings.HasPrefix(p, "/run/media")
 		}
 	}
 	return false
