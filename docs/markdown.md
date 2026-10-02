@@ -1,24 +1,48 @@
 # Markdown
 
-This documents the Markdown dialect used by Cairn memories. The dialect is
-implemented in the web editor's renderer and the Go reference parser
-(`internal/markdown`), and is versioned with the memory editor.
+This documents the Markdown dialect used by the text blocks of Cairn memories
+([memories.md](memories.md)). Markdown is the canonical content: the server
+stores it verbatim and never stores HTML. The dialect is implemented in the
+web renderer (`web/src/lib/markdown.ts`) and the Go reference parser
+(`internal/markdown`).
 
 ## Standard Markdown subset
 
 Cairn renders a safe, bounded subset of CommonMark:
 
 - ATX headings (`#` to `######`)
-- paragraphs and hard breaks
-- unordered (`- `) and ordered (`1. `) lists
-- blockquotes (`> `)
-- fenced code blocks (```` ``` ````)
-- inline code, bold, and italic
-- links `[text](url)` and safe schemes only (`http:`, `https:`, `mailto:`)
-- thematic breaks (`---`)
+- paragraphs; a single newline inside a paragraph is a line break
+- `**bold**`, `__bold__`, `*italic*`, `_italic_` (not inside words, so
+  `snake_case` stays literal), `~~strikethrough~~`, `` `inline code` ``
+- unordered (`- `, `* `, `+ `) and ordered (`1. `) lists, nested by
+  indentation
+- task lists: `- [ ] todo`, `- [x] done`
+- blockquotes (`> `), including multi-paragraph quotes
+- fenced code blocks (```` ``` ```` or `~~~`) with an optional language
+- tables with a header separator row and `:--`, `:-:`, `--:` alignment
+- links `[text](url)` and autolinks `<https://…>`
+- thematic breaks (`---`, `***`, `___`)
 
-Raw HTML is **escaped, never rendered**. Any other Markdown extension renders
-as escaped text rather than being dropped.
+## Safety
+
+- Raw HTML is **escaped, never rendered**; any unsupported syntax shows as
+  escaped text rather than being dropped.
+- Link targets are limited to `http:`, `https:`, `mailto:`, `#fragment` and
+  relative paths; anything else (`javascript:`, `data:`, protocol-relative
+  `//host`) becomes `#`. Links get `rel="noopener noreferrer"`.
+- Markdown images `![alt](url)` render as a **link**, never as `<img>`, so a
+  memory cannot make a reader's browser fetch an arbitrary remote URL
+  (tracking pixels, mixed content). Photos belong in image blocks.
+- Code spans and fence contents are escaped and never receive inline
+  formatting; a fence's language is reduced to a class name.
+- Reference labels are escaped.
+
+## Live editing
+
+The editor highlights Markdown in place while typing
+(`highlightMarkdown`): the editable text is always exactly the source, and
+markers such as `##`, `**` or `](url)` are wrapped so they can be hidden
+while a block is not focused. Paste and drop insert plain text only.
 
 ## Internal references
 
@@ -52,10 +76,11 @@ Rules:
 Users normally create references through the editor picker; hand-written links
 have the same syntax so documents remain portable.
 
-## Media embedding
+## Media in memories
 
-Not yet implemented. A future phase will render `![[media:<id>]]` as an inline
-thumbnail grid, video player, or download chip.
+Photos and videos are not embedded in Markdown. They live in **image blocks**
+between text blocks, with layouts, captions and slideshows — see
+[memories.md](memories.md). `[[media:<id>]]` remains a link.
 
 ## Extensions
 

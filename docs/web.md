@@ -28,7 +28,7 @@ surface for.
 | `/videos`          | Videos                                    | Video listing and `search?type=video`                                               |
 | `/files`           | Files                                     | The untyped listing, with folders                                                  |
 | `/browse`          | Browse                                    | Flat and untyped; where the top-bar search lands                                    |
-| `/memories`        | Memories                                  | `memories` CRUD, with a `RefPicker` for the file, tag, album, and person it links to |
+| `/memories`, `/memories/:memoryId` | Memories                  | notebook editor (text + image blocks, live Markdown, layouts, slideshow, media picker, image editor, Preview); code in `src/memories/`, see [memories.md](memories.md) |
 | `/albums`          | Albums                                    | `albums` CRUD and membership                                                       |
 | `/people`          | People                                    | `people`, face clusters, naming, merging, and the unassigned-face purge            |
 | `/tags`            | Tags                                      | `tags` CRUD and the per-tag file listing                                           |

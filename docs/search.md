@@ -72,7 +72,9 @@ resource handler. On public shares the same `shareCan` path applies.
 ## Memories
 
 `GET /api/v1/libraries/{libraryID}/memories?q=...` uses the same
-`fts.BuildExpression` parser over `fts_memories`; an empty `q` falls back to a
+`fts.BuildExpression` parser over `fts_memories`, which indexes each memory's
+title and `search_text` — every text block, image caption, the description,
+the location and tag names; an empty `q` falls back to a
 plain browse. Future memory search gets the same operators for free.
 
 ## Future unification

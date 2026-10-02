@@ -261,13 +261,35 @@ the file between the typed pages.
 | GET    | `/libraries/{libraryID}/search`                             | FTS5 file search + filters       | cap  |
 | GET    | `/libraries/{libraryID}/memories`                           | List / search memories           | session |
 | POST   | `/libraries/{libraryID}/memories`                           | Create a memory                  | session |
-| GET    | `/libraries/{libraryID}/memories/{memoryID}`                | Latest revision                  | session |
-| PUT    | `/libraries/{libraryID}/memories/{memoryID}`                | Autosave (new revision)          | session |
+| GET    | `/libraries/{libraryID}/memories/{memoryID}`                | Memory with ordered blocks       | session |
+| PATCH  | `/libraries/{libraryID}/memories/{memoryID}`                | Metadata (title, date, tags, cover…) | session |
+| PUT    | `/libraries/{libraryID}/memories/{memoryID}/document`       | Save all blocks (revision-checked) | session |
+| PUT    | `/libraries/{libraryID}/memories/{memoryID}`                | Legacy single-body save          | session |
+| POST   | `/libraries/{libraryID}/memories/{memoryID}/blocks`         | Insert a block                   | session |
+| PUT    | `/libraries/{libraryID}/memories/{memoryID}/blocks/order`   | Reorder blocks                   | session |
+| PATCH  | `/libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}` | Markdown / layout / slideshow  | session |
+| DELETE | `/libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}` | Delete a block                 | session |
+| POST   | `/libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}/duplicate` | Duplicate a block    | session |
+| POST   | `/libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}/images` | Add photos to a section | session |
+| PUT    | `/libraries/{libraryID}/memories/{memoryID}/blocks/{blockID}/images/order` | Reorder photos    | session |
+| PATCH  | `/libraries/{libraryID}/memories/{memoryID}/images/{imageID}` | Caption / edits / replace      | session |
+| DELETE | `/libraries/{libraryID}/memories/{memoryID}/images/{imageID}` | Remove from memory (file kept) | session |
+| GET    | `/libraries/{libraryID}/memories/{memoryID}/images/{imageID}/derived` | Edited copy (JPEG)    | session |
 | DELETE | `/libraries/{libraryID}/memories/{memoryID}`                | Soft delete                      | session |
 | POST   | `/libraries/{libraryID}/memories/{memoryID}/restore`        | Restore                          | session |
 | GET    | `/libraries/{libraryID}/memories/{memoryID}/versions`       | Revision list                    | session |
 | GET    | `/libraries/{libraryID}/memories/{memoryID}/versions/{version}` | One revision                | session |
 | GET    | `/libraries/{libraryID}/memories/{memoryID}/refs`           | Parsed wikilink references       | session |
+
+Memory writes accept `base_revision`; a stale one returns `409 CONFLICT`
+with `details.current_revision`. See [memories.md](memories.md).
+
+### Settings
+
+| Method | Path                     | Purpose                              | Auth    |
+| ------ | ------------------------ | ------------------------------------ | ------- |
+| GET    | `/settings/memories`     | The caller's Memories preferences    | session |
+| PATCH  | `/settings/memories`     | Update any subset of them            | session |
 
 ### Permissions and shares (management)
 

@@ -38,7 +38,8 @@ single dot-directory:
     ├── embeddings/             optional ML embeddings (future)
     ├── faces/                  optional face data (future)
     ├── jobs/                   persisted background job state
-    └── metadata/               extracted metadata cache
+    ├── metadata/               extracted metadata cache
+    └── memory-media/           optional edited copies of memory photos
 ```
 
 The `.cairn/` name is the project's chosen internal metadata directory. It is
@@ -66,6 +67,44 @@ cairn-data/
 Backups are written wherever `CAIRN_BACKUP_DIR` points (see docs/backups.md).
 Backup archives are meant to restore a Cairn installation, not to be pulled into
 the indexer as media; never place `CAIRN_BACKUP_DIR` inside a library root.
+
+## Memory media
+
+When a user turns on *Settings → Memories → Also save edited copies in the
+library*, edited memory photos are rendered to:
+
+```text
+<library>/.cairn/memory-media/
+├── .cairn-memory-media                 marker: claims the directory for Cairn
+└── <memory-id>/
+    └── <memory-image-id>-<signature>.jpg
+```
+
+- **Reserved namespace.** The copies live inside the library (so they travel
+  and back up with it) but inside `.cairn/`, which the indexer never scans,
+  so they are never indexed as new media and never appear as a user folder.
+- **Collision safety.** Cairn creates `memory-media/` and writes the marker
+  file. If that path already exists as a file, a symlink, or a non-empty
+  directory without the marker, Cairn treats it as someone else's: it writes
+  nothing there, moves nothing, overwrites nothing, and the editor reports
+  that edited copies could not be created. An empty pre-existing directory is
+  claimed.
+- **Stable identity.** Names come from IDs, never from user-visible file
+  names: `<memory-image-id>` is the memory image that owns the copy and
+  `<signature>` a hash of its edits and source, so copies never collide with
+  each other or with user files. `memory_derived_media` records the original
+  file id, memory, memory image, path, edit signature, size and timestamps;
+  the caption and edits stay on the memory image.
+- **Lifecycle.** A copy exists only for an image with edits, and only while
+  the edits match its signature. Unedited images always reference the
+  original. Copies no memory image references are deleted (row and file);
+  copies of soft-deleted memories are kept. Everything here can be deleted
+  by hand — Cairn regenerates what it needs on the next save.
+- **Originals are read-only.** Rendering opens the original read-only; its
+  bytes, name, location, timestamps and metadata are never changed. This is
+  covered by an automated SHA-256 integrity test.
+- Encrypted with the at-rest key when encryption is enabled, like
+  thumbnails.
 
 ## What is never done
 
