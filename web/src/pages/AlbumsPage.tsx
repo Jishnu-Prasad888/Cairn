@@ -1,612 +1,607 @@
 /**
- * Albums — a manual grouping of files that crosses folders.
+ * Albums — curated sets of photos from anywhere in the library.
  *
- * Two screens: the album grid, and one album's contents with a searchable
- * file picker for adding to it. The picker is the reason this page exists
- * separately from Tags: an album is a curated set, a tag is a label.
+ * Two views on one route: the grid of albums (`/albums`), where the covers do
+ * the talking, and one album (`/albums/:id`), which is a photo grid with the
+ * album's own actions. An album never owns its files: deleting it, or removing
+ * a photo from it, leaves the files exactly where they are on disk.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
 import { useLibraryResource } from '../api/resources';
 import {
-  addAlbumFile,
   createAlbum,
   deleteAlbum,
-  listAlbums,
   listAlbumFiles,
-  listFiles,
-  listFolders,
+  listAlbums,
   removeAlbumFile,
-  searchFiles,
+  updateAlbum,
 } from '../api/queries';
-import type { Album, FileSummary, Folder } from '../api/types';
-import { ConfirmDialog, Dialog, PromptDialog } from '../components/Dialog';
-import { FileGrid } from '../components/FileGrid';
+import type { Album, FileSummary, Library } from '../api/types';
+import { AddFilesDialog } from '../components/albums/AddFilesDialog';
+import { AlbumCard } from '../components/albums/AlbumCard';
+import { ConfirmDialog, PromptDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
-import LibraryPicker from '../components/LibraryPicker';
-import { mediaGlyph, thumbnailUrl } from '../components/media';
+import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
+import { SelectionToolbar } from '../components/media/SelectionToolbar';
+import { useFavorites } from '../components/media/useFavorites';
+import { useMediaActions } from '../components/media/useMediaActions';
+import { useSelection } from '../components/media/useSelection';
 import {
   EmptyState,
   ErrorState,
   LibraryOfflineNotice,
-  LoadingState,
   NoLibrariesState,
   PageHeader,
 } from '../components/States';
+import { Icon } from '../components/ui/Icon';
+import { Menu, type MenuAnchor, type MenuEntry, useMenuButton } from '../components/ui/Menu';
+import { useToast } from '../components/ui/Toast';
 import { ViewerModal } from '../components/ViewerModal';
+import { formatDate } from '../lib/dates';
 import './AlbumsPage.css';
 
-/** Adding files to an album: browse folders or search, tick, confirm. */
-function AddFilesDialog({
-  libraryId,
-  album,
-  alreadyIn,
-  onClose,
-  onAdded,
-}: {
-  libraryId: string;
-  album: Album;
-  alreadyIn: string[];
-  onClose: () => void;
-  onAdded: () => void;
-}) {
-  // Tabs: 'browse' = folder tree, 'search' = free-text search
-  const [tab, setTab] = useState<'browse' | 'search'>('browse');
-
-  // ---- browse state ----
-  const [folderPath, setFolderPath] = useState('');
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [browseFiles, setBrowseFiles] = useState<FileSummary[]>([]);
-  // Loading is derived from which folder the shown listing belongs to, so the
-  // effect below never has to set it synchronously.
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  const browseKey = `${libraryId}|${folderPath}`;
-  const browseLoading = tab === 'browse' && loadedKey !== browseKey;
-
-  // ---- search state ----
-  const [query, setQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<FileSummary[]>([]);
-
-  // ---- shared state ----
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Load folders + files for the current folder path.
-  useEffect(() => {
-    if (tab !== 'browse') return;
-    let cancelled = false;
-    void Promise.all([
-      listFolders(libraryId, folderPath || undefined),
-      listFiles(libraryId, { folder: folderPath, limit: 100 }),
-    ])
-      .then(([dirs, listing]) => {
-        if (cancelled) return;
-        setFolders(dirs.folders ?? []);
-        setBrowseFiles(listing.files ?? []);
-        setLoadedKey(browseKey);
-        setError(null);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setLoadedKey(browseKey);
-        setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, folderPath, tab, browseKey]);
-
-  const runSearch = useCallback(
-    async (q: string) => {
-      setError(null);
-      try {
-        const resp = await searchFiles(libraryId, { q, limit: 50 });
-        setSearchResults(resp.files ?? []);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [libraryId],
-  );
-
-  const toggle = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const submit = () => {
-    setBusy(true);
-    setError(null);
-    Promise.all([...selected].map((id) => addAlbumFile(libraryId, album.id, id)))
-      .then(() => {
-        onAdded();
-        onClose();
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false));
-  };
-
-  const displayFiles = tab === 'browse' ? browseFiles : searchResults;
-
-  // Build breadcrumb segments for the browse tab.
-  const crumbs = folderPath
-    ? folderPath.split('/').reduce<Array<{ label: string; path: string }>>((acc, part) => {
-        const prev = acc[acc.length - 1]?.path ?? '';
-        acc.push({ label: part, path: prev ? `${prev}/${part}` : part });
-        return acc;
-      }, [])
-    : [];
-
-  return (
-    <Dialog
-      open
-      size="medium"
-      title={`Add files to "${album.name}"`}
-      onClose={onClose}
-      dismissible={!busy}
-      testId="add-files-dialog"
-      footer={
-        <>
-          <button type="button" className="button" onClick={onClose} disabled={busy}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="button primary-button"
-            onClick={submit}
-            disabled={busy || selected.size === 0}
-            data-testid="confirm-add-files"
-          >
-            {busy ? 'Adding…' : `Add ${selected.size > 0 ? selected.size : ''}`.trim()}
-          </button>
-        </>
-      }
-    >
-      <div className="album-picker">
-        {/* Tab switcher */}
-        <div className="album-picker-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'browse'}
-            className={tab === 'browse' ? 'album-picker-tab active' : 'album-picker-tab'}
-            onClick={() => setTab('browse')}
-          >
-            Browse folders
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'search'}
-            className={tab === 'search' ? 'album-picker-tab active' : 'album-picker-tab'}
-            onClick={() => setTab('search')}
-          >
-            Search
-          </button>
-        </div>
-
-        {tab === 'browse' && (
-          <>
-            {/* Breadcrumb navigation */}
-            <nav className="album-picker-breadcrumbs" aria-label="Folders">
-              <button type="button" className="crumb" onClick={() => setFolderPath('')}>
-                Library root
-              </button>
-              {crumbs.map((crumb, i) => (
-                <span key={crumb.path} className="crumb-segment">
-                  <span className="crumb-sep" aria-hidden="true">
-                    /
-                  </span>
-                  <button
-                    type="button"
-                    className="crumb"
-                    onClick={() => setFolderPath(crumb.path)}
-                    aria-current={i === crumbs.length - 1 ? 'page' : undefined}
-                  >
-                    {crumb.label}
-                  </button>
-                </span>
-              ))}
-            </nav>
-
-            {browseLoading && <p className="muted">Loading…</p>}
-
-            {/* Subfolders */}
-            {folders.length > 0 && (
-              <ul className="album-picker-folders">
-                {folders.map((folder) => (
-                  <li key={folder.id}>
-                    <button
-                      type="button"
-                      className="album-picker-folder"
-                      onClick={() => setFolderPath(folder.rel_path)}
-                    >
-                      📁 {folder.name}
-                      <span className="muted"> ({folder.file_count})</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-
-        {tab === 'search' && (
-          <div className="album-picker-search-row">
-            <label className="visually-hidden" htmlFor="album-picker-search">
-              Search library files
-            </label>
-            <input
-              id="album-picker-search"
-              className="search-input"
-              type="search"
-              placeholder="Search library files…"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (e.target.value.trim() === '') setSearchResults([]);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && query.trim() !== '') void runSearch(query.trim());
-              }}
-              data-testid="album-picker-search"
-            />
-            <button
-              type="button"
-              className="button"
-              onClick={() => void runSearch(query.trim())}
-              disabled={query.trim() === ''}
-            >
-              Search
-            </button>
-          </div>
-        )}
-
-        {/* Files list */}
-        {displayFiles.length > 0 && (
-          <ul className="picker-results">
-            {displayFiles.map((f) => {
-              const inAlbum = alreadyIn.includes(f.id);
-              return (
-                <li key={f.id} className="picker-row">
-                  <label className="picker-label">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${f.name}`}
-                      checked={selected.has(f.id)}
-                      disabled={inAlbum}
-                      onChange={() => toggle(f.id)}
-                    />
-                    {f.media_type === 'photo' ? (
-                      <img className="picker-thumb" src={thumbnailUrl(libraryId, f)} alt="" />
-                    ) : (
-                      <span className="picker-thumb picker-glyph" aria-hidden="true">
-                        {mediaGlyph(f)}
-                      </span>
-                    )}
-                    <span className="picker-name" title={f.rel_path}>
-                      {f.name}
-                    </span>
-                  </label>
-                  {inAlbum && <span className="muted picker-note">in album</span>}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        {tab === 'browse' && !browseLoading && folders.length === 0 && browseFiles.length === 0 && (
-          <p className="muted">This folder is empty.</p>
-        )}
-
-        {tab === 'search' && query.trim() !== '' && searchResults.length === 0 && (
-          <p className="muted">No files match "{query.trim()}".</p>
-        )}
-
-        {error && (
-          <p className="error-text" role="alert">
-            {error}
-          </p>
-        )}
-      </div>
-    </Dialog>
-  );
+/** The album id in `/albums/:id`, read from the path so the page works in or out of `<Routes>`. */
+function useAlbumIdFromPath(): string | null {
+  const { pathname } = useLocation();
+  return matchPath('/albums/:albumId', pathname)?.params.albumId ?? null;
 }
 
 export default function AlbumsPage() {
   const gate = useLibraryGate();
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const albumId = useAlbumIdFromPath();
 
-  const [albumId, setAlbumId] = useState<string | null>(null);
+  if (gate.kind === 'loading') {
+    return (
+      <main className="page albums-page">
+        <PageHeader title="Albums" />
+        <div className="album-grid-skeleton" aria-hidden="true">
+          {Array.from({ length: 8 }, (_, i) => (
+            <span key={i} className="skeleton" />
+          ))}
+        </div>
+      </main>
+    );
+  }
+  if (gate.kind === 'error') {
+    return (
+      <main className="page albums-page">
+        <PageHeader title="Albums" />
+        <ErrorState message={gate.message} title="Couldn't load your libraries" />
+      </main>
+    );
+  }
+  if (gate.kind === 'empty') {
+    return (
+      <main className="page albums-page">
+        <PageHeader title="Albums" />
+        <NoLibrariesState isAdmin={user?.role === 'admin'} />
+      </main>
+    );
+  }
+  return <Albums library={gate.library} albumId={albumId} />;
+}
+
+function Albums({ library, albumId }: { library: Library; albumId: string | null }) {
+  const libraryId = library.id;
+  const navigate = useNavigate();
+  const toast = useToast();
   const [creating, setCreating] = useState(false);
-  const [deleting, setDeleting] = useState<Album | null>(null);
-  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [promptError, setPromptError] = useState<string | null>(null);
 
   const albums = useLibraryResource(
     useCallback(async (id: string) => (await listAlbums(id)).albums ?? [], []),
   );
-  const files = useLibraryResource(
-    useCallback((id: string) => listAlbumFiles(id, albumId!).then((r) => r.files ?? []), [albumId]),
-    [albumId],
-    albumId !== null,
-  );
 
-  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', () => {
-    files.reload();
-    albums.reload();
-  });
+  const offline = library.status === 'offline';
+  const active = albumId ? (albums.data?.find((a) => a.id === albumId) ?? null) : null;
 
-  const run = useCallback(
-    async (action: () => Promise<unknown>, after?: () => void) => {
-      setBusy(true);
-      setError(null);
-      try {
-        await action();
-        after?.();
-        albums.reload();
-        files.reload();
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [albums, files],
-  );
-
-  if (gate.kind === 'loading') {
-    return (
-      <main className="albums-page">
-        <LoadingState label="Loading libraries…" />
-      </main>
-    );
+  if (albumId) {
+    if (albums.data && !active) {
+      return (
+        <main className="page albums-page">
+          <EmptyState title="Album not found" icon="album" testId="album-missing">
+            <p>It may have been deleted, or it belongs to another library.</p>
+          </EmptyState>
+          <div className="albums-center">
+            <button type="button" className="button" onClick={() => navigate('/albums')}>
+              Back to albums
+            </button>
+          </div>
+        </main>
+      );
+    }
+    if (active) {
+      return (
+        <AlbumDetail
+          key={active.id}
+          library={library}
+          album={active}
+          onBack={() => navigate('/albums')}
+          onChanged={albums.reload}
+        />
+      );
+    }
   }
-
-  const header = (
-    <PageHeader
-      title="Albums"
-      subtitle="Curated groups of files from anywhere in the library."
-      controls={
-        <>
-          <LibraryPicker />
-          <button
-            type="button"
-            className="button primary-button"
-            onClick={() => {
-              setPromptError(null);
-              setCreating(true);
-            }}
-            disabled={gate.kind !== 'ready'}
-            data-testid="new-album-button"
-          >
-            New album
-          </button>
-        </>
-      }
-    />
-  );
-
-  if (gate.kind === 'error') {
-    return (
-      <main className="albums-page">
-        {header}
-        <ErrorState message={gate.message} onRetry={albums.reload} />
-      </main>
-    );
-  }
-
-  if (gate.kind === 'empty') {
-    return (
-      <main className="albums-page">
-        {header}
-        <NoLibrariesState isAdmin={isAdmin} />
-      </main>
-    );
-  }
-
-  const library = gate.library;
-  const activeAlbum = albums.data?.find((a) => a.id === albumId) ?? null;
 
   return (
-    <main className="albums-page">
-      {header}
-
-      {library.status === 'offline' && <LibraryOfflineNotice library={library} />}
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
-      {albums.error && <ErrorState message={albums.error} onRetry={albums.reload} />}
-
-      {activeAlbum ? (
-        <section className="album-detail" data-testid="album-detail">
-          <div className="album-detail-header">
+    <main className="page albums-page">
+      <PageHeader
+        title="Albums"
+        subtitle={
+          albums.data && albums.data.length > 0
+            ? `${albums.data.length} ${albums.data.length === 1 ? 'album' : 'albums'}`
+            : undefined
+        }
+        controls={
+          !offline && (
             <button
               type="button"
-              className="button"
+              className="button primary-button"
               onClick={() => {
-                setAlbumId(null);
-                ops.closeViewer();
+                setPromptError(null);
+                setCreating(true);
               }}
+              data-testid="new-album-button"
             >
-              ← Albums
+              <Icon name="plus" />
+              New album
             </button>
-            <h2>{activeAlbum.name}</h2>
-            <div className="header-controls">
-              <button
-                type="button"
-                className="button"
-                onClick={() => setAdding(true)}
-                data-testid="add-files-button"
-              >
-                Add files
-              </button>
-              <button
-                type="button"
-                className="button danger-button"
-                onClick={() => setDeleting(activeAlbum)}
-              >
-                Delete album
-              </button>
-            </div>
-          </div>
+          )
+        }
+      />
 
-          {activeAlbum.description && <p className="muted">{activeAlbum.description}</p>}
-
-          {files.loading && <LoadingState />}
-          {files.error && <ErrorState message={files.error} onRetry={files.reload} />}
-
-          {files.data !== null && files.data.length === 0 && (
-            <EmptyState title="This album is empty" testId="album-empty">
-              <p className="muted">
-                Use “Add files” to bring in media from anywhere in the library.
-              </p>
-            </EmptyState>
-          )}
-
-          {files.data !== null && files.data.length > 0 && (
-            <FileGrid
-              libraryId={gate.libraryId}
-              files={files.data}
-              onOpen={ops.openViewer}
-              renderAction={(f) => (
-                <button
-                  type="button"
-                  className="file-card-action"
-                  aria-label={`Remove ${f.name} from album`}
-                  onClick={() =>
-                    void run(() => removeAlbumFile(gate.libraryId, activeAlbum.id, f.id))
-                  }
-                >
-                  ×
-                </button>
-              )}
-            />
-          )}
-        </section>
-      ) : (
-        <>
-          {albums.loading && <LoadingState />}
-          {albums.data !== null && albums.data.length === 0 && (
-            <EmptyState title="No albums yet" testId="albums-empty">
-              <p className="muted">Create an album to group photos from any folder.</p>
-            </EmptyState>
-          )}
-          {albums.data !== null && albums.data.length > 0 && (
-            <ul className="album-grid" data-testid="albums-grid" aria-label="Albums">
-              {albums.data.map((album) => (
-                <li key={album.id}>
-                  <button
-                    type="button"
-                    className="album-card"
-                    onClick={() => {
-                      setAlbumId(album.id);
-                      ops.closeViewer();
-                    }}
-                  >
-                    <span className="album-glyph" aria-hidden="true">
-                      🗂
-                    </span>
-                    <span className="album-name" title={album.name}>
-                      {album.name}
-                    </span>
-                    <span className="album-date">
-                      Updated {new Date(album.updated_at).toLocaleDateString()}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
+      {offline && <LibraryOfflineNotice library={library} />}
+      {albums.error && (
+        <ErrorState message={albums.error} onRetry={albums.reload} title="Couldn't load albums" />
       )}
 
-      {ops.viewer && (
-        <ViewerModal
-          libraryId={gate.libraryId}
-          file={ops.viewer}
-          siblings={files.data ?? []}
-          onNavigate={ops.openViewer}
-          onChanged={() => {
-            files.reload();
-            albums.reload();
-          }}
-          onRequestAction={ops.requestAction}
-          onClose={ops.closeViewer}
-        />
+      {albums.loading && (
+        <div className="album-grid-skeleton" aria-hidden="true">
+          {Array.from({ length: 8 }, (_, i) => (
+            <span key={i} className="skeleton" />
+          ))}
+        </div>
       )}
-      {ops.dialogs}
 
-      {adding && activeAlbum && (
-        <AddFilesDialog
-          libraryId={gate.libraryId}
-          album={activeAlbum}
-          alreadyIn={(files.data ?? []).map((f) => f.id)}
-          onClose={() => setAdding(false)}
-          onAdded={() => {
-            files.reload();
-            albums.reload();
-          }}
-        />
+      {albums.data !== null && albums.data.length === 0 && (
+        <EmptyState
+          title="No albums yet"
+          testId="albums-empty"
+          icon="album"
+          action={
+            !offline && (
+              <button
+                type="button"
+                className="button primary-button"
+                onClick={() => setCreating(true)}
+              >
+                Create an album
+              </button>
+            )
+          }
+        >
+          <p>Gather photos from any folder into an album — a trip, a year, a person.</p>
+        </EmptyState>
+      )}
+
+      {albums.data !== null && albums.data.length > 0 && (
+        <ul className="album-grid" data-testid="albums-grid" aria-label="Albums">
+          {albums.data.map((album) => (
+            <li key={album.id}>
+              <AlbumCard
+                album={album}
+                libraryId={libraryId}
+                onOpen={(a) => navigate(`/albums/${a.id}`)}
+              />
+            </li>
+          ))}
+        </ul>
       )}
 
       <PromptDialog
         open={creating}
         title="New album"
         label="Album name"
-        placeholder="Summer 2024"
+        placeholder="Summer 2026"
         busy={busy}
         error={promptError}
         onCancel={() => setCreating(false)}
         onConfirm={(name) => {
           setBusy(true);
           setPromptError(null);
-          createAlbum(gate.libraryId, name)
-            .then(() => {
+          createAlbum(libraryId, name)
+            .then((resp) => {
               setCreating(false);
               albums.reload();
+              toast({ message: `Created ${name}`, tone: 'success' });
+              navigate(`/albums/${resp.album.id}`);
             })
             .catch((e: unknown) => setPromptError(e instanceof Error ? e.message : String(e)))
             .finally(() => setBusy(false));
         }}
         testId="new-album-dialog"
       />
+    </main>
+  );
+}
+
+type Editing = 'rename' | 'describe' | 'delete' | null;
+
+function AlbumDetail({
+  library,
+  album,
+  onBack,
+  onChanged,
+}: {
+  library: Library;
+  album: Album;
+  onBack: () => void;
+  onChanged: () => void;
+}) {
+  const libraryId = library.id;
+  const toast = useToast();
+  const more = useMenuButton();
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Editing>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
+
+  const files = useLibraryResource(
+    useCallback(
+      (id: string) => listAlbumFiles(id, album.id).then((r) => r.files ?? []),
+      [album.id],
+    ),
+    [album.id],
+  );
+  const list = files.data ?? EMPTY;
+
+  const reloadAll = useCallback(() => {
+    files.reload();
+    onChanged();
+  }, [files, onChanged]);
+
+  const favorites = useFavorites(libraryId);
+  const selection = useSelection(list, album.id);
+  const ops = useFileOperations(libraryId, reloadAll);
+
+  const remove = async (targets: FileSummary[]) => {
+    const results = await Promise.allSettled(
+      targets.map((f) => removeAlbumFile(libraryId, album.id, f.id)),
+    );
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed) {
+      toast({ message: `Couldn't remove ${failed} from the album`, tone: 'error' });
+    } else {
+      toast({
+        message:
+          targets.length === 1 ? 'Removed from album' : `${targets.length} removed from album`,
+        tone: 'success',
+      });
+    }
+    selection.clear();
+    reloadAll();
+  };
+
+  const setCover = async (file: FileSummary) => {
+    try {
+      await updateAlbum(libraryId, album.id, { cover_file_id: file.id });
+      toast({ message: 'Album cover updated', tone: 'success' });
+      selection.clear();
+      onChanged();
+    } catch (e: unknown) {
+      toast({ message: e instanceof Error ? e.message : "Couldn't set the cover", tone: 'error' });
+    }
+  };
+
+  const actions = useMediaActions({
+    libraryId,
+    selection,
+    favorites,
+    ops,
+    onChanged: reloadAll,
+    allow: { album: false },
+    extra: [
+      ...(selection.size === 1
+        ? [
+            {
+              id: 'cover',
+              label: 'Use as album cover',
+              icon: 'photo' as const,
+              onClick: () => void setCover(selection.selectedFiles[0]!),
+            },
+          ]
+        : []),
+      {
+        id: 'remove',
+        label: 'Remove from album',
+        icon: 'minus' as const,
+        onClick: () => void remove(selection.selectedFiles),
+        testId: 'selection-remove',
+      },
+    ],
+    extraMenu: (file) => [
+      {
+        id: 'cover',
+        label: 'Use as album cover',
+        icon: 'photo',
+        onSelect: () => void setCover(file),
+      },
+      {
+        id: 'remove',
+        label: 'Remove from album',
+        icon: 'minus',
+        onSelect: () => void remove([file]),
+        testId: `remove-${file.id}`,
+      },
+    ],
+  });
+
+  const runEdit = async (action: () => Promise<unknown>, after: () => void) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      after();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const offline = library.status === 'offline';
+  const count = files.data?.length ?? album.file_count;
+
+  return (
+    <main className="page albums-page" data-testid="album-detail">
+      {selection.active && (
+        <SelectionToolbar
+          count={selection.size}
+          total={list.length}
+          actions={actions.selectionActions}
+          onClear={selection.clear}
+          onSelectAll={selection.selectAll}
+          onDeleteKey={actions.onDeleteKey}
+        />
+      )}
+
+      <header className="album-head">
+        <button type="button" className="icon-button" onClick={onBack} aria-label="Back to albums">
+          <Icon name="arrow-left" />
+        </button>
+        <div className="album-head-titles">
+          <h1>{album.name}</h1>
+          <p className="album-head-meta">
+            {count !== undefined && (
+              <span>
+                {count} {count === 1 ? 'item' : 'items'}
+              </span>
+            )}
+            <span>Updated {formatDate(album.updated_at)}</span>
+          </p>
+          {album.description && <p className="album-head-description">{album.description}</p>}
+        </div>
+        {!offline && (
+          <div className="header-controls">
+            <button
+              type="button"
+              className="button"
+              onClick={() => setAdding(true)}
+              data-testid="add-files-button"
+            >
+              <Icon name="plus" />
+              Add photos
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Album options"
+              aria-haspopup="menu"
+              aria-expanded={more.open}
+              onClick={more.toggle}
+            >
+              <Icon name="more" />
+            </button>
+          </div>
+        )}
+      </header>
+
+      {offline && <LibraryOfflineNotice library={library} />}
+      {files.error && (
+        <ErrorState message={files.error} onRetry={files.reload} title="Couldn't load this album" />
+      )}
+      {files.loading && <MediaGridSkeleton count={12} />}
+
+      {files.data !== null && files.data.length === 0 && (
+        <EmptyState
+          title="This album is empty"
+          testId="album-empty"
+          icon="album"
+          action={
+            !offline && (
+              <button
+                type="button"
+                className="button primary-button"
+                onClick={() => setAdding(true)}
+              >
+                Add photos
+              </button>
+            )
+          }
+        >
+          <p>Bring in photos and files from anywhere in the library.</p>
+        </EmptyState>
+      )}
+
+      {list.length > 0 && (
+        <MediaGrid
+          libraryId={libraryId}
+          files={list}
+          onOpen={ops.openViewer}
+          selection={selection}
+          favorites={favorites.ids}
+          onContextMenu={(file, x, y) =>
+            setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
+          }
+          label={`Album: ${album.name}`}
+          testId="file-grid"
+        />
+      )}
+
+      {ops.viewer && (
+        <ViewerModal
+          libraryId={libraryId}
+          file={ops.viewer}
+          siblings={list}
+          onNavigate={ops.openViewer}
+          onChanged={reloadAll}
+          onRequestAction={ops.requestAction}
+          onClose={ops.closeViewer}
+        />
+      )}
+      {ops.dialogs}
+      {actions.dialogs}
+
+      {menu && (
+        <Menu
+          anchor={menu.anchor}
+          items={menu.items}
+          onClose={() => setMenu(null)}
+          label="Photo actions"
+        />
+      )}
+
+      {more.anchor && (
+        <Menu
+          anchor={more.anchor}
+          align="end"
+          label="Album options"
+          onClose={more.close}
+          items={[
+            {
+              id: 'rename',
+              label: 'Rename album',
+              icon: 'edit',
+              onSelect: () => setEditing('rename'),
+            },
+            {
+              id: 'describe',
+              label: album.description ? 'Edit description' : 'Add a description',
+              icon: 'document',
+              onSelect: () => setEditing('describe'),
+            },
+            ...(album.cover_file_id
+              ? [
+                  {
+                    id: 'cover',
+                    label: 'Use the first photo as cover',
+                    icon: 'photo' as const,
+                    onSelect: () =>
+                      void updateAlbum(libraryId, album.id, { cover_file_id: '' }).then(onChanged),
+                  },
+                ]
+              : []),
+            'separator',
+            {
+              id: 'delete',
+              label: 'Delete album',
+              icon: 'trash',
+              danger: true,
+              onSelect: () => setEditing('delete'),
+              testId: 'delete-album',
+            },
+          ]}
+        />
+      )}
+
+      {adding && (
+        <AddFilesDialog
+          libraryId={libraryId}
+          album={album}
+          alreadyIn={list.map((f) => f.id)}
+          onClose={() => setAdding(false)}
+          onAdded={reloadAll}
+        />
+      )}
+
+      <PromptDialog
+        open={editing === 'rename'}
+        title="Rename album"
+        label="Album name"
+        initialValue={album.name}
+        busy={busy}
+        error={error}
+        onCancel={() => setEditing(null)}
+        onConfirm={(name) =>
+          void runEdit(
+            () => updateAlbum(libraryId, album.id, { name }),
+            () => {
+              setEditing(null);
+              onChanged();
+            },
+          )
+        }
+        testId="rename-album-dialog"
+      />
+
+      <PromptDialog
+        open={editing === 'describe'}
+        title="Album description"
+        label="Description"
+        initialValue={album.description ?? ''}
+        multiline
+        busy={busy}
+        error={error}
+        onCancel={() => setEditing(null)}
+        onConfirm={(description) =>
+          void runEdit(
+            () => updateAlbum(libraryId, album.id, { description }),
+            () => {
+              setEditing(null);
+              onChanged();
+            },
+          )
+        }
+        testId="describe-album-dialog"
+      />
 
       <ConfirmDialog
-        open={deleting !== null}
-        title={`Delete album “${deleting?.name ?? ''}”?`}
+        open={editing === 'delete'}
+        title={`Delete album “${album.name}”?`}
         destructive
         confirmLabel="Delete album"
         busy={busy}
         error={error}
         message={
           <p>
-            The album is removed. The files in it are not affected and stay exactly where they are.
+            Only the album is deleted. The photos and files in it stay exactly where they are in
+            your library.
           </p>
         }
-        onCancel={() => setDeleting(null)}
-        onConfirm={() => {
-          if (!deleting) return;
-          const target = deleting;
-          void run(
-            () => deleteAlbum(gate.libraryId, target.id),
-            () => setAlbumId(null),
-          );
-        }}
+        onCancel={() => setEditing(null)}
+        onConfirm={() =>
+          void runEdit(
+            () => deleteAlbum(libraryId, album.id),
+            () => {
+              setEditing(null);
+              toast({ message: `Deleted ${album.name}`, tone: 'success' });
+              onChanged();
+              onBack();
+            },
+          )
+        }
         testId="delete-album-dialog"
       />
     </main>
   );
 }
+
+const EMPTY: FileSummary[] = [];

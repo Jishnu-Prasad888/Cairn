@@ -15,9 +15,11 @@ import { useLibraryResource } from '../api/resources';
 import { createTag, deleteTag, listTags, removeFileTag, searchFiles } from '../api/queries';
 import type { FileSummary, Tag } from '../api/types';
 import { ConfirmDialog, PromptDialog } from '../components/Dialog';
-import { FileGrid } from '../components/FileGrid';
+import { MediaGrid } from '../components/media/MediaGrid';
+import { SelectionToolbar } from '../components/media/SelectionToolbar';
+import { useMediaActions } from '../components/media/useMediaActions';
+import { useSelection } from '../components/media/useSelection';
 import { useFileOperations } from '../components/FileOperations';
-import LibraryPicker from '../components/LibraryPicker';
 import {
   EmptyState,
   ErrorState,
@@ -54,7 +56,37 @@ export default function TagsPage() {
     activeTag !== null,
   );
 
-  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', tags.reload);
+  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', () => {
+    files.reload();
+    tags.reload();
+  });
+  const tagFiles = files.data ?? NO_FILES;
+  const selection = useSelection(tagFiles, activeTag?.id ?? '');
+  const libraryIdOrEmpty = gate.kind === 'ready' ? gate.libraryId : '';
+  const untag = async (targets: FileSummary[]) => {
+    if (!activeTag) return;
+    await run(() =>
+      Promise.all(targets.map((f) => removeFileTag(libraryIdOrEmpty, f.id, activeTag.id))),
+    );
+    selection.clear();
+  };
+  const actions = useMediaActions({
+    libraryId: libraryIdOrEmpty,
+    selection,
+    ops,
+    onChanged: files.reload,
+    extra: activeTag
+      ? [
+          {
+            id: 'untag',
+            label: `Remove tag “${activeTag.name}”`,
+            icon: 'tag',
+            onClick: () => void untag(selection.selectedFiles),
+            testId: 'selection-untag',
+          },
+        ]
+      : [],
+  });
 
   const run = useCallback(
     async (action: () => Promise<unknown>, after?: () => void) => {
@@ -76,7 +108,7 @@ export default function TagsPage() {
 
   if (gate.kind === 'loading') {
     return (
-      <main className="tags-page">
+      <main className="page tags-page">
         <LoadingState label="Loading libraries…" />
       </main>
     );
@@ -88,7 +120,6 @@ export default function TagsPage() {
       subtitle="A flat vocabulary you apply to any file, from the viewer or in bulk."
       controls={
         <>
-          <LibraryPicker />
           <button
             type="button"
             className="button primary-button"
@@ -108,7 +139,7 @@ export default function TagsPage() {
 
   if (gate.kind === 'error') {
     return (
-      <main className="tags-page">
+      <main className="page tags-page">
         {header}
         <ErrorState message={gate.message} onRetry={tags.reload} />
       </main>
@@ -117,7 +148,7 @@ export default function TagsPage() {
 
   if (gate.kind === 'empty') {
     return (
-      <main className="tags-page">
+      <main className="page tags-page">
         {header}
         <NoLibrariesState isAdmin={isAdmin} />
       </main>
@@ -128,7 +159,7 @@ export default function TagsPage() {
   const offline = library.status === 'offline';
 
   return (
-    <main className="tags-page">
+    <main className="page tags-page">
       {header}
 
       {offline && <LibraryOfflineNotice library={library} />}
@@ -168,20 +199,13 @@ export default function TagsPage() {
           )}
 
           {files.data !== null && files.data.length > 0 && (
-            <FileGrid
+            <MediaGrid
               libraryId={gate.libraryId}
               files={files.data}
               onOpen={ops.openViewer}
-              renderAction={(f: FileSummary) => (
-                <button
-                  type="button"
-                  className="file-card-action"
-                  aria-label={`Remove tag ${activeTag.name} from ${f.name}`}
-                  onClick={() => void run(() => removeFileTag(gate.libraryId, f.id, activeTag.id))}
-                >
-                  ×
-                </button>
-              )}
+              selection={selection}
+              label={`Tagged ${activeTag.name}`}
+              testId="file-grid"
             />
           )}
 
@@ -200,6 +224,17 @@ export default function TagsPage() {
             />
           )}
           {ops.dialogs}
+          {actions.dialogs}
+          {selection.active && (
+            <SelectionToolbar
+              count={selection.size}
+              total={tagFiles.length}
+              actions={actions.selectionActions}
+              onClear={selection.clear}
+              onSelectAll={selection.selectAll}
+              onDeleteKey={actions.onDeleteKey}
+            />
+          )}
         </section>
       ) : (
         <>
@@ -284,3 +319,5 @@ export default function TagsPage() {
     </main>
   );
 }
+
+const NO_FILES: FileSummary[] = [];

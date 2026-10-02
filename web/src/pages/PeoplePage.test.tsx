@@ -83,6 +83,22 @@ function setup(options: Options = {}) {
   return fn;
 }
 
+/** Open a person's options menu and choose an item from it. */
+async function chooseFromPerson(personId: string, name: string, item: string) {
+  fireEvent.click(
+    within(screen.getByTestId(`person-${personId}`)).getByRole('button', {
+      name: `Options for ${name}`,
+    }),
+  );
+  fireEvent.click(await screen.findByRole('menuitem', { name: item }));
+}
+
+/** Open the "Find people" tools menu and choose a tool by its test id. */
+async function chooseTool(testId: string) {
+  fireEvent.click(screen.getByRole('button', { name: /Find people/ }));
+  fireEvent.click(await screen.findByTestId(testId));
+}
+
 describe('PeoplePage', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -93,17 +109,8 @@ describe('PeoplePage', () => {
     setup();
 
     expect(await screen.findByTestId('people-grid')).toBeInTheDocument();
-    expect(screen.getByTestId('people-stats')).toHaveTextContent(
-      '4 faces · 2 people · 2 unassigned',
-    );
+    expect(screen.getByTestId('people-stats')).toHaveTextContent('2 people · 2 faces to review');
     expect(within(screen.getByTestId('person-p1')).getByText('Mom')).toBeInTheDocument();
-  });
-
-  it('offers the library picker', async () => {
-    setup();
-
-    await screen.findByTestId('people-grid');
-    expect(screen.getByLabelText('Library')).toBeInTheDocument();
   });
 
   it('lists the unassigned pool and assigns a face from it', async () => {
@@ -128,8 +135,7 @@ describe('PeoplePage', () => {
     // separate request that must not happen until the card is opened.
     expect(called(fetchMock, 'GET', '/api/v1/libraries/lib1/people/p1')).toBe(false);
 
-    const card = screen.getByTestId('person-p1');
-    fireEvent.click(within(card).getByRole('button', { name: 'Faces' }));
+    await chooseFromPerson('p1', 'Mom', 'Manage faces');
 
     const faces = await screen.findByTestId('person-faces-p1');
     expect(within(faces).getAllByRole('figure')).toHaveLength(2);
@@ -137,25 +143,31 @@ describe('PeoplePage', () => {
     expect(within(faces).getByRole('button', { name: 'Set cover' })).toBeEnabled();
   });
 
-  it('collapses the card again', async () => {
+  it('closes the faces dialog again', async () => {
     setup();
     await screen.findByTestId('people-grid');
 
-    const card = screen.getByTestId('person-p1');
-    fireEvent.click(within(card).getByRole('button', { name: 'Faces' }));
+    await chooseFromPerson('p1', 'Mom', 'Manage faces');
     await screen.findByTestId('person-faces-p1');
 
-    fireEvent.click(within(card).getByRole('button', { name: 'Hide' }));
+    fireEvent.click(screen.getByRole('button', { name: /Close Faces of Mom/ }));
     expect(screen.queryByTestId('person-faces-p1')).not.toBeInTheDocument();
+  });
+
+  it('links a person to their photos', async () => {
+    setup();
+    await screen.findByTestId('people-grid');
+
+    expect(
+      within(screen.getByTestId('person-p1')).getByRole('link', { name: /Mom/ }),
+    ).toHaveAttribute('href', '/search?person=p1');
   });
 
   it('renames a person through the dialog', async () => {
     const fetchMock = setup();
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(
-      within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Rename' }),
-    );
+    await chooseFromPerson('p1', 'Mom', 'Rename');
     const dialog = await screen.findByTestId('rename-person-dialog');
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Mum' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
@@ -169,7 +181,7 @@ describe('PeoplePage', () => {
     const fetchMock = setup();
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Merge' }));
+    await chooseFromPerson('p1', 'Mom', 'Merge into…');
     const dialog = await screen.findByTestId('merge-person-dialog');
 
     const select = within(dialog).getByLabelText('Keep') as HTMLSelectElement;
@@ -200,7 +212,7 @@ describe('PeoplePage', () => {
     renderPage(<PeoplePage />);
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
+    await chooseFromPerson('p1', 'Mom', 'Merge into…');
     const dialog = await screen.findByTestId('merge-person-dialog');
     expect(within(dialog).getByText('You need at least two people to merge.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Merge' })).toBeDisabled();
@@ -211,9 +223,7 @@ describe('PeoplePage', () => {
     const confirmSpy = vi.spyOn(window, 'confirm');
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(
-      within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Delete' }),
-    );
+    await chooseFromPerson('p1', 'Mom', 'Delete');
     const dialog = await screen.findByTestId('delete-person-dialog');
     expect(within(dialog).getByText('Mom')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
@@ -228,7 +238,7 @@ describe('PeoplePage', () => {
     const fetchMock = setup();
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(screen.getByTestId('purge-faces'));
+    await chooseTool('purge-faces');
     const dialog = await screen.findByTestId('purge-faces-dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Purge' }));
 
@@ -236,7 +246,7 @@ describe('PeoplePage', () => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/faces/purge')).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Removed 4 faces.');
+      expect(screen.getByText('Removed 4 faces.')).toBeInTheDocument();
     });
   });
 
@@ -244,21 +254,21 @@ describe('PeoplePage', () => {
     const fetchMock = setup();
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(screen.getByTestId('detect-faces'));
+    await chooseTool('detect-faces');
 
     await waitFor(() => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/faces/pass')).toBe(true);
     });
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Detection pass started. It runs in the background.',
-    );
+    expect(
+      await screen.findByText('Detection pass started. It runs in the background.'),
+    ).toBeInTheDocument();
   });
 
   it('starts a clustering pass', async () => {
     const fetchMock = setup();
     await screen.findByTestId('people-grid');
 
-    fireEvent.click(screen.getByTestId('cluster-faces'));
+    await chooseTool('cluster-faces');
 
     await waitFor(() => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/faces/cluster')).toBe(true);
@@ -308,9 +318,6 @@ describe('PeoplePage', () => {
 
     // The card is already open on the first paint, so its faces load too.
     expect(await screen.findByTestId('person-faces-p1')).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId('person-p1')).getByRole('button', { name: 'Hide' }),
-    ).toBeInTheDocument();
   });
 
   it('explains a failed face listing with a retry', async () => {

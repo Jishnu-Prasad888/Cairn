@@ -89,29 +89,31 @@ describe('SettingsPage', () => {
 
   it('links the organizing surfaces from one place', async () => {
     setup();
-    await screen.findByRole('heading', { name: 'Organize' });
+    await screen.findByRole('heading', { name: 'Library' });
 
-    // Each of these has its own page; settings is where "the admin things" land.
-    for (const label of ['Tags', 'Albums', 'Memories', 'People', 'Sharing', 'Duplicates']) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+    // Each of these has its own page; settings is where the less-used ones land.
+    for (const label of ['Tags', 'Sharing', 'Duplicates', 'Trash']) {
+      expect(screen.getByRole('link', { name: new RegExp(`^${label}`) })).toBeInTheDocument();
     }
+    // Sharing goes to the real route.
+    expect(screen.getByRole('link', { name: /^Sharing/ })).toHaveAttribute('href', '/shared');
   });
 
   it('links the server upkeep surfaces to administrators', async () => {
     setup();
-    await screen.findByRole('heading', { name: 'Server upkeep' });
+    await screen.findByRole('heading', { name: 'Advanced' });
 
     for (const label of ['Libraries', 'Permissions', 'Machine learning', 'Backups']) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: new RegExp(`^${label}`) })).toBeInTheDocument();
     }
   });
 
   it('keeps the upkeep surfaces away from members', async () => {
     setup([], { user: member });
 
-    expect(await screen.findByRole('heading', { name: 'Organize' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Server upkeep' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Backups' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Advanced' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Backups/ })).not.toBeInTheDocument();
   });
 
   it('lists accounts for administrators and can revoke sessions', async () => {
@@ -163,7 +165,7 @@ describe('SettingsPage', () => {
     fireEvent.change(screen.getByLabelText('New password'), { target: { value: 's3cret' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Created bob.');
+    expect(await screen.findByText('Created bob.')).toBeInTheDocument();
     expect(bodyOf(fn, 'POST', '/api/v1/users')).toEqual({
       username: 'bob',
       password: 's3cret',
