@@ -292,3 +292,24 @@
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+/* ------------------------------ motion -------------------------------- */
+
+/* Thumbnails lift a touch under the pointer. Photos are cropped squares, so a
+   slow 4% scale inside the tile's own clip reads as depth, not movement. */
+@media (hover: hover) {
+  .media-tile:not(.is-selected) .media-tile-img {
+    transition:
+      opacity var(--duration-slow) var(--ease-out),
+      transform var(--duration-slow) var(--ease-standard);
+  }
+
+  .media-tile:not(.is-selected):hover .media-tile-img {
+    transform: scale(1.04);
+  }
+}
+
+/* The date headings slide in with the rows they introduce. */
+.media-date {
+  animation: content-in var(--duration-slow) var(--ease-out) backwards;
+}

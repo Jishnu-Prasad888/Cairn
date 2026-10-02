@@ -576,3 +576,30 @@
     opacity: 0;
   }
 }
+
+/* Navigation: the active pill fills in rather than snapping, and icons nudge
+   on hover. */
+.nav-item {
+  transition:
+    background-color var(--duration-base) var(--ease-standard),
+    color var(--duration-base) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.nav-item:active {
+  transform: scale(0.98);
+}
+
+.nav-item-icon {
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .nav-item:hover .nav-item-icon {
+    transform: translateX(1px) scale(1.06);
+  }
+}
+
+.library-switcher .progress-fill {
+  transition: none;
+}
