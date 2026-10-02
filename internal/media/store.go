@@ -342,6 +342,59 @@ func (s *FileStore) GetFolderByPath(ctx context.Context, relPath string) (*Folde
 	return s.scanFolder(row)
 }
 
+// CountPresentUnder returns how many present files live in folderPath or any
+// folder beneath it. It is computed from the index on demand because the
+// folders table is not maintained by the indexer.
+func (s *FileStore) CountPresentUnder(ctx context.Context, folderPath string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM indexed_files WHERE status = ? AND rel_path LIKE ? `+likeutil.EscapeClause,
+		string(FileStatusPresent), likeutil.Escape(filepath.ToSlash(folderPath))+"/%").Scan(&n)
+	return n, err
+}
+
+// CountsByType returns the number of present files per media type in a single
+// indexed pass, so dashboards need one query instead of one per type.
+func (s *FileStore) CountsByType(ctx context.Context) (map[MediaType]int, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT media_type, COUNT(*) FROM indexed_files WHERE status = ? GROUP BY media_type`,
+		string(FileStatusPresent))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[MediaType]int{}
+	for rows.Next() {
+		var t string
+		var n int
+		if err := rows.Scan(&t, &n); err != nil {
+			return nil, err
+		}
+		out[MediaType(t)] = n
+	}
+	return out, rows.Err()
+}
+
+// CollectionCounts holds the sizes of the user-curated collections.
+type CollectionCounts struct {
+	Albums    int `json:"albums"`
+	Tags      int `json:"tags"`
+	Favorites int `json:"favorites"`
+}
+
+// CountCollections returns album, tag and favorite totals in one round trip.
+// Favorites only count files that are still present, matching the favorites list.
+func (s *FileStore) CountCollections(ctx context.Context) (CollectionCounts, error) {
+	var c CollectionCounts
+	err := s.db.QueryRowContext(ctx,
+		`SELECT (SELECT COUNT(*) FROM albums),
+		        (SELECT COUNT(*) FROM tags),
+		        (SELECT COUNT(*) FROM favorites fav
+		           JOIN indexed_files f ON f.id = fav.file_id WHERE f.status = 'present')`,
+	).Scan(&c.Albums, &c.Tags, &c.Favorites)
+	return c, err
+}
+
 // ListFolders returns direct children of a parent folder path.
 func (s *FileStore) ListFolders(ctx context.Context, parentPath string) ([]*Folder, error) {
 	var rows *sql.Rows

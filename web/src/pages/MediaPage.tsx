@@ -16,6 +16,8 @@ import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
 import {
   listFiles,
+  copyFile,
+  createFolder,
   listFolders,
   moveFile,
   searchFiles,
@@ -91,6 +93,27 @@ function crumbSegments(folderPath: string): Array<{ label: string; path: string 
 /** Multi-select actions live here; single-file actions are the viewer's. */
 type PendingAction = { kind: 'trash-many'; files: FileSummary[] } | null;
 
+/** Files set aside by Cut or Copy, waiting for a Paste. */
+interface Clipboard {
+  mode: 'cut' | 'copy';
+  files: FileSummary[];
+}
+
+/** "photo.jpg" → "photo (copy).jpg", for pasting a copy next to its original. */
+function copyName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? `${name.slice(0, dot)} (copy)${name.slice(dot)}` : `${name} (copy)`;
+}
+
+/** True when a key press is meant for a form field or an open dialog, not the page. */
+function keyBelongsElsewhere(e: KeyboardEvent): boolean {
+  const el = e.target;
+  if (el instanceof HTMLElement) {
+    if (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return true;
+  }
+  return document.querySelector('dialog[open], [role="dialog"]') !== null;
+}
+
 export default function MediaPage({ config }: { config: MediaPageConfig }) {
   const gate = useLibraryGate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -129,6 +152,8 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [clipboard, setClipboard] = useState<Clipboard | null>(null);
+  const [pasting, setPasting] = useState(false);
 
   const libraryId = gate.kind === 'ready' ? gate.libraryId : null;
   const library = gate.kind === 'ready' ? gate.library : null;
@@ -354,6 +379,104 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
   const crumbs = crumbSegments(folderPath);
   const selectedFiles = useMemo(() => files.filter((f) => selected.has(f.id)), [files, selected]);
 
+  // New folders and paste target a folder, so they only make sense while
+  // browsing one. Acting on files works on search results too.
+  const canManage = config.showFolders && !offline && !q;
+  const canActOnFiles = config.showFolders && !offline;
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const stash = (mode: Clipboard['mode']) => {
+    if (selectedFiles.length === 0) return;
+    setClipboard({ mode, files: selectedFiles });
+    setSelected(new Set());
+  };
+
+  const paste = async () => {
+    if (!libraryId || !clipboard || pasting) return;
+    setPasting(true);
+    setError(null);
+    const results = await Promise.allSettled(
+      clipboard.files.map((f) => {
+        const sameFolder = f.folder_path === folderPath;
+        if (clipboard.mode === 'cut') {
+          // Moving a file to the folder it is already in changes nothing.
+          return sameFolder
+            ? Promise.resolve()
+            : moveFile(libraryId, f.rel_path, f.id, folderPath, f.name);
+        }
+        return copyFile(
+          libraryId,
+          f.rel_path,
+          f.id,
+          folderPath,
+          sameFolder ? copyName(f.name) : f.name,
+        );
+      }),
+    );
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      const first = failed[0] as PromiseRejectedResult;
+      const why = first.reason instanceof Error ? ` ${first.reason.message}` : '';
+      setError(`Could not paste ${failed.length} of ${results.length} items.${why}`);
+    }
+    // A cut is spent once it lands; a copy can be pasted again elsewhere.
+    if (clipboard.mode === 'cut') setClipboard(null);
+    setPasting(false);
+    reload();
+  };
+
+  // Keyboard shortcuts, in the spirit of a desktop file manager / Google Drive.
+  // Keys typed into a field or an open dialog are left alone. The latest
+  // listener is re-attached each render so it always sees current state.
+  const onShortcut = (e: KeyboardEvent) => {
+    if (keyBelongsElsewhere(e) || !libraryId || offline) return;
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+
+    if ((mod && !e.shiftKey && key === 'k') || (!mod && !e.altKey && e.key === '/')) {
+      // Jump to the search box: Ctrl+K, or "/" as in Drive and GitHub.
+      const box = searchRef.current;
+      if (!box) return;
+      e.preventDefault();
+      box.focus();
+      box.select();
+    } else if (mod && e.shiftKey && key === 'n') {
+      if (!canManage) return;
+      e.preventDefault();
+      setNewFolderOpen(true);
+    } else if (!mod && e.shiftKey && !e.altKey && key === 'f') {
+      // Chrome reserves Ctrl+Shift+N for incognito windows, and a page cannot
+      // override it; Shift+F is the same shortcut Google Drive uses.
+      if (!canManage) return;
+      e.preventDefault();
+      setNewFolderOpen(true);
+    } else if (mod && key === 'a') {
+      if (files.length === 0) return;
+      e.preventDefault();
+      setSelected(new Set(files.map((f) => f.id)));
+    } else if (mod && (key === 'c' || key === 'x')) {
+      if (!canActOnFiles || selectedFiles.length === 0) return;
+      e.preventDefault();
+      stash(key === 'x' ? 'cut' : 'copy');
+    } else if (mod && key === 'v') {
+      if (!canManage || !clipboard) return;
+      e.preventDefault();
+      void paste();
+    } else if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) {
+      if (!canActOnFiles || selectedFiles.length === 0) return;
+      e.preventDefault();
+      setPending({ kind: 'trash-many', files: selectedFiles });
+    } else if (!mod && e.key === 'F2') {
+      if (!canActOnFiles || selectedFiles.length !== 1) return;
+      e.preventDefault();
+      requestAction('rename', selectedFiles[0]!);
+    }
+  };
+  useEffect(() => {
+    window.addEventListener('keydown', onShortcut);
+    return () => window.removeEventListener('keydown', onShortcut);
+  });
+
   if (gate.kind === 'loading') {
     return (
       <main className="media-page">
@@ -407,6 +530,7 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
                 type="button"
                 className="button"
                 onClick={() => setNewFolderOpen(true)}
+                title="New folder (Shift+F)"
                 data-testid="new-folder-btn"
               >
                 + Folder
@@ -423,6 +547,30 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
         <p className="error-text" role="alert">
           {uploadError}
         </p>
+      )}
+
+      {clipboard && canActOnFiles && (
+        <div className="selection-bar" role="status" data-testid="clipboard-bar">
+          <span className="selection-count">
+            {clipboard.files.length} {clipboard.files.length === 1 ? 'file' : 'files'} ready to{' '}
+            {clipboard.mode === 'cut' ? 'move' : 'copy'}
+          </span>
+          <div className="selection-actions">
+            <button
+              type="button"
+              className="button primary-button"
+              onClick={() => void paste()}
+              disabled={pasting || !canManage}
+              title={canManage ? 'Paste here (Ctrl+V)' : 'Open a folder to paste'}
+              data-testid="clipboard-paste"
+            >
+              {pasting ? 'Pasting…' : 'Paste here'}
+            </button>
+            <button type="button" className="button" onClick={() => setClipboard(null)}>
+              Clear
+            </button>
+          </div>
+        </div>
       )}
 
       {selected.size > 0 ? (
@@ -443,6 +591,28 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
             >
               Select all
             </button>
+            {canActOnFiles && (
+              <>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => stash('cut')}
+                  title="Cut (Ctrl+X)"
+                  data-testid="selection-cut"
+                >
+                  Cut
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => stash('copy')}
+                  title="Copy (Ctrl+C)"
+                  data-testid="selection-copy"
+                >
+                  Copy
+                </button>
+              </>
+            )}
             <a
               className="button"
               href={
@@ -553,6 +723,20 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
                   next.delete('q');
                 }
                 setSearchParams(next, { replace: true });
+              }}
+              ref={searchRef}
+              onKeyDown={(e) => {
+                // Escape empties the box (or, once empty, leaves it), so the
+                // page shortcuts are usable again.
+                if (e.key !== 'Escape') return;
+                if (search) {
+                  setSearch('');
+                  const next = new URLSearchParams(searchParams);
+                  next.delete('q');
+                  setSearchParams(next, { replace: true });
+                } else {
+                  e.currentTarget.blur();
+                }
               }}
               data-testid="media-search"
             />
@@ -785,12 +969,28 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
         title="New folder"
         label="Folder name"
         placeholder="2024/vacation"
-        hint="The folder will be created when you move or upload a file into it."
-        onCancel={() => setNewFolderOpen(false)}
-        onConfirm={(name) => {
-          const newPath = folderPath ? `${folderPath}/${name}` : name;
-          setFolderPath(newPath);
+        hint="The folder is created in the library right away."
+        confirmLabel="Create"
+        busy={dialogBusy}
+        error={dialogError}
+        onCancel={() => {
           setNewFolderOpen(false);
+          setDialogError(null);
+        }}
+        onConfirm={(name) => {
+          if (!libraryId) return;
+          const clean = name.trim().replace(/^\/+|\/+$/g, '');
+          if (!clean) return;
+          const newPath = folderPath ? `${folderPath}/${clean}` : clean;
+          setDialogBusy(true);
+          setDialogError(null);
+          createFolder(libraryId, newPath)
+            .then(() => {
+              setFolderPath(newPath);
+              setNewFolderOpen(false);
+            })
+            .catch((e: unknown) => setDialogError(e instanceof Error ? e.message : String(e)))
+            .finally(() => setDialogBusy(false));
         }}
         testId="new-folder-dialog"
       />
