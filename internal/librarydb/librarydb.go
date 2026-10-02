@@ -133,6 +133,12 @@ func addIndexedFileMediaType(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS indexed_files_type_idx ON indexed_files (media_type)`); err != nil {
 		return err
 	}
+	// Covers the dashboard's per-type counts and newest-first listings.
+	if _, err := db.Exec(
+		`CREATE INDEX IF NOT EXISTS indexed_files_status_type_mod_idx
+		 ON indexed_files (status, media_type, mod_time)`); err != nil {
+		return err
+	}
 	// Every existing row is still classified as 'other' at this point. The
 	// extension is what the type is derived from, so the backfill is a rewrite
 	// rather than a guess — it is also exactly what a re-index would store, so

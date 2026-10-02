@@ -143,8 +143,19 @@ export interface ListFilesParams {
 export const listFiles = (libraryId: string, params: ListFilesParams = {}) =>
   apiGet<FileListResponse>(`/libraries/${libraryId}/files${query({ ...params })}`);
 
+export const getFileCounts = (libraryId: string) =>
+  apiGet<{
+    counts: Partial<Record<'photo' | 'video' | 'audio' | 'document' | 'other', number>>;
+    albums: number;
+    tags: number;
+    favorites: number;
+  }>(`/libraries/${libraryId}/files/counts`);
+
 export const listFolders = (libraryId: string, parent?: string) =>
   apiGet<FolderListResponse>(`/libraries/${libraryId}/folders${query({ parent })}`);
+
+export const createFolder = (libraryId: string, path: string) =>
+  apiPost<{ folder: import('./types').Folder }>(`/libraries/${libraryId}/folders`, { path });
 
 export const getFile = (libraryId: string, fileId: string) =>
   apiGet<{ file: FileSummary }>(`/libraries/${libraryId}/files/${fileId}`);

@@ -588,3 +588,84 @@ func TestDownloadDoesNotModifyFile(t *testing.T) {
 	}
 	_ = time.Now() // silence unused import
 }
+
+func TestListFoldersReadsDiskIncludingEmptyFolders(t *testing.T) {
+	svc, _, root := newTestService(t)
+	for _, d := range []string{"trips/2024", "empty", ".hidden"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	top, err := svc.ListFolders(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 2 || top[0].RelPath != "empty" || top[1].RelPath != "trips" {
+		t.Fatalf("top-level folders = %+v", top)
+	}
+	sub, err := svc.ListFolders(context.Background(), "trips")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sub) != 1 || sub[0].RelPath != "trips/2024" {
+		t.Fatalf("sub folders = %+v", sub)
+	}
+}
+
+func TestCreateFolderMakesDirectoryOnDisk(t *testing.T) {
+	svc, _, root := newTestService(t)
+	if _, err := svc.CreateFolder("trips/2025"); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(filepath.Join(root, "trips", "2025")); err != nil || !fi.IsDir() {
+		t.Fatalf("folder not created: %v", err)
+	}
+	if _, err := svc.CreateFolder(".cairn/x"); err == nil {
+		t.Fatal("hidden folder should be rejected")
+	}
+	if _, err := svc.CreateFolder("../escape"); err == nil {
+		t.Fatal("traversal should be rejected")
+	}
+	if got, err := svc.ListFolders(context.Background(), "nope"); err != nil || len(got) != 0 {
+		t.Fatalf("missing parent: %v %v", got, err)
+	}
+}
+
+func TestListFoldersCountsIndexedFiles(t *testing.T) {
+	svc, store, root := newTestService(t)
+	if _, err := svc.CreateFolder("trips/2024"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if n, err := store.CountPresentUnder(ctx, "trips"); err != nil || n != 0 {
+		t.Fatalf("empty count = %d, %v", n, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "trips", "2024", "a.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertFromPath(ctx, "trips/2024/a.jpg", 1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	top, err := svc.ListFolders(ctx, "")
+	if err != nil || len(top) != 1 || top[0].FileCount != 1 {
+		t.Fatalf("top = %+v, %v", top, err)
+	}
+}
+
+func TestCountsByTypeAndCollections(t *testing.T) {
+	_, store, _ := newTestService(t)
+	ctx := context.Background()
+	for _, p := range []string{"a/1.jpg", "a/2.jpg", "b/v.mp4"} {
+		if err := store.UpsertFromPath(ctx, p, 1, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	counts, err := store.CountsByType(ctx)
+	if err != nil || counts[media.MediaTypePhoto] != 2 || counts[media.MediaTypeVideo] != 1 {
+		t.Fatalf("counts = %v, %v", counts, err)
+	}
+	c, err := store.CountCollections(ctx)
+	if err != nil || c != (media.CollectionCounts{}) {
+		t.Fatalf("collections = %+v, %v", c, err)
+	}
+}
