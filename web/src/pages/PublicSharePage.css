@@ -9,8 +9,8 @@
   padding: var(--space-5) var(--space-4);
   max-width: 60rem;
   margin: 0 auto;
-  background: var(--bg);
-  color: var(--text-primary);
+  background: var(--color-background);
+  color: var(--color-text-primary);
 }
 
 .share-view-header {
@@ -18,17 +18,17 @@
   align-items: baseline;
   gap: var(--space-3);
   padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .share-view-header p {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
 }
 
 .share-view-title {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: var(--font-size-xl);
   overflow-wrap: anywhere;
 }
 
@@ -40,15 +40,15 @@
   gap: var(--space-3);
   max-width: 28rem;
   padding: var(--space-5);
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--color-surface);
   box-shadow: var(--shadow-2);
 }
 
 .share-gate h1 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: var(--font-size-xl);
 }
 
 .share-gate p {
@@ -63,9 +63,9 @@
 }
 
 .share-gate-form label {
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
 }
 
 .share-gate-row {
@@ -78,18 +78,18 @@
   min-width: 0;
   padding: var(--space-2) var(--space-3);
   font: inherit;
-  color: var(--text-primary);
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
 .share-gate-row input:focus-visible {
-  border-color: var(--primary);
+  border-color: var(--color-primary-ink);
 }
 
 .share-gate-note {
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
 }
 
 /* -------------------------------- files ------------------------------- */
@@ -108,9 +108,9 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--color-surface);
 }
 
 .share-file-glyph {
@@ -120,8 +120,8 @@
   display: grid;
   place-items: center;
   border-radius: var(--radius-sm);
-  background: var(--border-subtle);
-  font-size: 20px;
+  background: var(--color-border-subtle);
+  font-size: var(--font-size-xl);
 }
 
 .share-file-meta {
@@ -130,7 +130,7 @@
   gap: var(--space-1);
   min-width: 0;
   flex: 1 1 auto;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
 }
 
 .share-file-name {
@@ -142,4 +142,8 @@
   display: flex;
   justify-content: center;
   padding: var(--space-3) 0;
+}
+.share-brand {
+  font-size: 28px;
+  color: var(--color-primary-ink);
 }

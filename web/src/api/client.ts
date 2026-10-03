@@ -165,3 +165,69 @@ export async function apiUpload<T>(endpoint: string, file: File, path?: string):
   }
   return (await response.json()) as T;
 }
+
+export interface UploadProgress {
+  loaded: number;
+  total: number;
+}
+
+/**
+ * A multipart upload that reports progress and can be cancelled.
+ *
+ * `fetch` cannot report upload progress, so this one request uses
+ * XMLHttpRequest. Errors are the same {@link ApiError} every other call
+ * throws, and an abort rejects with a `DOMException` named `AbortError`.
+ */
+export function apiUploadWithProgress<T>(
+  endpoint: string,
+  file: File,
+  path: string | undefined,
+  { onProgress, signal }: { onProgress?: (p: UploadProgress) => void; signal?: AbortSignal } = {},
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}${endpoint}`);
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.({ loaded: event.loaded, total: event.total });
+    };
+    xhr.onload = () => {
+      const parsed = parseJson(xhr.responseText);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve((xhr.status === 204 ? undefined : parsed) as T);
+        return;
+      }
+      const envelope = parsed as ApiErrorEnvelope | null;
+      const body: ApiErrorBody = envelope?.error?.code
+        ? envelope.error
+        : { code: 'UNKNOWN', message: `Request failed with status ${xhr.status}.`, request_id: '' };
+      notifyAuthFailure(xhr.status, body);
+      reject(new ApiError(body, xhr.status));
+    };
+    xhr.onerror = () => reject(new Error('The connection to the server was lost.'));
+    xhr.onabort = () => reject(new DOMException('Upload cancelled.', 'AbortError'));
+
+    if (signal) {
+      if (signal.aborted) {
+        reject(new DOMException('Upload cancelled.', 'AbortError'));
+        return;
+      }
+      signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+
+    const form = new FormData();
+    if (path) form.append('path', path);
+    form.append('file', file);
+    xhr.send(form);
+  });
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}

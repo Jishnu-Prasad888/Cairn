@@ -8,6 +8,7 @@
 
 import { API_BASE } from '../api/client';
 import type { FileSummary } from '../api/types';
+import type { IconName } from './ui/Icon';
 
 export const MEDIA_LABEL: Record<string, string> = {
   photo: 'Photo',
@@ -23,23 +24,39 @@ export const MEDIA_TYPES = ['photo', 'video', 'audio', 'document', 'other'] as c
 export const mediaLabel = (mediaType?: string): string =>
   MEDIA_LABEL[mediaType ?? 'other'] ?? 'File';
 
-export function downloadUrl(libraryId: string, file: FileSummary): string {
+/** The original bytes. Streams with Range support, so video seeks without a full download. */
+export function downloadUrl(libraryId: string, file: Pick<FileSummary, 'id'>): string {
   return `${API_BASE}/libraries/${libraryId}/files/${file.id}/download`;
 }
 
-export function thumbnailUrl(libraryId: string, file: FileSummary): string {
+/** The small JPEG preview the grid uses. Only photos have one. */
+export function thumbnailUrl(libraryId: string, file: Pick<FileSummary, 'id'>): string {
   return `${API_BASE}/libraries/${libraryId}/files/${file.id}/thumbnail`;
 }
 
-export function mediaGlyph(file: FileSummary): string {
-  if (file.media_type === 'photo') return '🖼';
-  if (file.media_type === 'video') return '🎬';
-  if (file.media_type === 'audio') return '🎵';
-  if (file.media_type === 'document') return '📄';
-  return '📦';
+/** The file's extension, upper-cased, for a list view's Type column ("JPG"). */
+export function fileExtension(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toUpperCase() : '';
 }
 
 /** Photo and video get a real preview; everything else falls back to a glyph. */
 export function isPreviewable(file: FileSummary): boolean {
   return file.media_type === 'photo' || file.media_type === 'video';
+}
+
+/** The icon that stands for a file's media type, for tiles without a preview. */
+export function mediaTypeIcon(mediaType: string | undefined): IconName {
+  switch (mediaType) {
+    case 'photo':
+      return 'photo';
+    case 'video':
+      return 'video';
+    case 'audio':
+      return 'audio';
+    case 'document':
+      return 'document';
+    default:
+      return 'file';
+  }
 }

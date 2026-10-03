@@ -200,7 +200,7 @@ export default function SharingPage() {
 
   if (gate.kind === 'loading') {
     return (
-      <main className="sharing-page">
+      <main className="page sharing-page">
         <LoadingState label="Loading libraries…" />
       </main>
     );
@@ -229,7 +229,7 @@ export default function SharingPage() {
 
   if (gate.kind === 'error') {
     return (
-      <main className="sharing-page">
+      <main className="page sharing-page">
         {header}
         <ErrorState message={gate.message} onRetry={shares.reload} />
       </main>
@@ -238,7 +238,7 @@ export default function SharingPage() {
 
   if (gate.kind === 'empty') {
     return (
-      <main className="sharing-page">
+      <main className="page sharing-page">
         {header}
         <NoLibrariesState isAdmin={user?.role === 'admin'} />
       </main>
@@ -246,7 +246,7 @@ export default function SharingPage() {
   }
 
   return (
-    <main className="sharing-page">
+    <main className="page sharing-page">
       {header}
 
       {shares.error && <ErrorState message={shares.error} onRetry={shares.reload} />}

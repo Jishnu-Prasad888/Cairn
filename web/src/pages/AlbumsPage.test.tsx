@@ -11,6 +11,7 @@ import {
   originalFetch,
   renderPage,
 } from '../test/harness';
+import type { RouteHandler } from '../test/harness';
 import AlbumsPage from './AlbumsPage';
 
 const albums = {
@@ -44,10 +45,14 @@ const searchHit = {
   files: [fileFixture({ id: 'f3', rel_path: 'beach.jpg', name: 'beach.jpg', content_hash: 'ghi' })],
 };
 
-function setup(overrides: { albums?: typeof albums; albumFiles?: typeof albumFiles } = {}) {
+function setup(
+  extraRules: RouteHandler[] = [],
+  overrides: { albums?: typeof albums; albumFiles?: typeof albumFiles } = {},
+) {
   const albumList = overrides.albums ?? albums;
   const files = overrides.albumFiles ?? albumFiles;
   const fn = mockApi([
+    ...extraRules,
     (url, init) =>
       url.endsWith('/api/v1/libraries/lib1/albums/a1/files/f3') && init?.method === 'POST'
         ? noContent()
@@ -116,7 +121,7 @@ describe('AlbumsPage', () => {
   });
 
   it('shows an empty state when there are no albums', async () => {
-    setup({ albums: { albums: [] } });
+    setup([], { albums: { albums: [] } });
 
     expect(await screen.findByTestId('albums-empty')).toBeInTheDocument();
   });
@@ -158,7 +163,7 @@ describe('AlbumsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
     await screen.findByTestId('album-detail');
 
-    fireEvent.click(screen.getByRole('button', { name: '← Albums' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to albums' }));
 
     expect(await screen.findByTestId('albums-grid')).toBeInTheDocument();
   });
@@ -170,7 +175,9 @@ describe('AlbumsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
     await screen.findByTestId('file-grid');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove IMG_0001.png from album' }));
+    // Photos are removed through the selection bar; the album itself is untouched.
+    fireEvent.click(screen.getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.click(await screen.findByTestId('selection-remove'));
 
     await waitFor(() => {
       expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/albums/a1/files/f1')).toBe(true);
@@ -185,7 +192,8 @@ describe('AlbumsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
     await screen.findByTestId('album-detail');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete album' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Album options' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete album' }));
     const dialog = await screen.findByTestId('delete-album-dialog');
     expect(dialog).toHaveAttribute('role', 'dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete album' }));
@@ -198,6 +206,55 @@ describe('AlbumsPage', () => {
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
+  it('renames an album from its options menu', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/albums/a1') && init?.method === 'PATCH'
+          ? json({ album: { ...albums.albums[0], name: 'Summer 2026' } })
+          : undefined,
+    ]);
+
+    await screen.findByTestId('albums-grid');
+    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    await screen.findByTestId('album-detail');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Album options' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename album' }));
+    const dialog = await screen.findByTestId('rename-album-dialog');
+    fireEvent.change(within(dialog).getByLabelText('Album name'), {
+      target: { value: 'Summer 2026' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'PATCH', '/api/v1/libraries/lib1/albums/a1')).toEqual({
+        name: 'Summer 2026',
+      });
+    });
+  });
+
+  it('uses a selected photo as the album cover', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/albums/a1') && init?.method === 'PATCH'
+          ? json({ album: albums.albums[0] })
+          : undefined,
+    ]);
+
+    await screen.findByTestId('albums-grid');
+    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    await screen.findByTestId('file-grid');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select clip.mp4' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use as album cover' }));
+
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'PATCH', '/api/v1/libraries/lib1/albums/a1')).toEqual({
+        cover_file_id: 'f2',
+      });
+    });
+  });
+
   it('keeps the album when the delete dialog is cancelled', async () => {
     const fetchMock = setup();
 
@@ -205,7 +262,8 @@ describe('AlbumsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
     await screen.findByTestId('album-detail');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete album' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Album options' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete album' }));
     const dialog = await screen.findByTestId('delete-album-dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 

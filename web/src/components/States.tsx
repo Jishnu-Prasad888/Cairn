@@ -1,19 +1,23 @@
 /**
- * Small presentational building blocks shared by every page: the page frame,
- * library selector, status badges, and the loading/empty/error states.
+ * The building blocks every page shares: its header, and the states a page
+ * can be in besides "showing content" — loading, empty, failed, offline, and
+ * not allowed.
  *
- * These existed as ad-hoc markup and CSS per page, which is why the layout
- * drifted and why an offline library was invisible instead of explained.
+ * They are written for people, not for operators: what happened, what it
+ * means for them, and what to do next, in a sentence or two. Technical detail
+ * (paths, codes) stays out of the way.
  */
 
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
+import { useAuth } from '../auth/authContext';
 import { useLibraries } from '../api/libraries';
 import type { Library, LibraryStatus } from '../api/types';
+import { Icon, type IconName } from './ui/Icon';
 import './States.css';
 
-/** The `page-header` + `h1` + `header-controls` frame every page uses. */
+/** The title row every page starts with. */
 export function PageHeader({
   title,
   subtitle,
@@ -27,7 +31,7 @@ export function PageHeader({
     <header className="page-header">
       <div className="page-header-titles">
         <h1>{title}</h1>
-        {subtitle && <p className="muted page-header-subtitle">{subtitle}</p>}
+        {subtitle && <p className="page-header-subtitle">{subtitle}</p>}
       </div>
       {controls && <div className="header-controls">{controls}</div>}
     </header>
@@ -35,9 +39,8 @@ export function PageHeader({
 }
 
 /**
- * The library picker. Shows an explicit "Offline" marker for libraries whose
- * storage is unreachable so a user can tell an empty library from a
- * disconnected disk.
+ * A library dropdown, for pages (permissions, sharing) that act on a library
+ * other than the one being browsed.
  */
 export function LibrarySelect({
   label = 'Library',
@@ -71,7 +74,7 @@ export function LibrarySelect({
   );
 }
 
-/** A connected/disconnected pill for a library's storage. */
+/** Connected or disconnected, as a small dot-and-word badge. */
 export function LibraryStatusBadge({ status }: { status: LibraryStatus }) {
   const offline = status === 'offline';
   return (
@@ -90,18 +93,62 @@ export function TypeBadge({ children }: { children: ReactNode }) {
   return <span className="type-badge">{children}</span>;
 }
 
+/**
+ * Inline "this is loading" for lists and panels. Media grids use their own
+ * skeleton instead, which holds the shape of what is coming.
+ */
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
-    <p className="muted" role="status">
+    <p className="loading-state" role="status">
+      <span className="loading-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
       {label}
     </p>
   );
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+/** Rows of placeholder text in the shape of a list. */
+export function ListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="list-skeleton" aria-hidden="true">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="list-skeleton-row">
+          <span className="skeleton list-skeleton-thumb" />
+          <span
+            className="skeleton list-skeleton-line"
+            style={{ width: `${40 + ((i * 17) % 40)}%` }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Something failed. Calm, specific, and with a way forward: the server's
+ * message (already written for people), and Try again when it makes sense.
+ */
+export function ErrorState({
+  message,
+  onRetry,
+  title = "Couldn't load this",
+}: {
+  message: string;
+  onRetry?: () => void;
+  title?: string;
+}) {
   return (
     <div className="error-state" role="alert">
-      <p className="error-text">{message}</p>
+      <span className="state-icon state-icon-error" aria-hidden="true">
+        <Icon name="alert" />
+      </span>
+      <div className="error-state-text">
+        <p className="error-state-title">{title}</p>
+        <p className="error-text">{message}</p>
+      </div>
       {onRetry && (
         <button type="button" className="button" onClick={onRetry}>
           Try again
@@ -111,20 +158,29 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
+/**
+ * Nothing here (yet). The heading is set in the brand hand, because an empty
+ * library is a beginning rather than an error; the body says what will fill it.
+ */
 export function EmptyState({
   title,
   children,
   action,
   testId,
+  icon = 'photo',
 }: {
   title: string;
   children?: ReactNode;
   action?: ReactNode;
   testId?: string;
+  icon?: IconName;
 }) {
   return (
     <div className="empty-state" data-testid={testId}>
-      <h2>{title}</h2>
+      <span className="empty-state-pebble" aria-hidden="true">
+        <Icon name={icon} size={28} />
+      </span>
+      <h2 className="empty-state-title">{title}</h2>
       {children && <div className="empty-state-body">{children}</div>}
       {action && <div className="empty-state-action">{action}</div>}
     </div>
@@ -132,14 +188,15 @@ export function EmptyState({
 }
 
 /**
- * The "no libraries at all" state. Administrators get a route to register one;
- * members are told to ask, because library registration is admin-only.
+ * The "no libraries at all" state. Administrators get a route to add one;
+ * members are told to ask, because adding a library is admin-only.
  */
 export function NoLibrariesState({ isAdmin }: { isAdmin: boolean }) {
   return (
     <EmptyState
-      title="No libraries yet"
+      title="Let's find your photos"
       testId="no-libraries"
+      icon="drive"
       action={
         isAdmin ? (
           <Link className="button primary-button" to="/libraries">
@@ -148,34 +205,50 @@ export function NoLibrariesState({ isAdmin }: { isAdmin: boolean }) {
         ) : undefined
       }
     >
-      <p className="muted">
-        Cairn organizes media that already lives on your disk. Point it at a folder of photos,
-        videos, or files and it will index them in place — nothing is copied or modified.
+      <p>
+        Cairn organizes media that already lives on your disk. Point it at a folder and it will
+        index it in place — nothing is copied or changed.
       </p>
       {!isAdmin && (
-        <p className="muted">
-          You have not been given access to a library yet. Ask an administrator to grant you one.
-        </p>
+        <p>You don't have access to a library yet. Ask an administrator to share one.</p>
       )}
     </EmptyState>
   );
 }
 
 /**
- * The "your library's storage is not reachable" state. Distinct from empty:
- * the metadata is still there, the bytes are not.
+ * The library's drive is not connected. Not an error and not empty: the
+ * details Cairn keeps (albums, tags, memories) are still here, the files are
+ * not. Administrators also see where the drive was last mounted.
  */
 export function LibraryOfflineNotice({ library }: { library: Library }) {
+  const { user } = useAuth();
   return (
-    <div className="offline-notice" role="status" data-testid="library-offline">
-      <LibraryStatusBadge status="offline" />
-      <div>
-        <strong>{library.name} is offline.</strong>
-        <p className="muted">
-          Its storage was last seen at <code>{library.root}</code>. Your tags, albums, and memories
-          are safe — reconnect the drive and Cairn will pick up where it left off.
+    <div className="notice notice-warning" role="status" data-testid="library-offline">
+      <span className="state-icon state-icon-warning" aria-hidden="true">
+        <Icon name="drive-off" />
+      </span>
+      <div className="notice-text">
+        <p className="notice-title">{library.name} is unavailable</p>
+        <p>
+          The drive holding this library is disconnected. Your albums, tags, and memories are safe —
+          reconnect it and Cairn will pick up where it left off.
         </p>
+        {user?.role === 'admin' && (
+          <p className="notice-detail">
+            Last seen at <code>{library.root}</code> · <Link to="/libraries">Reconnect</Link>
+          </p>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Inline "you can't see this", for a section of a page rather than a whole route. */
+export function PermissionDeniedState({ what = 'this' }: { what?: string }) {
+  return (
+    <EmptyState title="Not shared with you" icon="lock" testId="permission-denied">
+      <p>You don't have access to {what}. Ask the library's owner to share it with you.</p>
+    </EmptyState>
   );
 }

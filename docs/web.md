@@ -9,7 +9,7 @@ The app is a session-based shell around that API. `AuthProvider` resolves the
 session once, `LibrariesProvider` loads the libraries the caller can read once
 and shares them, and every page renders through `AppShell` against those two
 facts. Shared pieces (`Dialog`, `States`, `FileOperations`, `ViewerModal`,
-`FileGrid`, `LibraryPicker`, `RefPicker`) are the reason a page is a page and
+`MediaGrid`, `LibraryPicker`, `RefPicker`) are the reason a page is a page and
 not a copy of the same fetch/cancel/error logic.
 
 ## Pages
@@ -23,43 +23,50 @@ surface for.
 | `/login`           | Sign in                                   | `/auth/login`                                                                     |
 | `/s/:token`        | Public share (no session)                 | `/shares/{token}`, its files, and per-file download                                |
 | `/403`             | Access denied                             | Standalone — a permission failure replaces the whole UI                            |
-| `/`                | Home                                      | Recent media, quick counts, and the section links                                   |
-| `/photos`          | Photos                                    | Photo listing and `search?type=photo`                                               |
-| `/videos`          | Videos                                    | Video listing and `search?type=video`                                               |
-| `/files`           | Files                                     | The untyped listing, with folders                                                  |
-| `/browse`          | Browse                                    | Flat and untyped; where the top-bar search lands                                    |
-| `/memories`, `/memories/:memoryId` | Memories                  | notebook editor (text + image blocks, live Markdown, layouts, slideshow, media picker, image editor, Preview); code in `src/memories/`, see [memories.md](memories.md) |
-| `/albums`          | Albums                                    | `albums` CRUD and membership                                                       |
-| `/people`          | People                                    | `people`, face clusters, naming, merging, and the unassigned-face purge            |
-| `/tags`            | Tags                                      | `tags` CRUD and the per-tag file listing                                           |
-| `/favorites`       | Favorites                                 | `/favorites`; per-user, so only you see yours                                       |
-| `/trash`           | Trash                                     | `trash`, restore, and the permanent delete                                         |
-| `/shared`          | Sharing                                   | `shares` CRUD, capabilities, expiry, revoke, and the link itself                   |
-| `/duplicates`      | Duplicate groups                          | `files/duplicates`; keep one, delete the rest                                        |
-| `/libraries`       | Libraries                                 | Register, reconnect, re-index, and unregister storage                              |
-| `/permissions`     | Permissions                               | Per-library grants, plus a typed user id when the admin user list is not readable  |
-| `/ml`              | Machine learning                          | Similarity and face passes, the signature and face purges, and their availability  |
-| `/backups`         | Backups                                   | Run, verify, and restore; administrator-only                                        |
-| `/settings`        | Settings                                  | Account, appearance, the Organize links, accounts (admin), the Server upkeep links  |
+| `/`                | Home                                      | Newest photos, people, albums, memories — no counters                              |
+| `/photos`, `/videos` | Timelines                               | Every photo or video, newest first, grouped by day                                  |
+| `/files`           | Files                                     | Folders, breadcrumbs, grid or list, upload, new folder                              |
+| `/search`          | Search results                            | `?q=`, `?type=`, `?person=`, `?album=`, `?tag=`                                     |
+| `/albums`, `/albums/:id` | Albums                              | Cover grid; one album with rename, cover, add/remove                                |
+| `/memories`, `/memories/:id` | Memories                         | Notebook editor (text + image blocks, live Markdown, layouts, slideshow, media picker, image editor, Preview); code in `src/memories/`, see [memories.md](memories.md) |
+| `/people`          | People                                    | Round face portraits, naming, merging, face tools menu                               |
+| `/tags`            | Tags                                      | `tags` CRUD and the per-tag file grid                                                |
+| `/favorites`       | Favorites                                 | `/favorites`; per-user                                                               |
+| `/trash`           | Trash                                     | Restore, delete forever, empty trash — bulk                                          |
+| `/shared`          | Sharing                                   | `shares` CRUD, capabilities, expiry, revoke                                          |
+| `/duplicates`, `/libraries`, `/permissions`, `/ml`, `/backups` | Manage        | Upkeep surfaces, grouped under "Manage" in the sidebar                                |
+| `/settings`        | Settings                                  | Account, appearance, library, accounts (admin), advanced, about                      |
 
-`PhotosPage`, `VideosPage`, `FilesPage`, and `BrowsePage` are four small
-configurations of a single `MediaPage` — one grid, one search, one set of
-filters, one viewer — rather than four copies of it.
+`/media` and `/browse` redirect to `/files` / `/search`. Every filter, folder,
+query, and the open photo (`?view=<id>`) is in the address bar.
+
+`PhotosPage`, `VideosPage`, `FilesPage`, and `SearchPage` are four small
+configurations of a single `MediaPage` — one grid, one set of filters, one
+viewer — rather than four copies of it. The look and the component inventory
+are documented in `docs/design-system.md`.
 
 ## App shell and navigation
 
-`AppShell` (`web/src/components/AppShell.tsx`) renders the left navigation, the
-top bar, and the account footer. Two groups, in the order the product spec
-lists them: the browsing sections (Home, Photos, Videos, Files, Memories,
-Albums, People, Tags, Shared, Favorites, Trash, Settings) and **Upkeep**
-(Duplicates, Libraries, Permissions, Machine learning, Backups). `/browse` is
-deliberately not linked — a "Browse" entry next to Photos, Videos, and Files is
-four ways to the same place — but the top-bar search navigates there, and the
-query stays in the address bar so it is linkable and re-applies on reload.
+`components/app-shell/AppShell.tsx` composes the `Sidebar`, `TopBar`,
+`MobileNav`, the upload tray, and the shortcuts sheet around every signed-in
+page. Navigation lives in `navigation.ts` so the sidebar, the phone's bottom
+bar, and the "More" drawer never disagree: Home, Photos, Videos, Albums,
+People, Memories, Files, Favorites, Shared, Trash; a collapsible **Manage**
+group (Tags, Duplicates, Libraries, Permissions, Machine learning, Backups);
+Settings and the library switcher at the foot.
 
-Below the icon rail's breakpoint the sidebar becomes a drawer: a menu button
-with `aria-expanded`, a dismissable backdrop, and Escape that closes it and
-returns focus to the button that opened it.
+- **Search** (`SearchBox`) is the prominent control in the top bar. `/` focuses
+  it; it suggests as you type — search everything, in Photos, in Videos, and
+  matching people, albums, and tags from the real library — and offers recent
+  searches (stored per browser). Submitting goes to `/search?q=`.
+- **Library switcher** shows the selected library with its state: offline, an
+  indexing count that climbs while a scan runs (polled every few seconds, only
+  while the tab is visible), or its item count.
+- **Narrow screens**: below 900px the sidebar is a drawer opened from "More" in
+  the bottom bar (Home, Photos, Albums, Search, More); below 600px search is a
+  tab rather than a top-bar box.
+- Global shortcuts: `/` (search) and `?` (shortcut sheet), ignored while typing
+  or while a dialog or the viewer owns the keyboard.
 
 ## Library selection
 
@@ -97,58 +104,52 @@ that fails keeps its error and stays open, so the action can be retried.
 
 ## Media browser
 
-`MediaPage.tsx` backs Photos, Videos, Files, and Browse:
+`MediaPage.tsx` backs Photos, Videos, Files, and Search through one
+`useFileListing` hook (`components/media/`):
 
-- **Library selector and folders** — folder cards with file counts and
-  breadcrumb navigation over `rel_path`. Photos, Videos, and Files browse
-  folders; Browse is deliberately flat, because that is the view a search
-  result lands in.
-- **Search** — server-side, so `?q=` from the top bar lands in the same
-  component and a shareable URL reproduces it. A query switches the page from
-  `listFiles` to `searchFiles`; the two are the same response shape.
-- **Filters** — a date range and a size range, sent as query parameters, with
-  a "Clear filters" that actually re-queries instead of only clearing the
-  inputs. The `type` filter is fixed per page by the page's configuration
-  rather than by a control, because a Photos page offering a Videos filter is
-  a contradiction.
-- **Sort** — date, name, size, and type, in both directions, in one control so
-  the direction is visible rather than implied by a second click.
-- **Pagination** — cursor-based, "Load more" rather than numbered pages,
-  because the API is cursor-based and a page number would be a lie.
-- **Upload** — multipart `POST .../files/upload` with the computed destination
-  path, an "Uploading…" state, and a reload on success.
+- **Photos / Videos** are timelines: the whole library, `recursive`, newest
+  first, grouped under day headings. **Files** is the file manager: folders and
+  breadcrumbs (each folder a history entry), grid or list (remembered), an
+  in-folder search, new folder, and drag-to-move onto a folder or breadcrumb.
+- A plain listing uses `GET /files` (sort order, folders); a query, a
+  person/album/tag, or a date/size filter uses `GET /search`.
+- **Grid** (`MediaGrid`) is virtualized: rows are laid out from pure arithmetic
+  (`layout.ts`) and only those near the viewport are mounted, so 100k loaded
+  items still render a few dozen tiles. Pages load by cursor as the end
+  approaches (IntersectionObserver), with a "Load more" fallback. Tiles are
+  stable squares, the image fades in over a quiet placeholder, and keyboard
+  focus uses a single roving tab stop.
+- **Selection** (`useSelection`, `SelectionToolbar`, `useMediaActions`): click,
+  Shift range, Ctrl/Cmd toggle, Space, Ctrl+A, Escape, long press on touch. The
+  bar offers Download, Add to album, Favorite, Move to trash (with a
+  confirmation), plus page-specific actions. A right-click or the row's "more"
+  opens the same actions as a menu.
+- **Upload** goes through `UploadProvider`: drop files anywhere on the page or
+  use Upload; the compact tray shows per-file progress with cancel and retry
+  while the person keeps browsing.
 
 ## Viewer
 
-`components/ViewerModal.tsx` is the app's most-used surface. It owns the image
-and video stage and the surrounding chrome, and nothing else: mutations are
-delegated to the page through `onRequestAction`, which routes into
-`useFileOperations` (`components/FileOperations.tsx`) so the dialogs exist once
-rather than once per page.
+`components/ViewerModal.tsx` is a full-window dark lightbox. The photo loads
+progressively (the grid thumbnail first, the original over it; a format the
+browser cannot decode falls back to the preview). Video streams — the download
+route serves `Range` requests — and is never held in memory.
 
-- **Zoom** — `+`/`-`, the buttons, or Ctrl/Cmd with the wheel, through
-  100–800%, and `0` to fit. Zooming resizes the element rather than painting a
-  `transform` over it, because a transform does not enlarge the scrollable area
-  and the corners of a scaled photo would be unreachable.
-- **Fullscreen** — button or `f`; escape leaves fullscreen before it leaves the
-  viewer.
-- **Previous / next** — arrow keys or buttons, across the siblings the page
-  passed in, so paging follows whatever collection the viewer was opened from.
-- **Slideshow** — `s` or the button; advances through the siblings and **stops
-  at the end** rather than looping behind the user's back. The button is
-  `aria-pressed`, so its state is not something you have to see to know.
-- **Panels** — Details (dimensions, duration, camera, capture time, GPS map
-  link), Tags, People, Memories, Similar, and Share, as a tablist toggled with
-  `t` that only fetches the tab you are looking at. A section the server
-  cannot answer says so instead of showing an error.
-- **Markdown note** — a per-file editor with Write/Preview and debounced
-  autosave.
-- **Actions** — Download, Favorite, Rename, Move, Copy, Move to trash. Every
-  one of them is a dialog. `DELETE /files/{id}` acts on `body.path`, not the
-  id, so the path is what gets sent.
-- **Focus** — the dialog takes focus on open and hands it back to the tile that
-  opened it on close, and Tab stays inside it. Keys are ignored while a text
-  field has focus, so `t` in a note does not toggle the panel.
+- Controls float over scrims and fade after a few seconds of stillness; any
+  movement or key brings them back. Back-arrow, zoom, favorite, share,
+  download, details, trash, and a "More" menu (rename, move, copy, album,
+  slideshow, fullscreen, hide controls).
+- Keyboard: `←` `→`, `+` `-` `0`, `Space` (video), `F`, `I`/`T`, `S`, `H`,
+  `Esc`. On touch: swipe to page, pull down to close.
+- **Details panel** (`viewer/DetailsPanel`) shows only what exists: when,
+  name/size/dimensions/duration, camera, location, folder. Tabs for Tags,
+  Albums, People, Memories, Similar, Share each fetch only when opened. It is
+  a side panel on desktop and a bottom sheet on phones.
+- The open photo is `?view=<id>` (`FileOperations.useViewerParam`): opening it
+  pushes a history entry so Back closes the viewer, paging replaces it, and a
+  link or reload reopens the same photo.
+- Mutations are delegated to the page through `onRequestAction`, which routes
+  into `useFileOperations`.
 
 ## Trash
 
@@ -191,11 +192,14 @@ no-op.
   the app does.
 - `Providers.tsx` — the same provider stack on its own, for a component test
   that has to declare its own routes.
-- `setup.ts` — jest-dom plus a 5s `asyncUtilTimeout`. The default 1s budget is
+- `setup.ts` — jest-dom, clean `localStorage` before and after every test (grid/
+  list, viewer panel, and recent searches are per-browser preferences), plus a
+  5s `asyncUtilTimeout`. The default 1s budget is
   real time, and real time is a flake generator once two dozen files are
   rendering in parallel.
 
-257 tests across 24 files, one suite per page, each targeting behaviour rather
+The frontend suite (one file per page plus the shell, grid, menu, toast,
+upload, and search components), each targeting behaviour rather
 than markup: that a member is not sent a request that can only 403, that a
 locked share asks for its password before anything else, that a 503 from the
 face provider is reported as unavailable rather than as a failure, that
@@ -212,8 +216,8 @@ plus `go test ./...`.
    confirmations through `components/Dialog.tsx`; hand the viewer's mutations
    to `useFileOperations` rather than fetching them again.
 2. Register the route in `web/src/App.tsx`, inside `<AppShell>`.
-3. Add it to `NAV_ITEMS` or `ADMIN_ITEMS` in `AppShell.tsx` so it is reachable,
-   and from `HomePage.tsx` and the Settings Organize/Server upkeep lists if it
-   belongs there.
+3. Add it to `PRIMARY_NAV` or `MANAGE_NAV` in
+   `components/app-shell/navigation.ts` so it is reachable, and from the
+   Settings lists if it belongs there.
 4. Write `web/src/pages/YourPage.test.tsx` against the harness.
 5. Add a row to the table above and run the gate.

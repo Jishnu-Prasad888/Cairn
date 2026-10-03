@@ -249,6 +249,7 @@ func (s *Server) Handler() http.Handler {
 		// Albums.
 		mux.Handle("GET /api/v1/libraries/{id}/albums", s.withAuth(allowAny, s.handleListAlbums))
 		mux.Handle("POST /api/v1/libraries/{id}/albums", s.withAuth(allowAny, s.handleCreateAlbum))
+		mux.Handle("PATCH /api/v1/libraries/{id}/albums/{albumID}", s.withAuth(allowAny, s.handleUpdateAlbum))
 		mux.Handle("DELETE /api/v1/libraries/{id}/albums/{albumID}", s.withAuth(allowAny, s.handleDeleteAlbum))
 		mux.Handle("GET /api/v1/libraries/{id}/albums/{albumID}/files", s.withAuth(allowAny, s.handleListAlbumFiles))
 		mux.Handle("POST /api/v1/libraries/{id}/albums/{albumID}/files/{fileID}", s.withAuth(allowAny, s.handleAddAlbumFile))

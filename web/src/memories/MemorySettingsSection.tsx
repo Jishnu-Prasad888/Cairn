@@ -54,11 +54,17 @@ export function MemorySettingsSection() {
 
   return (
     <section
-      className="settings-card"
+      className="settings-section"
+      id="memories"
       aria-labelledby="settings-memories"
       data-testid="memory-settings"
     >
-      <h2 id="settings-memories">Memories</h2>
+      <div className="settings-section-head">
+        <h2 id="settings-memories">Memories</h2>
+        <p className="settings-section-description">
+          Saved to your account; applies the next time a memory is opened.
+        </p>
+      </div>
       {!settings ? (
         <p className="muted">Loading…</p>
       ) : (

@@ -1,6 +1,6 @@
 /**
- * Files — the media browser with no type filter, so documents, archives, and
- * anything else the indexer could not classify appear alongside photos.
+ * Files — the library as it is on disk: folders, every kind of file, grid or
+ * list, upload and organize.
  */
 
 import MediaPage from './MediaPage';
@@ -8,9 +8,10 @@ import type { MediaPageConfig } from './MediaPage';
 
 const CONFIG: MediaPageConfig = {
   title: 'Files',
-  subtitle: 'Everything the indexer found, whatever its type.',
-  emptyTitle: 'Nothing here yet',
-  emptyBody: 'This folder is empty. Upload a file to get started.',
+  showFolders: true,
+  emptyTitle: 'This folder is empty',
+  emptyBody: 'Drop files here or use Upload to add some.',
+  emptyIcon: 'folder',
 };
 
 export default function FilesPage() {

@@ -147,7 +147,7 @@ describe('MediaPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'List' }));
 
     const list = await screen.findByTestId('file-list');
-    expect(within(list).getByRole('button', { name: /IMG_0001.png/ })).toBeInTheDocument();
+    expect(within(list).getByRole('button', { name: 'IMG_0001.png' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'false');
   });
@@ -162,9 +162,9 @@ describe('MediaPage', () => {
       expect(called(fetchMock, 'GET', 'folder=2024')).toBe(true);
     });
     // Breadcrumbs appear once there is somewhere to go back to.
-    fireEvent.click(await screen.findByRole('button', { name: 'Library root' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'All files' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Library root' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'All files' })).toBeInTheDocument();
     });
   });
 
@@ -264,31 +264,50 @@ describe('MediaPage', () => {
     expect(await screen.findByTestId('browser-empty')).toBeInTheDocument();
   });
 
-  it('uploads a file into the current folder', async () => {
-    const fetchMock = setup([
-      (url, init) =>
-        url.includes('/api/v1/libraries/lib1/files/upload')
-          ? json({ file: photo }, init?.method === 'POST' ? 201 : 200)
-          : undefined,
-    ]);
+  it('uploads a file into the current folder, with progress, and reloads', async () => {
+    // Uploads use XMLHttpRequest (fetch cannot report upload progress).
+    const sent: Array<{ url: string; body: FormData }> = [];
+    class FakeXhr {
+      status = 201;
+      responseText = JSON.stringify({ file: photo });
+      upload: { onprogress: ((e: unknown) => void) | null } = { onprogress: null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      withCredentials = false;
+      url = '';
+      open(_method: string, url: string) {
+        this.url = url;
+      }
+      setRequestHeader() {}
+      abort() {
+        this.onabort?.();
+      }
+      send(body: FormData) {
+        sent.push({ url: this.url, body });
+        this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 5 });
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeXhr);
 
+    const fetchMock = setup();
     const input = await screen.findByTestId('upload-input');
     const file = new File(['bytes'], 'beach.jpg', { type: 'image/jpeg' });
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     fireEvent.change(input);
 
-    await waitFor(() => {
-      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/files/upload')).toBe(true);
-    });
-    const upload = fetchMock.mock.calls.find(([input]) => String(input).includes('/files/upload'));
-    expect(upload?.[1]?.body).toBeInstanceOf(FormData);
-    expect((upload?.[1]?.body as FormData).get('path')).toBe('beach.jpg');
-    // The listing reloads afterwards.
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.url).toContain('/api/v1/libraries/lib1/files/upload');
+    expect(sent[0]!.body.get('path')).toBe('beach.jpg');
+
+    // The tray reports it, and the listing reloads afterwards.
     await waitFor(() => {
       expect(
-        fetchMock.mock.calls.filter(([input]) => String(input).includes('/folders')).length,
+        fetchMock.mock.calls.filter(([url]) => String(url).includes('/files?')).length,
       ).toBeGreaterThan(1);
     });
+    vi.unstubAllGlobals();
   });
 
   it('trashes a selection after confirming the dialog', async () => {
@@ -591,7 +610,8 @@ describe('MediaPage', () => {
     const dialog = within(await screen.findByTestId('viewer')).getByRole('dialog');
     expect(dialog).not.toHaveClass('chrome-hidden');
 
-    fireEvent.click(within(dialog).getByTestId('hide-controls'));
+    fireEvent.click(within(dialog).getByTestId('viewer-more'));
+    fireEvent.click(await within(dialog).findByTestId('hide-controls'));
     await waitFor(() => {
       expect(dialog).toHaveClass('chrome-hidden');
     });
@@ -640,15 +660,15 @@ describe('MediaPage', () => {
     );
 
     // Nothing is favorited yet, so the control offers to add one.
-    const favorite = await within(dialog).findByRole('button', { name: '☆ Favorite' });
+    const favorite = await within(dialog).findByRole('button', { name: 'Add to favorites' });
     expect(favorite).toBeEnabled();
 
     fireEvent.click(favorite);
-    await within(dialog).findByRole('button', { name: '★ Favorite' });
+    await within(dialog).findByRole('button', { name: 'Remove from favorites' });
     expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/files/f1/favorite')).toBe(true);
 
-    fireEvent.click(within(dialog).getByRole('button', { name: '★ Favorite' }));
-    await within(dialog).findByRole('button', { name: '☆ Favorite' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove from favorites' }));
+    await within(dialog).findByRole('button', { name: 'Add to favorites' });
     expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f1/favorite')).toBe(true);
   });
 
@@ -664,9 +684,9 @@ describe('MediaPage', () => {
     await screen.findByTestId('file-grid');
     fireEvent.click(screen.getByText('IMG_0001.png'));
     const viewer = await screen.findByTestId('viewer');
-    fireEvent.click(
-      within(within(viewer).getByRole('dialog')).getByRole('button', { name: 'Rename' }),
-    );
+    const viewerDialog = within(viewer).getByRole('dialog');
+    fireEvent.click(within(viewerDialog).getByTestId('viewer-more'));
+    fireEvent.click(await within(viewerDialog).findByRole('menuitem', { name: 'Rename' }));
 
     const dialog = await screen.findByTestId('rename-dialog');
     fireEvent.change(screen.getByLabelText('New name'), { target: { value: 'sunset.png' } });
@@ -699,9 +719,9 @@ describe('MediaPage', () => {
     await screen.findByTestId('file-grid');
     fireEvent.click(screen.getByText('IMG_0001.png'));
     const viewer = await screen.findByTestId('viewer');
-    fireEvent.click(
-      within(within(viewer).getByRole('dialog')).getByRole('button', { name: 'Move' }),
-    );
+    const viewerDialog = within(viewer).getByRole('dialog');
+    fireEvent.click(within(viewerDialog).getByTestId('viewer-more'));
+    fireEvent.click(await within(viewerDialog).findByRole('menuitem', { name: 'Move' }));
 
     const dialog = await screen.findByTestId('move-dialog');
     const menu = await within(dialog).findByLabelText('Pick an existing folder');
@@ -745,9 +765,9 @@ describe('MediaPage', () => {
     await screen.findByTestId('file-grid');
     fireEvent.click(screen.getByText('IMG_0001.png'));
     const viewer = await screen.findByTestId('viewer');
-    fireEvent.click(
-      within(within(viewer).getByRole('dialog')).getByRole('button', { name: 'Move' }),
-    );
+    const viewerDialog = within(viewer).getByRole('dialog');
+    fireEvent.click(within(viewerDialog).getByTestId('viewer-more'));
+    fireEvent.click(await within(viewerDialog).findByRole('menuitem', { name: 'Move' }));
 
     const dialog = await screen.findByTestId('move-dialog');
     // The menu is hidden rather than shown offering only the root, and the
