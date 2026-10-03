@@ -255,7 +255,7 @@ func faceCrop(img image.Image, box FaceBox, size int) (image.Image, error) {
 	if dh < 1 {
 		dh = 1
 	}
-	dst := image.NewGray(image.Rect(0, 0, dw, dh))
+	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
 	draw.CatmullRom.Scale(dst, dst.Bounds(), img, image.Rect(x0, y0, x1, y1), draw.Over, nil)
 	return dst, nil
 }
@@ -334,4 +334,9 @@ func DescriptorCosine(a, b []float32) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
+}
+
+func (p *PigoFaceProvider) setDetection(minSize int, minConfidence float64) {
+	p.MinSize = minSize
+	p.MinConfidence = minConfidence
 }

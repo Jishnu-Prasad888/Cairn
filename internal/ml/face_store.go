@@ -369,6 +369,14 @@ func (s *FaceStore) DeletePerson(ctx context.Context, id string) error {
 // assignment's provenance (manual wins when a face somehow appears twice),
 // adopts source's cover when the target lacks one, and deletes source.
 func (s *FaceStore) Merge(ctx context.Context, keepID, sourceID string) error {
+	return s.MergeAs(ctx, keepID, sourceID, "")
+}
+
+// MergeAs is Merge, but when by is non-empty every moved face is recorded as
+// assigned that way. A person merging two groups by hand says "these are the
+// same", so those faces become "manual": trusted evidence that later grouping
+// compares new faces against, and that automatic passes never undo.
+func (s *FaceStore) MergeAs(ctx context.Context, keepID, sourceID, by string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("merge begin: %w", err)
@@ -396,7 +404,10 @@ func (s *FaceStore) Merge(ctx context.Context, keepID, sourceID string) error {
 	}
 
 	for _, m := range moves {
-		by := m.by
+		assigned := m.by
+		if by != "" {
+			assigned = by
+		}
 		var existing string
 		err := tx.QueryRowContext(ctx,
 			`SELECT assigned_by FROM person_faces WHERE person_id = ? AND face_id = ?`,
@@ -405,12 +416,12 @@ func (s *FaceStore) Merge(ctx context.Context, keepID, sourceID string) error {
 		case err == sql.ErrNoRows:
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO person_faces (person_id, face_id, assigned_by, created_at)
-				 VALUES (?, ?, ?, ?)`, keepID, m.faceID, by, rfc3339(time.Now().UTC())); err != nil {
+				 VALUES (?, ?, ?, ?)`, keepID, m.faceID, assigned, rfc3339(time.Now().UTC())); err != nil {
 				return fmt.Errorf("merge insert: %w", err)
 			}
 		case err != nil:
 			return fmt.Errorf("merge probe: %w", err)
-		case existing == "auto" && by == "manual":
+		case existing == "auto" && assigned == "manual":
 			if _, err := tx.ExecContext(ctx,
 				`DELETE FROM person_faces WHERE person_id = ? AND face_id = ?`,
 				keepID, m.faceID); err != nil {
@@ -418,7 +429,7 @@ func (s *FaceStore) Merge(ctx context.Context, keepID, sourceID string) error {
 			}
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO person_faces (person_id, face_id, assigned_by, created_at)
-				 VALUES (?, ?, ?, ?)`, keepID, m.faceID, by, rfc3339(time.Now().UTC())); err != nil {
+				 VALUES (?, ?, ?, ?)`, keepID, m.faceID, assigned, rfc3339(time.Now().UTC())); err != nil {
 				return fmt.Errorf("merge insert manual: %w", err)
 			}
 		}
@@ -503,6 +514,97 @@ func (s *FaceStore) PurgeFaces(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("purge assignments: %w", err)
 	}
 	return n, nil
+}
+
+// PurgeStaleFaces removes faces recorded by any other provider or version:
+// descriptors from different algorithms are not comparable, so they must not
+// be mixed into clustering. People left with no faces and an automatic
+// "Person N" name go too; names a user chose are kept.
+func (s *FaceStore) PurgeStaleFaces(ctx context.Context, provider string, version int) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM faces WHERE NOT (provider = ? AND version = ?)`, provider, version)
+	if err != nil {
+		return 0, fmt.Errorf("purge stale faces: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return 0, nil
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM person_faces WHERE face_id NOT IN (SELECT id FROM faces)`); err != nil {
+		return 0, fmt.Errorf("purge stale assignments: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		DELETE FROM people
+		WHERE id NOT IN (SELECT person_id FROM person_faces)
+		  AND name GLOB 'Person [0-9]*'`); err != nil {
+		return 0, fmt.Errorf("purge empty people: %w", err)
+	}
+	return int(n), nil
+}
+
+// Exemplar is one stored face descriptor of a person, with whether a human
+// vouched for it (assigned or merged by hand).
+type Exemplar struct {
+	Descriptor []float32
+	Manual     bool
+}
+
+// PersonExemplars returns up to perPerson descriptors for every person, the
+// hand-confirmed ones first and then the newest. Matching a new face against
+// individual exemplars (not only the person's average) is what lets a person
+// whose two looks were merged be recognised as either.
+func (s *FaceStore) PersonExemplars(ctx context.Context, perPerson int) (map[string][]Exemplar, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pf.person_id, fa.descriptor, pf.assigned_by
+		FROM person_faces pf
+		JOIN faces fa ON fa.id = pf.face_id
+		ORDER BY pf.person_id, (pf.assigned_by = 'manual') DESC, pf.created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list exemplars: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]Exemplar{}
+	for rows.Next() {
+		var pid, by string
+		var blob []byte
+		if err := rows.Scan(&pid, &blob, &by); err != nil {
+			return nil, fmt.Errorf("scan exemplar: %w", err)
+		}
+		if len(out[pid]) >= perPerson {
+			continue
+		}
+		d, err := float32FromBytes(blob)
+		if err != nil {
+			return nil, err
+		}
+		out[pid] = append(out[pid], Exemplar{Descriptor: d, Manual: by == "manual"})
+	}
+	return out, rows.Err()
+}
+
+// AutoNamedPeople returns the people Cairn named itself ("Person 12") that no
+// human has touched: no hand-assigned face. Only these may be merged
+// automatically.
+func (s *FaceStore) AutoNamedPeople(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id FROM people p
+		WHERE p.name GLOB 'Person [0-9]*'
+		  AND NOT EXISTS (SELECT 1 FROM person_faces pf
+		                  WHERE pf.person_id = p.id AND pf.assigned_by = 'manual')`)
+	if err != nil {
+		return nil, fmt.Errorf("list auto people: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
 }
 
 // Float32 BLOB helpers -----------------------------------------------------

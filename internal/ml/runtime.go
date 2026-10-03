@@ -13,6 +13,9 @@ import (
 // settingKey is the server_settings row holding the master switch.
 const settingKey = "ml.enabled"
 
+// thresholdKey holds the administrator's face-matching threshold.
+const thresholdKey = "ml.face_threshold"
+
 // Target is a library a pass can run over.
 type Target struct {
 	ID     string
@@ -71,7 +74,35 @@ func (r *Runtime) Load(ctx context.Context, def bool) error {
 		return err
 	}
 	r.apply(on)
+	if err := r.db.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = ?`, thresholdKey).Scan(&raw); err == nil {
+		var v float64
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			r.faces.SetThreshold(v)
+		}
+	}
 	return nil
+}
+
+// SetFaceThreshold stores and applies the face-matching threshold (0 resets
+// it to the recognition model's default). It affects faces grouped from now
+// on; people already formed are left as they are.
+func (r *Runtime) SetFaceThreshold(ctx context.Context, v float64) error {
+	r.faces.SetThreshold(v)
+	if v <= 0 {
+		_, err := r.db.ExecContext(ctx, `DELETE FROM server_settings WHERE key = ?`, thresholdKey)
+		return err
+	}
+	raw, _ := json.Marshal(v)
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		thresholdKey, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// FaceThreshold reports the active threshold and the model's default.
+func (r *Runtime) FaceThreshold() (current, def float64) {
+	return r.faces.Threshold(), r.faces.DefaultThreshold()
 }
 
 // Set stores and applies the switch. Turning it on starts a pass over every
@@ -135,5 +166,17 @@ func (r *Runtime) process(libraryID, root string) {
 		if _, err := r.faces.ClusterPass(ctx, root); err != nil && !errors.Is(err, ErrFacesDisabled) {
 			r.logger.Warn("ml: face clustering", "library_id", libraryID, "error", err)
 		}
+	}
+}
+
+// UsesFaceModel reports whether the learned face-recognition model is loaded.
+func (r *Runtime) UsesFaceModel() bool { return r.faces.UsesEmbeddings() }
+
+// ModelReady swaps in a freshly downloaded recognition model and, when ML is
+// on, re-processes every online library with it.
+func (r *Runtime) ModelReady(p *EmbeddingFaceProvider) {
+	r.faces.SetProvider(p)
+	if r.Enabled() {
+		r.StartAll()
 	}
 }
