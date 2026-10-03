@@ -1,73 +1,114 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import RequireAuth from './auth/RequireAuth';
 import { LibrariesProvider } from './api/libraries';
-import AppShell from './components/AppShell';
+import AppShell from './components/app-shell/AppShell';
+import { ToastProvider } from './components/ui/Toast';
+import { UploadProvider } from './components/upload/UploadProvider';
 import AlbumsPage from './pages/AlbumsPage';
-import BackupsPage from './pages/BackupsPage';
-import BrowsePage from './pages/BrowsePage';
-import DuplicatesPage from './pages/DuplicatesPage';
 import FavoritesPage from './pages/FavoritesPage';
+import FilesPage from './pages/FilesPage';
 import ForbiddenPage from './pages/ForbiddenPage';
 import HomePage from './pages/HomePage';
-import LibrariesPage from './pages/LibrariesPage';
 import LoginPage from './pages/LoginPage';
-import MediaHub from './pages/MediaHub';
-import MemoriesPage from './pages/MemoriesPage';
-import MLPage from './pages/MLPage';
-import PeoplePage from './pages/PeoplePage';
-import PermissionsPage from './pages/PermissionsPage';
-import PublicSharePage from './pages/PublicSharePage';
-import SettingsPage from './pages/SettingsPage';
+import PhotosPage from './pages/PhotosPage';
+import SearchPage from './pages/SearchPage';
 import SetupPage from './pages/SetupPage';
-import SharingPage from './pages/SharingPage';
-import TagsPage from './pages/TagsPage';
 import TrashPage from './pages/TrashPage';
+import VideosPage from './pages/VideosPage';
+
+/* Pages most visits never touch load on demand, keeping the first load small. */
+const BackupsPage = lazy(() => import('./pages/BackupsPage'));
+const DuplicatesPage = lazy(() => import('./pages/DuplicatesPage'));
+const LibrariesPage = lazy(() => import('./pages/LibrariesPage'));
+const MLPage = lazy(() => import('./pages/MLPage'));
+const PermissionsPage = lazy(() => import('./pages/PermissionsPage'));
+const SharingPage = lazy(() => import('./pages/SharingPage'));
+const TagsPage = lazy(() => import('./pages/TagsPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const MemoriesPage = lazy(() => import('./pages/MemoriesPage'));
+const PeoplePage = lazy(() => import('./pages/PeoplePage'));
+const PublicSharePage = lazy(() => import('./pages/PublicSharePage'));
+
+/**
+ * `/media?type=…` was the unified browser before Photos, Videos, and Files
+ * became sections of their own; old links land on the matching section.
+ */
+function LegacyMediaRedirect() {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  const type = params.get('type');
+  if (type === 'photo') return <Navigate to="/photos" replace />;
+  if (type === 'video') return <Navigate to="/videos" replace />;
+  return <Navigate to={`/files${search}`} replace />;
+}
+
+/** `/browse?q=…` became `/search?q=…`. */
+function LegacyBrowseRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/search${search}`} replace />;
+}
+
+/** Shown for the instant a lazily loaded page is fetched. */
+function RouteFallback() {
+  return (
+    <p className="visually-hidden" role="status">
+      Loading…
+    </p>
+  );
+}
 
 export default function App() {
   return (
     <LibrariesProvider>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/s/:token" element={<PublicSharePage />} />
-        <Route path="/setup" element={<SetupPage />} />
-        <Route path="/signup" element={<SetupPage />} />
-        <Route path="/login" element={<LoginPage />} />
+      <ToastProvider>
+        <UploadProvider>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/s/:token" element={<PublicSharePage />} />
+              <Route path="/setup" element={<SetupPage />} />
+              <Route path="/signup" element={<SetupPage />} />
+              <Route path="/login" element={<LoginPage />} />
 
-        <Route element={<RequireAuth />}>
-          <Route path="/403" element={<ForbiddenPage />} />
-          <Route element={<AppShell />}>
-            <Route path="/" element={<HomePage />} />
+              <Route element={<RequireAuth />}>
+                <Route path="/403" element={<ForbiddenPage />} />
+                <Route element={<AppShell />}>
+                  <Route path="/" element={<HomePage />} />
 
-            {/* Unified media browser */}
-            <Route path="/media" element={<MediaHub />} />
-            <Route path="/browse" element={<BrowsePage />} />
+                  <Route path="/photos" element={<PhotosPage />} />
+                  <Route path="/videos" element={<VideosPage />} />
+                  <Route path="/files" element={<FilesPage />} />
+                  <Route path="/search" element={<SearchPage />} />
 
-            {/* Legacy routes redirect to the unified page */}
-            <Route path="/photos" element={<Navigate to="/media?type=photo" replace />} />
-            <Route path="/videos" element={<Navigate to="/media?type=video" replace />} />
-            <Route path="/files" element={<Navigate to="/media?type=other" replace />} />
+                  <Route path="/media" element={<LegacyMediaRedirect />} />
+                  <Route path="/browse" element={<LegacyBrowseRedirect />} />
 
-            <Route path="/memories" element={<MemoriesPage />} />
-            <Route path="/memories/:memoryId" element={<MemoriesPage />} />
-            <Route path="/albums" element={<AlbumsPage />} />
-            <Route path="/people" element={<PeoplePage />} />
-            <Route path="/tags" element={<TagsPage />} />
-            <Route path="/favorites" element={<FavoritesPage />} />
-            <Route path="/trash" element={<TrashPage />} />
-            <Route path="/shared" element={<SharingPage />} />
+                  <Route path="/albums" element={<AlbumsPage />} />
+                  <Route path="/albums/:albumId" element={<AlbumsPage />} />
+                  <Route path="/people" element={<PeoplePage />} />
+                  <Route path="/memories" element={<MemoriesPage />} />
+                  <Route path="/memories/:memoryId" element={<MemoriesPage />} />
+                  <Route path="/tags" element={<TagsPage />} />
+                  <Route path="/favorites" element={<FavoritesPage />} />
+                  <Route path="/trash" element={<TrashPage />} />
+                  <Route path="/shared" element={<SharingPage />} />
 
-            <Route path="/duplicates" element={<DuplicatesPage />} />
-            <Route path="/libraries" element={<LibrariesPage />} />
-            <Route path="/permissions" element={<PermissionsPage />} />
-            <Route path="/ml" element={<MLPage />} />
-            <Route path="/backups" element={<BackupsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Route>
-        </Route>
+                  <Route path="/duplicates" element={<DuplicatesPage />} />
+                  <Route path="/libraries" element={<LibrariesPage />} />
+                  <Route path="/permissions" element={<PermissionsPage />} />
+                  <Route path="/ml" element={<MLPage />} />
+                  <Route path="/backups" element={<BackupsPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                </Route>
+              </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </UploadProvider>
+      </ToastProvider>
     </LibrariesProvider>
   );
 }

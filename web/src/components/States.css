@@ -1,92 +1,161 @@
-/* Shared page states: headers, badges, empty/error/offline blocks. */
+/* Shared page states. None of them is a heavy card: they sit on the page. */
 
-.page-header-titles {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.page-header-subtitle {
-  margin: 0;
-  font-size: 0.85rem;
-}
-
-.status-badge {
+.loading-state {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 2px var(--space-2);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3) 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.loading-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.loading-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: loading-bob 1.2s var(--ease-standard) infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+  background: var(--color-primary-strong);
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+  background: var(--color-text-secondary);
+}
+
+@keyframes loading-bob {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: none;
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.list-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.list-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.list-skeleton-thumb {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.list-skeleton-line {
+  height: 12px;
+}
+
+/* ------------------------------ icons ------------------------------- */
+
+.state-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-pill);
-  white-space: nowrap;
 }
 
-.status-badge-online {
-  color: #3f5a35;
-  background: color-mix(in srgb, var(--green) 26%, var(--surface));
+.state-icon-error {
+  color: var(--color-danger-ink);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
 }
 
-.status-badge-offline {
-  color: #7c3a34;
-  background: color-mix(in srgb, var(--danger) 22%, var(--surface));
+.state-icon-warning {
+  color: var(--color-warning-ink);
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
 }
 
-:root[data-theme='dark'] .status-badge-online {
-  color: var(--green);
-}
-
-:root[data-theme='dark'] .status-badge-offline {
-  color: var(--danger);
-}
-
-.type-badge {
-  display: inline-block;
-  padding: 1px var(--space-2);
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  background: var(--border-subtle);
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-}
+/* ------------------------------ error ------------------------------- */
 
 .error-state {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
   padding: var(--space-4);
-  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
-  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-danger) 6%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, var(--color-border-subtle));
+  border-radius: var(--radius-lg);
 }
+
+.error-state-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.error-state-text p {
+  margin: 0;
+}
+
+.error-state-title {
+  font-weight: var(--font-weight-medium);
+}
+
+.error-state .error-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ------------------------------ empty ------------------------------- */
 
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
-  max-width: 460px;
+  max-width: 440px;
   margin: var(--space-7) auto;
-  padding: var(--space-6) var(--space-5);
+  padding: 0 var(--space-4);
   text-align: center;
-  background: var(--surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
 }
 
-.empty-state h2 {
+/* A soft pebble behind the icon — the only clay flourish on the page. */
+.empty-state-pebble {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 64px;
+  margin-bottom: var(--space-2);
+  color: var(--color-primary-ink);
+  background: var(--color-fill-active);
+  border-radius: 46% 54% 50% 50% / 58% 56% 44% 42%;
+  box-shadow: var(--shadow-clay);
+}
+
+.empty-state-title {
   margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-family: var(--font-brand);
+  font-size: var(--font-size-2xl);
+  font-weight: 400;
+  color: var(--color-text-primary);
 }
 
 .empty-state-body {
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
   line-height: 1.55;
 }
 
@@ -98,20 +167,61 @@
   margin-bottom: 0;
 }
 
-.offline-notice {
+.empty-state-body .muted {
+  color: var(--color-text-secondary);
+}
+
+.empty-state-action {
+  margin-top: var(--space-2);
+}
+
+/* --------------------------- notice banner -------------------------- */
+
+.notice {
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-4);
-  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--border));
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
 }
 
-.offline-notice code {
+.notice-warning {
+  background: color-mix(in srgb, var(--color-warning) 9%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-warning) 26%, var(--color-border-subtle));
+}
+
+.notice-text {
+  min-width: 0;
+}
+
+.notice-text p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.notice-text .notice-title {
+  margin-bottom: 2px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.notice-detail {
+  margin-top: var(--space-2) !important;
+  font-size: var(--font-size-sm);
+}
+
+.notice code {
   padding: 1px 5px;
-  font-size: 0.82em;
-  background: var(--border-subtle);
-  border-radius: var(--radius-sm);
+  font-size: 0.85em;
   word-break: break-all;
+  background: var(--color-fill-subtle);
+  border-radius: var(--radius-xs);
+}
+
+/* ------------------------- library picker --------------------------- */
+
+.library-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }

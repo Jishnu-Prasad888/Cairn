@@ -1,64 +1,38 @@
 /**
- * The media viewer.
+ * The media viewer: the photo, full window, on a dark surround.
  *
- * This is the app's most-used surface, so it carries everything the brief
- * promises for §15: fullscreen, zoom, previous/next, a slideshow, and the
- * people / memory / similar-file associations. It also stops owning anything
- * the *page* should own: it never calls `window.prompt` or `window.confirm`,
- * and it never mutates a file behind the caller's back. Rename, move, copy, and
- * trash are requested via {@link ViewerModalProps.onRequestAction} so the page
- * that rendered the viewer can put its own accessible dialog in charge of the
- * confirmation and the error handling.
+ * Everything else is secondary and appears only when wanted. The controls fade
+ * after a few seconds of stillness and return on any movement or key; the
+ * details open in a side panel on request; editing actions live behind "More".
+ * The viewer never mutates a file behind the page's back — rename, move, copy,
+ * and trash are handed to the page through `onRequestAction`, which owns the
+ * dialogs and the reload.
  *
- * Keyboard (as documented in the footer): ← → navigate, + − zoom, 0 reset,
- * F fullscreen, S slideshow, T details, Esc close.
+ * Images load progressively: the grid's thumbnail is shown at once, blurred,
+ * and the original replaces it when it arrives. Videos stream (the download
+ * route supports Range requests), so a large file starts playing at once and
+ * is never held in memory.
+ *
+ * Keyboard: ← → navigate, + − zoom, 0 fit, Space play/pause, F fullscreen,
+ * S slideshow, I (or T) details, H hide controls, Esc close.
  */
 
-import {
-  type CSSProperties,
-  type FormEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 
-import {
-  addFavorite,
-  addFileTag,
-  createShare,
-  createTag,
-  getFileMetadata,
-  getSimilarFiles,
-  listAlbumFiles,
-  listAlbums,
-  listFavorites,
-  listFileTags,
-  listMemoryRefs,
-  listMemories,
-  listPeople,
-  listTags,
-  removeFavorite,
-  removeFileTag,
-  addAlbumFile,
-  removeAlbumFile,
-  searchFiles,
-} from '../api/queries';
-import type {
-  Album,
-  FileMetadata,
-  FileSummary,
-  Memory,
-  Person,
-  SimilarFile,
-  Tag,
-} from '../api/types';
-import { formatBytes } from '../api/types';
+import { addFavorite, getFileMetadata, listFavorites, removeFavorite } from '../api/queries';
+import type { FileMetadata, FileSummary } from '../api/types';
+import { formatDateTime } from '../lib/dates';
 import { useFocusTrap } from '../lib/focusTrap';
 import { FileNote } from './FileNote';
-import { downloadUrl, mediaGlyph, thumbnailUrl } from './media';
-import './views.css';
+import { downloadUrl, thumbnailUrl, mediaTypeIcon } from './media';
+import { Icon, type IconName } from './ui/Icon';
+import { Menu, useMenuButton, withDangerLast } from './ui/Menu';
+import { AlbumsPanel } from './viewer/AlbumsPanel';
+import { DetailsPanel } from './viewer/DetailsPanel';
+import { Filmstrip } from './viewer/Filmstrip';
+import { MemoriesPanel, PeoplePanel, SimilarPanel } from './viewer/RelatedPanels';
+import { SharePanel } from './viewer/SharePanel';
+import { TagsPanel } from './viewer/TagsPanel';
 import './ViewerModal.css';
 
 /** File operations the viewer asks the page to perform. */
@@ -76,23 +50,27 @@ export interface ViewerModalProps {
   onRequestAction: (action: ViewerAction, file: FileSummary) => void;
   /** Dismiss the viewer. */
   onClose: () => void;
+  /** Called near the end of `siblings`, so the page can fetch the next page. */
+  onNearEnd?: (() => void) | undefined;
 }
 
-type PanelTab = 'details' | 'tags' | 'people' | 'memories' | 'similar' | 'share' | 'albums';
+type PanelTab = 'details' | 'tags' | 'albums' | 'people' | 'memories' | 'similar' | 'share';
 
 const PANEL_TABS: Array<{ id: PanelTab; label: string }> = [
   { id: 'details', label: 'Details' },
   { id: 'tags', label: 'Tags' },
+  { id: 'albums', label: 'Albums' },
   { id: 'people', label: 'People' },
   { id: 'memories', label: 'Memories' },
   { id: 'similar', label: 'Similar' },
   { id: 'share', label: 'Share' },
-  { id: 'albums', label: 'Albums' },
 ];
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
 const SLIDESHOW_MS = 4000;
 const CHROME_IDLE_MS = 3500;
+const SWIPE_PX = 50;
+const NEAR_END = 3;
 
 const PANEL_STORAGE_KEY = 'cairn.viewer.panel';
 
@@ -121,30 +99,30 @@ export function ViewerModal({
   onChanged,
   onRequestAction,
   onClose,
+  onNearEnd,
 }: ViewerModalProps) {
   const [zoom, setZoom] = useState(1);
   const [slideshowWanted, setSlideshowWanted] = useState(false);
-  // Closed until asked for: the image comes first. The choice is remembered.
   const [panelOpen, setPanelOpen] = useState(readPanelPreference);
-  // The interface fades away after a moment of stillness, or on request, so
-  // the photo has the whole window; any movement or key brings it back.
   const [chromeHidden, setChromeHidden] = useState(false);
-  const [originalFailedId, setOriginalFailedId] = useState<string | null>(null);
   const [tab, setTab] = useState<PanelTab>('details');
-  // Both are tagged with the file they describe, so navigating never shows the
-  // previous file's favourite or metadata while the new request is in flight.
-  const [favoriteState, setFavoriteState] = useState<{ fileId: string; value: boolean } | null>(
-    null,
-  );
+  // The original image's load state, tagged with the file it describes so
+  // navigating never shows the previous photo's state.
+  const [original, setOriginal] = useState<{ id: string; state: 'loaded' | 'failed' } | null>(null);
+  const [favoriteIds, setFavoriteIds] = useState<ReadonlySet<string> | null>(null);
   const [metadataState, setMetadataState] = useState<{
     fileId: string;
     value: FileMetadata | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const more = useMenuButton();
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
-  const restoreRef = useRef<HTMLElement | null>(null);
+  // The same element, as state, for mounting the "More" menu inside the dialog.
+  const [dialogEl, setDialogEl] = useState<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const swipeRef = useRef<{ x: number; y: number } | null>(null);
 
   const index = siblings.findIndex((f) => f.id === file.id);
   const position = index >= 0 ? index + 1 : 0;
@@ -159,15 +137,21 @@ export function ViewerModal({
     if (hasNext) onNavigate(siblings[index + 1]!);
   }, [hasNext, index, onNavigate, siblings]);
 
+  // Paging toward the end of what is loaded fetches more, so the viewer can
+  // keep going through a library larger than one page.
+  useEffect(() => {
+    if (onNearEnd && index >= 0 && index >= siblings.length - NEAR_END) onNearEnd();
+  }, [index, siblings.length, onNearEnd]);
+
   const close = useCallback(() => {
     if (typeof document !== 'undefined' && document.fullscreenElement) {
       void document.exitFullscreen().catch(() => undefined);
     }
     onClose();
   }, [onClose]);
-  // Reset per-file state when navigating within the same viewer. Adjusted
-  // during render (the React-recommended way to reset state on a prop change)
-  // rather than in an effect, which would show the stale zoom for a frame.
+
+  // Reset per-file view state when navigating, during render rather than in
+  // an effect, so the previous zoom is never drawn for a frame.
   const [prevFileId, setPrevFileId] = useState(file.id);
   if (prevFileId !== file.id) {
     setPrevFileId(file.id);
@@ -175,28 +159,30 @@ export function ViewerModal({
     setError(null);
   }
 
-  // Focus the dialog on open and give focus back to the tile on unmount. The
-  // dialog is `aria-modal`, so Tab has to stay inside it — this one listens on
-  // `window` because its arrow keys and Escape are global.
+  // Focus the dialog on open, keep the page behind from scrolling, and give
+  // focus back to the tile that opened it on close.
   useEffect(() => {
-    restoreRef.current = document.activeElement as HTMLElement | null;
+    const restore = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
+    const { overflow } = document.body.style;
+    document.body.style.overflow = 'hidden';
     return () => {
-      restoreRef.current?.focus?.();
+      document.body.style.overflow = overflow;
+      restore?.focus?.();
     };
   }, []);
 
   useFocusTrap(dialogRef);
 
   const toggleFullscreen = useCallback(() => {
-    const el = dialogRef.current;
+    const el = dialogEl;
     if (!el) return;
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => undefined);
     } else {
       void el.requestFullscreen?.().catch(() => undefined);
     }
-  }, []);
+  }, [dialogEl]);
 
   const togglePanel = useCallback(() => {
     setPanelOpen((open) => {
@@ -205,8 +191,13 @@ export function ViewerModal({
     });
   }, []);
 
-  // Idle timer: hide the interface after a few seconds without input. Held off
-  // while the details are open, since reading them is not idleness.
+  const openPanelAt = useCallback((next: PanelTab) => {
+    setTab(next);
+    setPanelOpen(true);
+    writePanelPreference(true);
+  }, []);
+
+  // Idle timer: hide the interface after a few seconds without input.
   const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const armIdle = useCallback(() => {
     if (idleRef.current) clearTimeout(idleRef.current);
@@ -232,11 +223,27 @@ export function ViewerModal({
     });
   }, []);
 
+  const togglePlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) void video.play()?.catch(() => undefined);
+    else video.pause();
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Never steal keys from a field the user is typing in.
+      // A menu opened from the viewer has already handled its keys.
+      if (e.defaultPrevented) return;
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      // A dialog above the viewer (rename, move) owns the keyboard.
+      if (
+        target instanceof Element &&
+        target !== document.body &&
+        !dialogRef.current?.contains(target)
+      )
+        return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       switch (e.key) {
         case 'Escape':
           e.preventDefault();
@@ -263,6 +270,13 @@ export function ViewerModal({
           e.preventDefault();
           setZoom(1);
           break;
+        case ' ':
+          // Space on a focused button presses it; elsewhere it plays a video.
+          if (videoRef.current && !(target instanceof HTMLButtonElement)) {
+            e.preventDefault();
+            togglePlayback();
+          }
+          break;
         case 'f':
         case 'F':
           e.preventDefault();
@@ -273,6 +287,8 @@ export function ViewerModal({
           e.preventDefault();
           setSlideshowWanted((v) => !v);
           break;
+        case 'i':
+        case 'I':
         case 't':
         case 'T':
           e.preventDefault();
@@ -289,12 +305,11 @@ export function ViewerModal({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [close, goNext, goPrev, stepZoom, toggleFullscreen, togglePanel]);
+  }, [close, goNext, goPrev, stepZoom, toggleFullscreen, togglePanel, togglePlayback]);
 
-  // Slideshow: advance through the siblings, and stop at the end rather than
-  // looping forever behind the user's back. Whether it is *running* is derived
-  // so reaching the last file ends the show without an effect having to switch
-  // it off (and leave the toolbar showing "stopped" a render later).
+  // Slideshow: advance through the siblings and stop at the end rather than
+  // looping behind the user's back. Whether it is running is derived, so
+  // reaching the last file ends it without an effect switching it off.
   const slideshow = slideshowWanted && hasNext;
 
   useEffect(() => {
@@ -310,118 +325,170 @@ export function ViewerModal({
     stepZoom(e.deltaY < 0 ? 1 : -1);
   };
 
-  // Favorite state and extracted metadata are best-effort; a failure hides the
-  // control or the details rather than blocking the viewer. Both results are
-  // tagged with the file they belong to, so navigating invalidates them without
-  // an explicit reset.
+  // On touch screens a horizontal swipe pages and a downward pull closes,
+  // as long as the photo is not zoomed in.
+  const onTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    swipeRef.current =
+      touch && e.touches.length === 1 ? { x: touch.clientX, y: touch.clientY } : null;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = swipeRef.current;
+    swipeRef.current = null;
+    const touch = e.changedTouches[0];
+    if (!start || !touch || zoom > 1) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) goNext();
+      else goPrev();
+    } else if (dy > SWIPE_PX * 2 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+      close();
+    }
+  };
+
+  // Favorites are read once per viewer rather than once per photo; metadata
+  // per photo. Both are best-effort: a failure hides the star or the extra
+  // details rather than blocking the viewer.
+  useEffect(() => {
+    let cancelled = false;
+    listFavorites(libraryId)
+      .then((resp) => {
+        if (!cancelled) setFavoriteIds(new Set((resp.files ?? []).map((f) => f.id)));
+      })
+      .catch(() => {
+        if (!cancelled) setFavoriteIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryId]);
+
   useEffect(() => {
     let cancelled = false;
     const fileId = file.id;
-
-    void listFavorites(libraryId)
-      .then((resp) => {
-        if (!cancelled) {
-          setFavoriteState({ fileId, value: resp.files?.some((f) => f.id === fileId) ?? false });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setFavoriteState({ fileId, value: false });
-      });
-
-    void getFileMetadata(libraryId, fileId)
+    getFileMetadata(libraryId, fileId)
       .then((resp) => {
         if (!cancelled) setMetadataState({ fileId, value: resp.metadata ?? null });
       })
       .catch(() => {
         if (!cancelled) setMetadataState({ fileId, value: null });
       });
-
     return () => {
       cancelled = true;
     };
   }, [libraryId, file.id]);
 
-  const favorite = favoriteState?.fileId === file.id ? favoriteState.value : null;
+  const favorite = favoriteIds === null ? null : favoriteIds.has(file.id);
   const metadata = metadataState?.fileId === file.id ? metadataState.value : null;
+
+  const setFavoriteLocally = (id: string, value: boolean) =>
+    setFavoriteIds((ids) => {
+      const updated = new Set(ids);
+      if (value) updated.add(id);
+      else updated.delete(id);
+      return updated;
+    });
 
   const toggleFavorite = async () => {
     if (favorite === null) return;
+    const id = file.id;
+    const next = !favorite;
     setBusy(true);
     setError(null);
+    // Optimistic: the star fills now and is put back if the request fails.
+    setFavoriteLocally(id, next);
     try {
-      if (favorite) {
-        await removeFavorite(libraryId, file.id);
-        setFavoriteState({ fileId: file.id, value: false });
-      } else {
-        await addFavorite(libraryId, file.id);
-        setFavoriteState({ fileId: file.id, value: true });
-      }
+      if (next) await addFavorite(libraryId, id);
+      else await removeFavorite(libraryId, id);
+      onChanged();
     } catch (e: unknown) {
+      setFavoriteLocally(id, !next);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
 
-  const previewable = file.media_type === 'photo' || file.media_type === 'video';
+  const isPhoto = file.media_type === 'photo';
+  const isVideo = file.media_type === 'video';
+  const originalState = original?.id === file.id ? original.state : null;
+  const originalShown = originalState === 'loaded' || originalState === 'failed';
 
-  // A CSS `transform` does not change the layout box: a scaled image overflows
-  // a scroll container that does not know it has got bigger, so the edges of a
-  // zoomed photo are drawn but can never be scrolled to. Size the element
-  // itself once zoomed, and let the stage do the scrolling.
+  // A CSS transform does not grow the layout box, so the edges of a scaled
+  // photo could never be scrolled to. Size the element itself once zoomed,
+  // and let the stage do the scrolling.
   const mediaStyle: CSSProperties =
     zoom > 1
-      ? {
-          width: `${zoom * 100}%`,
-          maxWidth: 'none',
-          height: 'auto',
-          maxHeight: 'none',
-          objectFit: 'contain',
-        }
+      ? { width: `${zoom * 100}%`, maxWidth: 'none', height: 'auto', maxHeight: 'none' }
       : {};
 
-  const stage = (
-    <div
-      className="viewer-stage"
-      onWheel={onWheel}
-      onDoubleClick={() => {
-        if (file.media_type === 'photo') setZoom((z) => (z === 1 ? 2 : 1));
-      }}
-      data-testid="viewer-stage"
-      data-zoomed={zoom > 1}
+  const when = formatDateTime(metadata?.taken_at ?? file.mod_time);
+
+  const moreItems = withDangerLast([
+    {
+      id: 'rename',
+      label: 'Rename',
+      icon: 'edit',
+      onSelect: () => onRequestAction('rename', file),
+    },
+    {
+      id: 'move',
+      label: 'Move',
+      icon: 'folder-move',
+      onSelect: () => onRequestAction('move', file),
+    },
+    { id: 'copy', label: 'Copy', icon: 'copy', onSelect: () => onRequestAction('copy', file) },
+    { id: 'albums', label: 'Add to album', icon: 'album', onSelect: () => openPanelAt('albums') },
+    { id: 'share', label: 'Share', icon: 'share', onSelect: () => openPanelAt('share') },
+    {
+      id: 'download',
+      label: 'Download',
+      icon: 'download',
+      href: downloadUrl(libraryId, file),
+    },
+    { id: 'tags', label: 'Tags', icon: 'tag', onSelect: () => openPanelAt('tags') },
+    {
+      id: 'slideshow',
+      label: slideshow ? 'Stop slideshow' : 'Slideshow',
+      icon: 'slideshow',
+      disabled: siblings.length < 2,
+      onSelect: () => setSlideshowWanted((v) => !v),
+      testId: 'slideshow-toggle',
+    },
+    {
+      id: 'fullscreen',
+      label: 'Fullscreen',
+      icon: 'fullscreen',
+      onSelect: toggleFullscreen,
+    },
+    {
+      id: 'hide',
+      label: 'Hide controls',
+      icon: 'eye-off',
+      onSelect: () => setChromeHidden(true),
+      testId: 'hide-controls',
+    },
+  ]);
+
+  const tool = (
+    name: IconName,
+    label: string,
+    onClick: () => void,
+    extra: { pressed?: boolean; disabled?: boolean; title?: string; testId?: string } = {},
+  ) => (
+    <button
+      type="button"
+      className={extra.pressed ? 'viewer-tool active' : 'viewer-tool'}
+      onClick={onClick}
+      disabled={extra.disabled}
+      aria-label={label}
+      aria-pressed={extra.pressed}
+      title={extra.title ?? label}
+      data-testid={extra.testId}
     >
-      {file.media_type === 'photo' ? (
-        <img
-          className="viewer-media"
-          // The thumbnail is a small preview, far too low-resolution to fill
-          // the window; show the original, and fall back to the preview for a
-          // format the browser cannot decode (HEIC, RAW).
-          src={
-            originalFailedId === file.id
-              ? thumbnailUrl(libraryId, file)
-              : downloadUrl(libraryId, file)
-          }
-          onError={() => setOriginalFailedId(file.id)}
-          alt={file.name}
-          style={mediaStyle}
-        />
-      ) : file.media_type === 'video' ? (
-        <video
-          className="viewer-media"
-          src={downloadUrl(libraryId, file)}
-          controls
-          style={mediaStyle}
-        />
-      ) : (
-        <div className="viewer-generic">
-          <span className="viewer-glyph" aria-hidden="true">
-            {mediaGlyph(file)}
-          </span>
-          <p>{file.name}</p>
-          <p className="muted">No preview for this file type. Download it to open it.</p>
-        </div>
-      )}
-    </div>
+      <Icon name={name} filled={name === 'star' && extra.pressed === true} />
+    </button>
   );
 
   return (
@@ -444,84 +511,72 @@ export function ViewerModal({
         aria-modal="true"
         aria-label={file.name}
         tabIndex={-1}
-        ref={dialogRef}
+        ref={(el) => {
+          dialogRef.current = el;
+          setDialogEl(el);
+        }}
         onClick={(e) => e.stopPropagation()}
         onMouseMove={revealChrome}
         onTouchStart={revealChrome}
         onKeyDown={revealChrome}
       >
         <header className="viewer-toolbar viewer-chrome">
-          <button type="button" className="viewer-tool" onClick={close} aria-label="Close viewer">
-            <ToolIcon name="close" />
+          <button
+            type="button"
+            className="viewer-tool"
+            onClick={close}
+            aria-label="Close viewer"
+            title="Close (Esc)"
+          >
+            <Icon name="arrow-left" />
           </button>
-          <span className="viewer-position" aria-live="polite">
-            {siblings.length > 1 ? `${position} of ${siblings.length}` : file.name}
-          </span>
+          <div className="viewer-title">
+            <span className="viewer-title-name" title={file.rel_path}>
+              {file.name}
+            </span>
+            <span className="viewer-title-sub" aria-live="polite">
+              {siblings.length > 1 ? `${position} of ${siblings.length}` : when}
+            </span>
+          </div>
+
           <div className="viewer-toolbar-actions">
-            {previewable && (
-              <>
-                <div className="viewer-tool-group" role="group" aria-label="Zoom">
-                  <button
-                    type="button"
-                    className="viewer-tool"
-                    onClick={() => stepZoom(-1)}
-                    disabled={zoom === 1}
-                    aria-label="Zoom out"
-                  >
-                    <ToolIcon name="minus" />
-                  </button>
-                  <button
-                    type="button"
-                    className="viewer-tool viewer-tool-wide"
-                    onClick={() => setZoom(1)}
-                    aria-label="Reset zoom"
-                  >
-                    {Math.round(zoom * 100)}%
-                  </button>
-                  <button
-                    type="button"
-                    className="viewer-tool"
-                    onClick={() => stepZoom(1)}
-                    disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-                    aria-label="Zoom in"
-                  >
-                    <ToolIcon name="plus" />
-                  </button>
-                </div>
+            {isPhoto && (
+              <div className="viewer-tool-group viewer-zoom" role="group" aria-label="Zoom">
+                {tool('minus', 'Zoom out', () => stepZoom(-1), { disabled: zoom === 1 })}
                 <button
                   type="button"
-                  className="viewer-tool"
-                  onClick={toggleFullscreen}
-                  aria-label="Toggle fullscreen"
-                  aria-pressed={false}
-                  title="Fullscreen (F)"
+                  className="viewer-tool viewer-tool-wide"
+                  onClick={() => setZoom(1)}
+                  aria-label="Reset zoom"
+                  title="Fit to window (0)"
                 >
-                  <ToolIcon name="fullscreen" />
+                  {Math.round(zoom * 100)}%
                 </button>
-                <button
-                  type="button"
-                  className={slideshow ? 'viewer-tool active' : 'viewer-tool'}
-                  onClick={() => setSlideshowWanted((v) => !v)}
-                  disabled={siblings.length < 2}
-                  aria-pressed={slideshow}
-                  aria-label={slideshow ? 'Stop slideshow' : 'Start slideshow'}
-                  title="Slideshow (S)"
-                  data-testid="slideshow-toggle"
-                >
-                  <ToolIcon name={slideshow ? 'pause' : 'play'} />
-                </button>
-              </>
+                {tool('plus', 'Zoom in', () => stepZoom(1), {
+                  disabled: zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1],
+                })}
+              </div>
             )}
-            <button
-              type="button"
+            {tool(
+              'star',
+              favorite ? 'Remove from favorites' : 'Add to favorites',
+              () => void toggleFavorite(),
+              {
+                pressed: favorite === true,
+                disabled: favorite === null || busy,
+                testId: 'viewer-favorite',
+              },
+            )}
+            {tool('share', 'Share', () => openPanelAt('share'))}
+            <a
               className="viewer-tool"
-              onClick={() => setChromeHidden(true)}
-              aria-label="Hide controls"
-              title="Hide controls (H)"
-              data-testid="hide-controls"
+              href={downloadUrl(libraryId, file)}
+              download={file.name}
+              aria-label="Download"
+              title="Download"
             >
-              <ToolIcon name="eye-off" />
-            </button>
+              <Icon name="download" />
+            </a>
             <button
               type="button"
               className={panelOpen ? 'viewer-tool active' : 'viewer-tool'}
@@ -529,19 +584,113 @@ export function ViewerModal({
               aria-expanded={panelOpen}
               aria-controls="viewer-panel"
               aria-label="Details"
-              title="Details (T)"
+              title="Details (I)"
               data-testid="toggle-panel"
             >
-              <ToolIcon name="info" />
+              <Icon name="info" />
+            </button>
+            {tool('trash', 'Move to trash', () => onRequestAction('trash', file), {
+              disabled: busy,
+              testId: 'viewer-trash',
+            })}
+            <button
+              type="button"
+              className="viewer-tool"
+              aria-label="More options"
+              aria-haspopup="menu"
+              aria-expanded={more.open}
+              onClick={more.toggle}
+              title="More options"
+              data-testid="viewer-more"
+            >
+              <Icon name="more" />
             </button>
           </div>
         </header>
 
-        <div className="viewer-stage-wrap">{stage}</div>
+        <div className="viewer-stage-wrap">
+          <div
+            className="viewer-stage"
+            onWheel={onWheel}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+            onDoubleClick={() => {
+              if (isPhoto) setZoom((z) => (z === 1 ? 2 : 1));
+            }}
+            data-testid="viewer-stage"
+            data-zoomed={zoom > 1}
+          >
+            {isPhoto ? (
+              <>
+                {/* The grid's thumbnail, shown at once while the original loads. */}
+                {!originalShown && (
+                  <img
+                    key={`preview-${file.id}`}
+                    className="viewer-media viewer-preview"
+                    src={thumbnailUrl(libraryId, file)}
+                    alt=""
+                    aria-hidden="true"
+                  />
+                )}
+                <img
+                  key={file.id}
+                  className={originalShown ? 'viewer-media' : 'viewer-media is-loading'}
+                  // The thumbnail is far too small to fill a window; show the
+                  // original, falling back to the preview for a format the
+                  // browser cannot decode (HEIC, RAW).
+                  src={
+                    originalState === 'failed'
+                      ? thumbnailUrl(libraryId, file)
+                      : downloadUrl(libraryId, file)
+                  }
+                  onLoad={() =>
+                    setOriginal((o) =>
+                      o?.id === file.id && o.state === 'failed'
+                        ? o
+                        : { id: file.id, state: 'loaded' },
+                    )
+                  }
+                  onError={() => setOriginal({ id: file.id, state: 'failed' })}
+                  alt={file.name}
+                  style={mediaStyle}
+                  draggable={false}
+                />
+              </>
+            ) : isVideo ? (
+              <video
+                key={file.id}
+                ref={videoRef}
+                className="viewer-media"
+                src={downloadUrl(libraryId, file)}
+                controls
+                autoPlay
+                playsInline
+                preload="metadata"
+                style={mediaStyle}
+              />
+            ) : (
+              <div className="viewer-generic">
+                <span className="viewer-generic-icon" aria-hidden="true">
+                  <Icon name={mediaTypeIcon(file.media_type)} size={40} />
+                </span>
+                <p className="viewer-generic-name">{file.name}</p>
+                <p className="viewer-generic-note">There's no preview for this kind of file.</p>
+                <a
+                  className="button primary-button"
+                  href={downloadUrl(libraryId, file)}
+                  download={file.name}
+                >
+                  <Icon name="download" />
+                  Download to open
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
 
         {slideshow && (
           <p className="viewer-slideshow-note viewer-chrome" role="status">
-            Slideshow is playing — press S to stop.
+            Slideshow · press S to stop
           </p>
         )}
 
@@ -552,7 +701,7 @@ export function ViewerModal({
             onClick={goPrev}
             aria-label="Previous item"
           >
-            <ToolIcon name="prev" />
+            <Icon name="chevron-left" size={28} />
           </button>
         )}
         {hasNext && (
@@ -562,7 +711,7 @@ export function ViewerModal({
             onClick={goNext}
             aria-label="Next item"
           >
-            <ToolIcon name="next" />
+            <Icon name="chevron-right" size={28} />
           </button>
         )}
 
@@ -580,907 +729,98 @@ export function ViewerModal({
         </div>
 
         {panelOpen && (
-          <div className="viewer-scroll-area">
-            {panelOpen && (
-              <aside
-                className="viewer-panel"
-                id="viewer-panel"
-                aria-label="File details and actions"
-              >
-                <div className="viewer-meta">
-                  <h2 title={file.rel_path}>{file.name}</h2>
-                  <p className="muted">
-                    {file.folder_path || 'Library root'} · {formatBytes(file.size_bytes)}
-                  </p>
-                </div>
-
-                <div className="viewer-actions">
-                  <a
-                    className="button"
-                    href={downloadUrl(libraryId, file)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Download
-                  </a>
-                  <button
-                    type="button"
-                    className={
-                      favorite ? 'button favorite-button active' : 'button favorite-button'
-                    }
-                    onClick={() => void toggleFavorite()}
-                    disabled={favorite === null || busy}
-                    aria-pressed={favorite === true}
-                  >
-                    {favorite ? '★ Favorite' : '☆ Favorite'}
-                  </button>
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() => onRequestAction('rename', file)}
-                    disabled={busy}
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() => onRequestAction('move', file)}
-                    disabled={busy}
-                  >
-                    Move
-                  </button>
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() => onRequestAction('copy', file)}
-                    disabled={busy}
-                  >
-                    Copy
-                  </button>
-                  <button
-                    type="button"
-                    className="button danger-button"
-                    onClick={() => onRequestAction('trash', file)}
-                    disabled={busy}
-                    data-testid="viewer-trash"
-                  >
-                    Move to trash
-                  </button>
-                </div>
-
-                <div className="viewer-tabs" role="tablist" aria-label="File information">
-                  {PANEL_TABS.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      role="tab"
-                      id={`viewer-tab-${t.id}`}
-                      aria-selected={tab === t.id}
-                      aria-controls="viewer-tabpanel"
-                      className={tab === t.id ? 'viewer-tab active' : 'viewer-tab'}
-                      onClick={() => setTab(t.id)}
-                      data-testid={`viewer-tab-${t.id}`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div
-                  className="viewer-tabpanel"
-                  role="tabpanel"
-                  id="viewer-tabpanel"
-                  aria-labelledby={`viewer-tab-${tab}`}
-                  tabIndex={0}
-                >
-                  {tab === 'details' && (
-                    <DetailsPanel key={file.id} file={file} metadata={metadata} />
-                  )}
-                  {tab === 'tags' && (
-                    <TagsPanel
-                      key={file.id}
-                      libraryId={libraryId}
-                      file={file}
-                      onChanged={onChanged}
-                    />
-                  )}
-                  {tab === 'people' && (
-                    <PeoplePanel key={file.id} libraryId={libraryId} file={file} />
-                  )}
-                  {tab === 'memories' && (
-                    <MemoriesPanel key={file.id} libraryId={libraryId} file={file} />
-                  )}
-                  {tab === 'similar' && (
-                    <SimilarPanel
-                      key={file.id}
-                      libraryId={libraryId}
-                      file={file}
-                      onOpen={onNavigate}
-                    />
-                  )}
-                  {tab === 'share' && (
-                    <SharePanel key={file.id} libraryId={libraryId} file={file} />
-                  )}
-                  {tab === 'albums' && (
-                    <AlbumsPanel
-                      key={file.id}
-                      libraryId={libraryId}
-                      file={file}
-                      onChanged={onChanged}
-                    />
-                  )}
-                </div>
-
-                {error && (
-                  <p className="error-text" role="alert">
-                    {error}
-                  </p>
-                )}
-              </aside>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------ chrome ------------------------------- */
-
-const TOOL_PATHS = {
-  close: 'M6 6l12 12M18 6 6 18',
-  minus: 'M5 12h14',
-  plus: 'M12 5v14M5 12h14',
-  fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
-  play: 'M8 5.5v13l11-6.5z',
-  pause: 'M8 5v14M16 5v14',
-  info: 'M12 11v6M12 7.5v.01M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
-  'eye-off':
-    'M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A9.6 9.6 0 0 1 12 5c5 0 8.5 4.5 9.5 7a13 13 0 0 1-2.6 3.8M6.5 6.6A13 13 0 0 0 2.5 12c1 2.5 4.5 7 9.5 7 1.6 0 3-.4 4.3-1.1',
-  prev: 'm15 5-7 7 7 7',
-  next: 'm9 5 7 7-7 7',
-} as const;
-
-/** A stroke icon for the viewer's toolbar and navigation buttons. */
-function ToolIcon({ name }: { name: keyof typeof TOOL_PATHS }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill={name === 'play' ? 'currentColor' : 'none'}
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={TOOL_PATHS[name]} />
-    </svg>
-  );
-}
-
-/** How many neighbours the filmstrip shows on each side of the open file. */
-const FILMSTRIP_REACH = 20;
-
-/**
- * A strip of thumbnails under the stage, so a person can see where they are in
- * the list and jump several files at once. Only the files around the current
- * one are rendered, so a 100k-item library never mounts 100k images.
- */
-function Filmstrip({
-  libraryId,
-  siblings,
-  index,
-  onNavigate,
-}: {
-  libraryId: string;
-  siblings: FileSummary[];
-  index: number;
-  onNavigate: (file: FileSummary) => void;
-}) {
-  const currentRef = useRef<HTMLButtonElement | null>(null);
-  const from = Math.max(0, index - FILMSTRIP_REACH);
-  const items = siblings.slice(from, index + FILMSTRIP_REACH + 1);
-
-  useEffect(() => {
-    currentRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
-  }, [index]);
-
-  return (
-    <ul className="viewer-filmstrip" aria-label="Files in this view">
-      {items.map((item) => {
-        const current = item.id === siblings[index]?.id;
-        return (
-          <li key={item.id}>
-            <button
-              type="button"
-              ref={current ? currentRef : undefined}
-              className={current ? 'viewer-film active' : 'viewer-film'}
-              onClick={() => onNavigate(item)}
-              aria-current={current ? 'true' : undefined}
-              aria-label={`Open ${item.name}`}
-              title={item.name}
-            >
-              {item.media_type === 'photo' || item.media_type === 'video' ? (
-                <img src={thumbnailUrl(libraryId, item)} alt="" loading="lazy" />
-              ) : (
-                <span aria-hidden="true">{mediaGlyph(item)}</span>
-              )}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/* ------------------------------ panels ------------------------------- */
-
-function DetailsPanel({ file, metadata }: { file: FileSummary; metadata: FileMetadata | null }) {
-  return (
-    <div data-testid="viewer-details-panel">
-      <dl className="viewer-facts">
-        <div className="viewer-detail-row">
-          <dt>Path</dt>
-          <dd>
-            <code>{file.rel_path}</code>
-          </dd>
-        </div>
-        <div className="viewer-detail-row">
-          <dt>Size</dt>
-          <dd>{formatBytes(file.size_bytes)}</dd>
-        </div>
-        <div className="viewer-detail-row">
-          <dt>Type</dt>
-          <dd>{file.mime_type || file.media_type}</dd>
-        </div>
-        <div className="viewer-detail-row">
-          <dt>Modified</dt>
-          <dd>
-            <time dateTime={file.mod_time}>
-              {Number.isNaN(Date.parse(file.mod_time))
-                ? file.mod_time
-                : new Date(file.mod_time).toLocaleString()}
-            </time>
-          </dd>
-        </div>
-        {file.status !== 'present' && (
-          <div className="viewer-detail-row">
-            <dt>Status</dt>
-            <dd>{file.status}</dd>
-          </div>
-        )}
-      </dl>
-
-      {!metadata && <p className="muted">No extra details were extracted for this file.</p>}
-      {metadata && <FileFacts metadata={metadata} />}
-    </div>
-  );
-}
-
-function FileFacts({ metadata }: { metadata: FileMetadata }) {
-  const rows: Array<[string, ReactNode]> = [];
-
-  if (metadata.width && metadata.height) {
-    rows.push(['Dimensions', `${metadata.width} × ${metadata.height}px`]);
-  }
-  if (metadata.duration_secs != null && metadata.duration_secs > 0) {
-    const total = Math.round(metadata.duration_secs);
-    rows.push(['Duration', `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`]);
-  }
-  const camera = [metadata.camera_make, metadata.camera_model].filter(Boolean).join(' ');
-  if (camera) rows.push(['Camera', camera]);
-  if (metadata.taken_at) {
-    const taken = new Date(metadata.taken_at);
-    rows.push([
-      'Taken',
-      Number.isNaN(taken.getTime()) ? metadata.taken_at : taken.toLocaleString(),
-    ]);
-  }
-  if (metadata.latitude != null && metadata.longitude != null) {
-    const lat = metadata.latitude.toFixed(5);
-    const lon = metadata.longitude.toFixed(5);
-    rows.push([
-      'Location',
-      <a
-        key="location"
-        href={`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}`}
-        target="_blank"
-        rel="noreferrer"
-      >
-        {lat}, {lon}
-      </a>,
-    ]);
-  }
-
-  if (rows.length === 0) return null;
-
-  return (
-    <div className="viewer-details" data-testid="viewer-details">
-      <h3>Extracted details</h3>
-      <dl>
-        {rows.map(([term, desc]) => (
-          <div key={term} className="viewer-detail-row">
-            <dt>{term}</dt>
-            <dd>{desc}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function TagsPanel({
-  libraryId,
-  file,
-  onChanged,
-}: {
-  libraryId: string;
-  file: FileSummary;
-  onChanged: () => void;
-}) {
-  const [loaded, setLoaded] = useState<{ library: Tag[]; file: Tag[] } | null>(null);
-  const [tagInput, setTagInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Bumping this re-runs the load; it is the only thing that makes the fetch
-  // effect run again, so a reload does not need its own state plumbing.
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all([listTags(libraryId), listFileTags(libraryId, file.id)])
-      .then(([all, mine]) => {
-        if (cancelled) return;
-        setLoaded({ library: all.tags ?? [], file: mine.tags ?? [] });
-        setError(null);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, file.id, reloadKey]);
-
-  const libraryTags = loaded?.library ?? [];
-  const fileTags = loaded?.file ?? [];
-
-  const attachTag = async (raw: string) => {
-    const name = raw.trim();
-    if (!name) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // Typing a new name creates the tag; an existing one is reused. Cairn has
-      // no "find-or-create" endpoint, so the lookup is client-side.
-      const existing = libraryTags.find((t) => t.name.toLowerCase() === name.toLowerCase());
-      let tagId = existing?.id;
-      if (!tagId) {
-        const created = await createTag(libraryId, name);
-        tagId = created.tag.id;
-      }
-      await addFileTag(libraryId, file.id, tagId);
-      setReloadKey((k) => k + 1);
-      setTagInput('');
-      onChanged();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const detachTag = async (tag: Tag) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await removeFileTag(libraryId, file.id, tag.id);
-      setReloadKey((k) => k + 1);
-      onChanged();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    void attachTag(tagInput);
-  };
-
-  return (
-    <div data-testid="viewer-tags">
-      {fileTags.length > 0 ? (
-        <ul className="viewer-tag-list" data-testid="file-tag-list">
-          {fileTags.map((t) => (
-            <li key={t.id} className="tag-chip" data-testid={`file-tag-${t.name}`}>
-              {t.name}
+          <aside className="viewer-panel" id="viewer-panel" aria-label="File details and actions">
+            <header className="viewer-panel-head">
+              <h2>Info</h2>
               <button
                 type="button"
-                aria-label={`Remove tag ${t.name}`}
-                onClick={() => void detachTag(t)}
-                disabled={busy}
+                className="viewer-tool"
+                onClick={togglePanel}
+                aria-label="Close details"
               >
-                ×
+                <Icon name="close" />
               </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="muted">No tags on this file.</p>
-      )}
+            </header>
 
-      <form className="viewer-tag-form" onSubmit={onSubmit}>
-        <label className="visually-hidden" htmlFor={`viewer-tag-input-${file.id}`}>
-          Add a tag
-        </label>
-        <input
-          id={`viewer-tag-input-${file.id}`}
-          className="viewer-tag-input"
-          type="text"
-          list={`viewer-tag-suggestions-${file.id}`}
-          placeholder="Add tag…"
-          value={tagInput}
-          onChange={(e) => setTagInput(e.target.value)}
-          disabled={busy}
-        />
-        <datalist id={`viewer-tag-suggestions-${file.id}`}>
-          {libraryTags.map((t) => (
-            <option key={t.id} value={t.name} />
-          ))}
-        </datalist>
-        <button type="submit" className="button" disabled={busy || tagInput.trim() === ''}>
-          Add
-        </button>
-      </form>
+            <div className="viewer-tabs" role="tablist" aria-label="File information">
+              {PANEL_TABS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  id={`viewer-tab-${t.id}`}
+                  aria-selected={tab === t.id}
+                  aria-controls="viewer-tabpanel"
+                  tabIndex={tab === t.id ? 0 : -1}
+                  className={tab === t.id ? 'viewer-tab active' : 'viewer-tab'}
+                  onClick={() => setTab(t.id)}
+                  onKeyDown={(event) => {
+                    // Arrow keys move between tabs (the tablist pattern), not
+                    // between photos.
+                    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+                    event.preventDefault();
+                    const i = PANEL_TABS.findIndex((x) => x.id === tab);
+                    const step = event.key === 'ArrowRight' ? 1 : -1;
+                    const next = PANEL_TABS[(i + step + PANEL_TABS.length) % PANEL_TABS.length]!;
+                    setTab(next.id);
+                    document.getElementById(`viewer-tab-${next.id}`)?.focus();
+                  }}
+                  data-testid={`viewer-tab-${t.id}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * "Who is in this photo?"
- *
- * The API has no per-file faces endpoint — a person is a cluster of faces
- * across the library, and the only way to ask whether a given person appears
- * in a given file is to search that person's files and look for this one. That
- * is one request per person, so it is only done when the panel is opened, and
- * the count is bounded by a single page of results per person.
- */
-function PeoplePanel({ libraryId, file }: { libraryId: string; file: FileSummary }) {
-  const [result, setResult] = useState<{ people: Person[]; matches: Set<string> } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const resp = await listPeople(libraryId);
-        const all = resp.people ?? [];
-        const results = await Promise.all(
-          all.map((person) =>
-            searchFiles(libraryId, { person: person.id, limit: 200 })
-              .then((listing) => (listing.files ?? []).some((f) => f.id === file.id))
-              .catch(() => false),
-          ),
-        );
-        if (cancelled) return;
-        setResult({
-          people: all,
-          matches: new Set(all.filter((_, i) => results[i]).map((p) => p.id)),
-        });
-        setError(null);
-      } catch (e: unknown) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, file.id]);
-
-  const people = result?.people ?? null;
-  const matches = result?.matches ?? new Set<string>();
-  const busy = result === null && error === null;
-
-  if (error) {
-    return (
-      <p className="error-text" role="alert">
-        {error}
-      </p>
-    );
-  }
-  if (busy && people === null) {
-    return (
-      <p className="muted" role="status">
-        Looking for familiar faces…
-      </p>
-    );
-  }
-  if (!people || people.length === 0) {
-    return <p className="muted">No people have been identified in this library yet.</p>;
-  }
-
-  const found = people.filter((p) => matches.has(p.id));
-
-  return (
-    <div data-testid="viewer-people">
-      {found.length === 0 ? (
-        <p className="muted">No identified people appear in this file.</p>
-      ) : (
-        <ul className="viewer-person-list">
-          {found.map((person) => (
-            <li key={person.id} className="viewer-person">
-              {person.cover_file_id && (
-                <img
-                  className="viewer-person-avatar"
-                  src={`/api/v1/libraries/${libraryId}/files/${person.cover_file_id}/thumbnail`}
-                  alt=""
+            <div
+              className="viewer-tabpanel"
+              role="tabpanel"
+              id="viewer-tabpanel"
+              aria-labelledby={`viewer-tab-${tab}`}
+              tabIndex={0}
+            >
+              {tab === 'details' && <DetailsPanel key={file.id} file={file} metadata={metadata} />}
+              {tab === 'tags' && (
+                <TagsPanel key={file.id} libraryId={libraryId} file={file} onChanged={onChanged} />
+              )}
+              {tab === 'albums' && (
+                <AlbumsPanel
+                  key={file.id}
+                  libraryId={libraryId}
+                  file={file}
+                  onChanged={onChanged}
                 />
               )}
-              <a href={`/people?person=${person.id}`}>{person.name}</a>
-              <span className="muted">
-                {person.face_count} {person.face_count === 1 ? 'face' : 'faces'}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="muted viewer-panel-footnote">
-        Based on the people Cairn has named in this library. Run a face pass and clustering on the
-        ML page to improve it.
-      </p>
-    </div>
-  );
-}
+              {tab === 'people' && <PeoplePanel key={file.id} libraryId={libraryId} file={file} />}
+              {tab === 'memories' && (
+                <MemoriesPanel key={file.id} libraryId={libraryId} file={file} />
+              )}
+              {tab === 'similar' && (
+                <SimilarPanel key={file.id} libraryId={libraryId} file={file} onOpen={onNavigate} />
+              )}
+              {tab === 'share' && <SharePanel key={file.id} libraryId={libraryId} file={file} />}
+            </div>
+          </aside>
+        )}
 
-/**
- * Memories that mention this file.
- *
- * A memory references a file with `[[media:<file-id>]]` written in its
- * Markdown body, and the only server-side way to find those is to read each
- * memory's refs. The panel pages the memory list (bounded) and keeps the ones
- * that point here.
- */
-function MemoriesPanel({ libraryId, file }: { libraryId: string; file: FileSummary }) {
-  const [linked, setLinked] = useState<Memory[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+        {error && (
+          <p className="viewer-error" role="alert">
+            {error}
+          </p>
+        )}
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const resp = await listMemories(libraryId, { limit: 50 });
-        const all = resp.memories ?? [];
-        const checks = await Promise.all(
-          all.map((m) =>
-            listMemoryRefs(libraryId, m.id)
-              .then((r) => (r.refs ?? []).some((ref) => ref.type === 'media' && ref.id === file.id))
-              .catch(() => false),
-          ),
-        );
-        if (cancelled) return;
-        setLinked(all.filter((_, i) => checks[i]));
-        setError(null);
-      } catch (e: unknown) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, file.id]);
-
-  const busy = linked === null && error === null;
-
-  if (error) {
-    return (
-      <p className="error-text" role="alert">
-        {error}
-      </p>
-    );
-  }
-  if (busy) {
-    return (
-      <p className="muted" role="status">
-        Checking memories…
-      </p>
-    );
-  }
-  if (!linked || linked.length === 0) {
-    return (
-      <p className="muted">
-        No memory mentions this file yet. Add <code>[[media:{file.id}]]</code> to a memory to link
-        it.
-      </p>
-    );
-  }
-
-  return (
-    <ul className="viewer-memory-list" data-testid="viewer-memories">
-      {linked.map((m) => (
-        <li key={m.id}>
-          <a href={`/memories?q=${encodeURIComponent(m.title)}`}>{m.title}</a>
-          {m.memory_date && <span className="muted"> · {m.memory_date}</span>}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SimilarPanel({
-  libraryId,
-  file,
-  onOpen,
-}: {
-  libraryId: string;
-  file: FileSummary;
-  onOpen: (file: FileSummary) => void;
-}) {
-  const [similar, setSimilar] = useState<SimilarFile[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getSimilarFiles(libraryId, file.id)
-      .then((resp) => {
-        if (cancelled) return;
-        setSimilar(resp.similar ?? []);
-        setError(null);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        // ML being disabled is the common case and is not a failure to report
-        // as a broken page — say so plainly instead.
-        setError(e instanceof Error ? e.message : String(e));
-        setSimilar([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, file.id]);
-
-  if (similar === null && error === null) {
-    return (
-      <p className="muted" role="status">
-        Looking for similar files…
-      </p>
-    );
-  }
-  if (error) {
-    return (
-      <p className="muted" data-testid="viewer-similar-unavailable">
-        Similarity search needs the optional local ML component, which is not available on this
-        server.
-      </p>
-    );
-  }
-  if (!similar || similar.length === 0) {
-    return <p className="muted">No visually similar files were found.</p>;
-  }
-
-  return (
-    <ul className="viewer-similar-list" data-testid="viewer-similar">
-      {similar.map((s) => {
-        const target = s.file ?? null;
-        return (
-          <li key={s.file_id} className="viewer-similar-item">
-            {target ? (
-              <>
-                <button
-                  type="button"
-                  className="viewer-similar-thumb"
-                  onClick={() => onOpen(target)}
-                  aria-label={`Open ${target.name}`}
-                >
-                  <img src={thumbnailUrl(libraryId, target)} alt="" loading="lazy" />
-                </button>
-                <span className="viewer-similar-name">{target.name}</span>
-              </>
-            ) : (
-              <span className="viewer-similar-name" title={s.file_path}>
-                {s.file_path}
-              </span>
-            )}
-            <span className="muted">{Math.round(s.similarity * 100)}%</span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/**
- * Albums panel: shows which albums already contain this file, and lets the
- * user add it to any other album in the library.
- */
-function AlbumsPanel({
-  libraryId,
-  file,
-  onChanged,
-}: {
-  libraryId: string;
-  file: FileSummary;
-  onChanged: () => void;
-}) {
-  const [allAlbums, setAllAlbums] = useState<Album[] | null>(null);
-  const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const resp = await listAlbums(libraryId);
-        const albums = resp.albums ?? [];
-        // Check which albums contain this file.
-        const checks = await Promise.all(
-          albums.map((a) =>
-            listAlbumFiles(libraryId, a.id)
-              .then((r) => (r.files ?? []).some((f) => f.id === file.id))
-              .catch(() => false),
-          ),
-        );
-        if (cancelled) return;
-        setAllAlbums(albums);
-        setMemberIds(new Set(albums.filter((_, i) => checks[i]).map((a) => a.id)));
-        setError(null);
-      } catch (e: unknown) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, file.id, reloadKey]);
-
-  const toggle = async (album: Album) => {
-    setBusy(true);
-    setError(null);
-    try {
-      if (memberIds.has(album.id)) {
-        await removeAlbumFile(libraryId, album.id, file.id);
-      } else {
-        await addAlbumFile(libraryId, album.id, file.id);
-      }
-      setReloadKey((k) => k + 1);
-      onChanged();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (allAlbums === null && error === null) {
-    return (
-      <p className="muted" role="status">
-        Loading albums…
-      </p>
-    );
-  }
-
-  if (error) {
-    return (
-      <p className="error-text" role="alert">
-        {error}
-      </p>
-    );
-  }
-
-  if (!allAlbums || allAlbums.length === 0) {
-    return (
-      <p className="muted">No albums yet. Create one from the Albums page to group your files.</p>
-    );
-  }
-
-  return (
-    <div data-testid="viewer-albums">
-      <ul className="viewer-album-list">
-        {allAlbums.map((album) => {
-          const inAlbum = memberIds.has(album.id);
-          return (
-            <li key={album.id} className="viewer-album-row">
-              <span className="viewer-album-name">{album.name}</span>
-              <button
-                type="button"
-                className={inAlbum ? 'button viewer-album-btn active' : 'button viewer-album-btn'}
-                disabled={busy}
-                onClick={() => void toggle(album)}
-                aria-pressed={inAlbum}
-              >
-                {inAlbum ? '✓ In album' : '+ Add'}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-/**
- * Sharing. Shares are created at a resource key, and a file's key is
- * `file:<library>/<rel-path>`, so a share here exposes exactly this file.
- */
-function SharePanel({ libraryId, file }: { libraryId: string; file: FileSummary }) {
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const resourceKey = `file:${libraryId}/${file.rel_path}`;
-
-  const create = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const resp = await createShare(libraryId, { key: resourceKey, caps: ['read'] });
-      setShareUrl(`${window.location.origin}/s/${resp.token}`);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [libraryId, resourceKey]);
-
-  const copy = async () => {
-    if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  return (
-    <div data-testid="viewer-share">
-      <p className="muted">
-        A read-only link that anyone with the URL (and the password, if you set one) can open
-        without a Cairn account. Manage links from the Sharing page.
-      </p>
-      <p className="viewer-share-key">
-        <code>{resourceKey}</code>
-      </p>
-      {shareUrl ? (
-        <div className="viewer-share-result">
-          <label className="visually-hidden" htmlFor="viewer-share-url">
-            Share link
-          </label>
-          <input id="viewer-share-url" className="viewer-tag-input" readOnly value={shareUrl} />
-          <button type="button" className="button" onClick={() => void copy()}>
-            {copied ? 'Copied' : 'Copy link'}
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="button primary-button"
-          onClick={() => void create()}
-          disabled={busy}
-          data-testid="viewer-create-share"
-        >
-          {busy ? 'Creating…' : 'Create a read-only link'}
-        </button>
-      )}
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
+        {more.anchor && (
+          <Menu
+            anchor={more.anchor}
+            align="end"
+            items={moreItems}
+            onClose={more.close}
+            label="More options"
+            tone="dark"
+            container={dialogEl}
+          />
+        )}
+      </div>
     </div>
   );
 }

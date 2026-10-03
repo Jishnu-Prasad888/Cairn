@@ -1,183 +1,227 @@
 /**
- * Trash — restore or erase for good.
+ * Trash — what was removed, waiting to be restored or erased.
  *
- * A soft-deleted file is still on disk and still indexed as `trashed`, so both
- * outcomes are reversible or not: restore puts it back where it was, and the
- * permanent delete erases the bytes. The second is the only irreversible action
- * in the product, so it is behind a dialog that says so and is not wired to the
- * same button as restore.
+ * A file in the trash is still on disk, so restoring is always safe and puts
+ * it back exactly where it was. Deleting forever erases the bytes; it is the
+ * one irreversible action in Cairn, so it is the only one that asks twice and
+ * says so plainly.
  */
 
 import { useCallback, useState } from 'react';
 
-import { useAuth } from '../auth/authContext';
-import { useLibraryGate } from '../api/libraries';
 import { useLibraryResource } from '../api/resources';
 import { deleteForever, listTrash, restoreFile } from '../api/queries';
-import type { FileSummary } from '../api/types';
+import type { FileSummary, Library } from '../api/types';
 import { ConfirmDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
-import LibraryPicker from '../components/LibraryPicker';
+import { LibraryGatePage } from '../components/LibraryGatePage';
+import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
+import { SelectionToolbar } from '../components/media/SelectionToolbar';
+import { useSelection } from '../components/media/useSelection';
+import { EmptyState, ErrorState, LibraryOfflineNotice, PageHeader } from '../components/States';
+import { Icon } from '../components/ui/Icon';
+import { Menu, type MenuAnchor } from '../components/ui/Menu';
+import { useToast } from '../components/ui/Toast';
 import { ViewerModal } from '../components/ViewerModal';
-import {
-  EmptyState,
-  ErrorState,
-  LibraryOfflineNotice,
-  LoadingState,
-  NoLibrariesState,
-  PageHeader,
-} from '../components/States';
-import { formatBytes } from '../api/types';
-import { mediaGlyph, thumbnailUrl } from '../components/media';
-import './MediaPage.css';
+import './TrashPage.css';
 
 export default function TrashPage() {
-  const gate = useLibraryGate();
-  const { user } = useAuth();
+  return (
+    <LibraryGatePage title="Trash">{(library) => <Trash library={library} />}</LibraryGatePage>
+  );
+}
 
+const plural = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`;
+
+function Trash({ library }: { library: Library }) {
+  const libraryId = library.id;
+  const toast = useToast();
+  const [erasing, setErasing] = useState<FileSummary[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [erasing, setErasing] = useState<FileSummary | null>(null);
+  const [menu, setMenu] = useState<{ anchor: MenuAnchor; file: FileSummary } | null>(null);
 
   const trash = useLibraryResource(
-    useCallback(async (libraryId: string) => (await listTrash(libraryId)).files ?? [], []),
+    useCallback(async (id: string) => (await listTrash(id)).files ?? [], []),
   );
+  const files = trash.data ?? EMPTY;
+  const selection = useSelection(files, libraryId);
 
-  // The viewer on this page offers a permanent delete rather than a second
-  // soft delete, which would be a no-op.
-  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', trash.reload, {
-    permanent: true,
-  });
+  // The viewer here offers "Delete forever" in place of a second soft delete.
+  const ops = useFileOperations(libraryId, trash.reload, { permanent: true });
 
-  const restore = async (file: FileSummary) => {
-    if (gate.kind !== 'ready') return;
+  const restore = async (targets: FileSummary[]) => {
     setBusy(true);
-    setError(null);
-    try {
-      await restoreFile(gate.libraryId, file.id);
-      trash.reload();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+    const results = await Promise.allSettled(targets.map((f) => restoreFile(libraryId, f.id)));
+    setBusy(false);
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed) {
+      toast({
+        message: `Couldn't restore ${plural(failed)}. Something may already be at the original location.`,
+        tone: 'error',
+      });
+    } else {
+      toast({
+        message: targets.length === 1 ? 'Restored' : `${plural(targets.length)} restored`,
+        tone: 'success',
+      });
     }
+    selection.clear();
+    trash.reload();
   };
 
-  if (gate.kind === 'loading') {
-    return (
-      <main className="media-page">
-        <LoadingState label="Loading libraries…" />
-      </main>
-    );
-  }
-
-  const header = (
-    <PageHeader
-      title="Trash"
-      subtitle="Files you removed. Restoring puts one back exactly where it was."
-      controls={<LibraryPicker />}
-    />
-  );
-
-  if (gate.kind === 'error') {
-    return (
-      <main className="media-page">
-        {header}
-        <ErrorState message={gate.message} onRetry={trash.reload} />
-      </main>
-    );
-  }
-
-  if (gate.kind === 'empty') {
-    return (
-      <main className="media-page">
-        {header}
-        <NoLibrariesState isAdmin={user?.role === 'admin'} />
-      </main>
-    );
-  }
+  const erase = async () => {
+    if (!erasing) return;
+    setBusy(true);
+    setError(null);
+    const results = await Promise.allSettled(erasing.map((f) => deleteForever(libraryId, f.id)));
+    setBusy(false);
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed) {
+      const reason = results.find(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      )?.reason;
+      setError(
+        reason instanceof Error ? reason.message : `${plural(failed)} could not be deleted.`,
+      );
+      trash.reload();
+      return;
+    }
+    toast({
+      message:
+        erasing.length === 1 ? 'Deleted forever' : `${plural(erasing.length)} deleted forever`,
+      tone: 'success',
+    });
+    setErasing(null);
+    selection.clear();
+    trash.reload();
+  };
 
   return (
-    <main className="media-page">
-      {header}
+    <main className="page media-page trash-page">
+      {selection.active && (
+        <SelectionToolbar
+          count={selection.size}
+          total={files.length}
+          onClear={selection.clear}
+          onSelectAll={selection.selectAll}
+          onDeleteKey={() => setErasing(selection.selectedFiles)}
+          actions={[
+            {
+              id: 'restore',
+              label: 'Restore',
+              icon: 'restore',
+              onClick: () => void restore(selection.selectedFiles),
+              disabled: busy,
+              testId: 'selection-restore',
+            },
+            {
+              id: 'erase',
+              label: 'Delete forever',
+              icon: 'trash',
+              danger: true,
+              onClick: () => setErasing(selection.selectedFiles),
+              testId: 'selection-erase',
+            },
+          ]}
+        />
+      )}
 
-      {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
-      {trash.error && <ErrorState message={trash.error} onRetry={trash.reload} />}
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
+      <PageHeader
+        title="Trash"
+        subtitle={files.length > 0 ? plural(files.length) : undefined}
+        controls={
+          files.length > 0 && (
+            <>
+              <button
+                type="button"
+                className="button"
+                onClick={() => void restore(files)}
+                disabled={busy}
+              >
+                <Icon name="restore" />
+                Restore all
+              </button>
+              <button
+                type="button"
+                className="button danger-button"
+                onClick={() => setErasing(files)}
+                disabled={busy}
+                data-testid="empty-trash"
+              >
+                Empty trash
+              </button>
+            </>
+          )
+        }
+      />
+
+      {library.status === 'offline' && <LibraryOfflineNotice library={library} />}
+
+      {files.length > 0 && (
+        <p className="trash-note">
+          <Icon name="info" size={18} />
+          Items here are still on disk. Restore puts them back where they were; Delete forever
+          erases them.
         </p>
       )}
-      {trash.loading && <LoadingState />}
+
+      {trash.error && (
+        <ErrorState message={trash.error} onRetry={trash.reload} title="Couldn't load the trash" />
+      )}
+      {trash.loading && <MediaGridSkeleton />}
 
       {trash.data !== null && trash.data.length === 0 && (
-        <EmptyState title="Trash is empty" testId="trash-empty">
-          <p className="muted">
-            Nothing has been removed. When you move a file to the trash it waits here until you
-            restore it or delete it for good.
+        <EmptyState title="Trash is empty" testId="trash-empty" icon="trash">
+          <p>
+            When you remove something, it waits here until you restore it or delete it for good.
           </p>
         </EmptyState>
       )}
 
-      {trash.data !== null && trash.data.length > 0 && (
-        <ul className="trash-list" data-testid="trash-list" aria-label="Files in the trash">
-          {trash.data.map((file) => (
-            <li key={file.id} className="trash-row">
-              {file.media_type === 'photo' ? (
-                <img
-                  className="trash-thumb"
-                  src={thumbnailUrl(gate.libraryId, file)}
-                  alt=""
-                  loading="lazy"
-                />
-              ) : (
-                <span className="trash-thumb trash-glyph" aria-hidden="true">
-                  {mediaGlyph(file)}
-                </span>
-              )}
-              <div className="trash-meta">
-                <button
-                  type="button"
-                  className="trash-name"
-                  onClick={() => ops.openViewer(file)}
-                  title={file.rel_path}
-                >
-                  {file.name}
-                </button>
-                <span className="muted trash-sub">
-                  {file.folder_path || 'Library root'} · {formatBytes(file.size_bytes)}
-                </span>
-              </div>
-              <div className="trash-actions">
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => void restore(file)}
-                  disabled={busy}
-                  data-testid={`restore-${file.id}`}
-                >
-                  Restore
-                </button>
-                <button
-                  type="button"
-                  className="button danger-button"
-                  onClick={() => setErasing(file)}
-                  disabled={busy}
-                  data-testid={`erase-${file.id}`}
-                >
-                  Delete forever
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+      {files.length > 0 && (
+        <MediaGrid
+          libraryId={libraryId}
+          files={files}
+          onOpen={ops.openViewer}
+          selection={selection}
+          onContextMenu={(file, x, y) => setMenu({ anchor: { x, y }, file })}
+          label="Trash"
+          testId="trash-list"
+        />
+      )}
+
+      {menu && (
+        <Menu
+          anchor={menu.anchor}
+          label="Trash actions"
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              id: 'restore',
+              label: 'Restore',
+              icon: 'restore',
+              onSelect: () => void restore([menu.file]),
+              testId: `restore-${menu.file.id}`,
+            },
+            'separator',
+            {
+              id: 'erase',
+              label: 'Delete forever',
+              icon: 'trash',
+              danger: true,
+              onSelect: () => setErasing([menu.file]),
+              testId: `erase-${menu.file.id}`,
+            },
+          ]}
+        />
       )}
 
       {ops.viewer && (
         <ViewerModal
-          libraryId={gate.libraryId}
+          libraryId={libraryId}
           file={ops.viewer}
-          siblings={trash.data ?? []}
+          siblings={files}
           onNavigate={ops.openViewer}
           onChanged={trash.reload}
           onRequestAction={ops.requestAction}
@@ -188,35 +232,30 @@ export default function TrashPage() {
 
       <ConfirmDialog
         open={erasing !== null}
-        title="Delete forever?"
+        title={
+          erasing && erasing.length === 1
+            ? `Delete “${erasing[0]!.name}” forever?`
+            : `Delete ${plural(erasing?.length ?? 0)} forever?`
+        }
         destructive
         confirmLabel="Delete forever"
         busy={busy}
         error={error}
         message={
-          erasing && (
-            <p>
-              <strong>{erasing.name}</strong> will be erased from Cairn's index and its bytes
-              removed from disk. <strong>This cannot be undone.</strong>
-            </p>
-          )
+          <p>
+            {erasing && erasing.length === 1 ? 'It' : 'They'} will be erased from disk.{' '}
+            <strong>This cannot be undone.</strong>
+          </p>
         }
-        onCancel={() => setErasing(null)}
-        onConfirm={() => {
-          if (!erasing || gate.kind !== 'ready') return;
-          const target = erasing;
-          setBusy(true);
+        onCancel={() => {
+          setErasing(null);
           setError(null);
-          deleteForever(gate.libraryId, target.id)
-            .then(() => {
-              setErasing(null);
-              trash.reload();
-            })
-            .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-            .finally(() => setBusy(false));
         }}
+        onConfirm={() => void erase()}
         testId="erase-dialog"
       />
     </main>
   );
 }
+
+const EMPTY: FileSummary[] = [];

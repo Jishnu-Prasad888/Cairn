@@ -1619,6 +1619,53 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
   /libraries/{libraryID}/albums/{albumID}:
+    patch:
+      tags: [Organization]
+      operationId: updateAlbum
+      summary: Rename an album, change its description, or set its cover
+      description: >
+        Requires an authenticated session with the `edit` capability on the
+        album. Every field is optional; omitted fields are left alone. An empty
+        `cover_file_id` clears the cover, so the album is previewed by its
+        first photo again. A non-empty cover must be a file already in the
+        album.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: albumID
+          in: path
+          required: true
+          description: Album id (returned by album endpoints).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: New name. Must not be empty.
+                description:
+                  type: string
+                cover_file_id:
+                  type: string
+      responses:
+        '200':
+          description: The updated album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags: [Organization]
       operationId: deleteAlbum
@@ -4892,6 +4939,15 @@ components:
         cover_file_id:
           type: string
           description: File powering the cover thumbnail, when set.
+        file_count:
+          type: integer
+          description: Number of files in the album.
+        preview_file_id:
+          type: string
+          description: >
+            The file that represents the album in a grid: the cover when set,
+            otherwise the first photo, otherwise the first file. Absent for an
+            empty album.
         created_at:
           type: string
           format: date-time

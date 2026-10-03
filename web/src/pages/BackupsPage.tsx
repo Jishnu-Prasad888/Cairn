@@ -232,7 +232,7 @@ export default function BackupsPage() {
 
   if (!isAdmin) {
     return (
-      <main className="backups-page">
+      <main className="page backups-page">
         <PageHeader title="Backups" subtitle="Copies of every library, written by the server." />
         <EmptyState title="Administrators only" testId="backups-forbidden">
           <p className="muted">
@@ -271,7 +271,7 @@ export default function BackupsPage() {
   const latest = backups.data?.[0] ?? null;
 
   return (
-    <main className="backups-page">
+    <main className="page backups-page">
       <PageHeader
         title="Backups"
         subtitle="Copies of every library, written to a destination the server owns. Nothing leaves this machine unless you configure it to."

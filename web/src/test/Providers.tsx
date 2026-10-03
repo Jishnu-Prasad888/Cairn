@@ -10,11 +10,17 @@ import type { ReactNode } from 'react';
 
 import { LibrariesProvider } from '../api/libraries';
 import AuthProvider from '../auth/AuthProvider';
+import { ToastProvider } from '../components/ui/Toast';
+import { UploadProvider } from '../components/upload/UploadProvider';
 
 export default function Providers({ children }: { children: ReactNode }) {
   return (
     <AuthProvider>
-      <LibrariesProvider>{children}</LibrariesProvider>
+      <LibrariesProvider>
+        <ToastProvider>
+          <UploadProvider>{children}</UploadProvider>
+        </ToastProvider>
+      </LibrariesProvider>
     </AuthProvider>
   );
 }

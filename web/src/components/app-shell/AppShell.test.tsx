@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { admin, member, mockApi, noContent, originalFetch, renderPage } from '../test/harness';
-import Providers from '../test/Providers';
+import { admin, member, mockApi, noContent, originalFetch, renderPage } from '../../test/harness';
+import Providers from '../../test/Providers';
 import AppShell from './AppShell';
 
 /** The shell renders an `Outlet`, so the routes have to be declared to render. */
@@ -14,8 +14,8 @@ function shell(route = '/') {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<p>home content</p>} />
-            <Route path="/media" element={<p>media content</p>} />
-            <Route path="/browse" element={<p>browse content</p>} />
+            <Route path="/photos" element={<p>photos content</p>} />
+            <Route path="/search" element={<p>search content</p>} />
           </Route>
         </Routes>
       </Providers>
@@ -29,7 +29,7 @@ describe('AppShell', () => {
     vi.restoreAllMocks();
   });
 
-  it('lists every browsing section from the spec, in order', () => {
+  it('lists every browsing section, in the order a person meets them', () => {
     mockApi();
     renderPage(<AppShell />);
 
@@ -39,50 +39,48 @@ describe('AppShell', () => {
       .map((link) => link.textContent);
     expect(labels).toEqual([
       'Home',
-      'Media',
-      'Memories',
+      'Photos',
+      'Videos',
       'Albums',
       'People',
-      'Tags',
-      'Shared',
+      'Memories',
+      'Files',
       'Favorites',
+      'Shared',
       'Trash',
-      'Settings',
     ]);
+    // Settings sits apart, at the foot.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Settings' })).getByRole('link', {
+        name: 'Settings',
+      }),
+    ).toBeInTheDocument();
   });
 
-  it('groups the maintenance sections separately', () => {
+  it('keeps organizing and upkeep in a collapsible Manage group', () => {
     mockApi();
     renderPage(<AppShell />);
 
-    const upkeep = screen.getByRole('navigation', { name: 'Maintenance' });
-    const labels = within(upkeep)
-      .getAllByRole('link')
-      .map((link) => link.textContent);
-    expect(labels).toEqual([
-      'Duplicates',
-      'Libraries',
-      'Permissions',
-      'Machine learning',
-      'Backups',
-    ]);
-  });
+    const toggle = screen.getByRole('button', { name: 'Manage' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
-  it('does not link the untyped browser, which the search box reaches', () => {
-    mockApi();
-    renderPage(<AppShell />);
-
-    // A "Browse" link next to Media is one too many.
-    expect(screen.queryByRole('link', { name: /Browse/ })).not.toBeInTheDocument();
+    const manage = screen.getByRole('navigation', { name: 'Manage' });
+    expect(
+      within(manage)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['Tags', 'Duplicates', 'Libraries', 'Permissions', 'Machine learning', 'Backups']);
   });
 
   it('marks the current section', async () => {
     mockApi();
-    shell('/media');
+    shell('/photos');
 
-    const current = await screen.findByRole('link', { name: 'Media' });
-    expect(current).toHaveClass('active');
-    expect(screen.getByRole('link', { name: 'Home' })).not.toHaveClass('active');
+    const nav = screen.getByRole('navigation', { name: 'Sections' });
+    expect(within(nav).getByRole('link', { name: 'Photos' })).toHaveClass('active');
+    expect(within(nav).getByRole('link', { name: 'Home' })).not.toHaveClass('active');
   });
 
   it('opens and closes the narrow-screen drawer', async () => {
@@ -120,14 +118,22 @@ describe('AppShell', () => {
     expect(toggle).toHaveFocus();
   });
 
-  it('sends the search box to the browser', () => {
+  it('sends the search box to the results page', async () => {
     mockApi();
     shell();
 
     fireEvent.change(screen.getByLabelText('Search Cairn'), { target: { value: 'beach' } });
     fireEvent.submit(screen.getByRole('search'));
 
-    expect(screen.getByText('browse content')).toBeInTheDocument();
+    expect(await screen.findByText('search content')).toBeInTheDocument();
+  });
+
+  it('focuses the search box with the slash key', () => {
+    mockApi();
+    shell();
+
+    fireEvent.keyDown(window, { key: '/' });
+    expect(screen.getByLabelText('Search Cairn')).toHaveFocus();
   });
 
   it('shows who is signed in and lets them sign out', async () => {
@@ -141,10 +147,12 @@ describe('AppShell', () => {
     shell();
 
     // The account is read from the session, so it arrives a tick after render.
-    expect(await screen.findByText('alice')).toBeInTheDocument();
-    expect(screen.getByText('Member')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Account: alice' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByText('alice')).toBeInTheDocument();
+    expect(within(menu).getByText('Member')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('sign-out'));
+    fireEvent.click(within(menu).getByTestId('sign-out'));
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some(([input]) => String(input).includes('/api/v1/auth/logout')),
@@ -156,6 +164,25 @@ describe('AppShell', () => {
     mockApi([], { user: admin });
     shell();
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Account: jishnu' }));
     expect(await screen.findByText('Administrator')).toBeInTheDocument();
+  });
+
+  it('opens the shortcut sheet with the question mark', async () => {
+    mockApi();
+    shell();
+
+    fireEvent.keyDown(window, { key: '?' });
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+  });
+
+  it('switches the theme from the account menu', async () => {
+    mockApi();
+    shell();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Account:/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Appearance: System/ }));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    document.documentElement.removeAttribute('data-theme');
   });
 });

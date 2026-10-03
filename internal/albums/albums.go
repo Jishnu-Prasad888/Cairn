@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
@@ -20,6 +21,9 @@ var ErrNotFound = errors.New("album not found")
 // ErrFileNotInAlbum is returned when trying to remove a file that is not in the album.
 var ErrFileNotInAlbum = errors.New("file is not in album")
 
+// ErrEmptyName is returned when an album would be left without a name.
+var ErrEmptyName = errors.New("album name must not be empty")
+
 // Album represents a named collection of files.
 type Album struct {
 	ID          string
@@ -28,7 +32,27 @@ type Album struct {
 	CoverFileID string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+
+	// FileCount is the number of files in the album.
+	FileCount int
+	// PreviewFileID is the file that represents the album in a grid: the
+	// chosen cover when there is one, otherwise the first photo in album
+	// order, otherwise the first file. Empty for an empty album.
+	PreviewFileID string
 }
+
+// albumColumns selects an album row together with its file count and the
+// file that previews it, so a list of albums needs one query rather than one
+// per album.
+const albumColumns = `a.id, a.name, a.description, a.cover_file_id, a.created_at, a.updated_at,
+	(SELECT COUNT(*) FROM album_files af WHERE af.album_id = a.id),
+	COALESCE(a.cover_file_id, (
+		SELECT af.file_id FROM album_files af
+		JOIN indexed_files f ON f.id = af.file_id
+		WHERE af.album_id = a.id AND f.status = 'present'
+		ORDER BY (f.media_type = 'photo') DESC, af.position
+		LIMIT 1
+	))`
 
 // AlbumStore is the repository for albums in a per-library database.
 type AlbumStore struct {
@@ -44,7 +68,7 @@ func NewAlbumStore(db *sql.DB, libraryID string) *AlbumStore {
 // Create creates a new album.
 func (s *AlbumStore) Create(ctx context.Context, name, description string) (*Album, error) {
 	if name == "" {
-		return nil, fmt.Errorf("album name must not be empty")
+		return nil, ErrEmptyName
 	}
 	id := newID()
 	now := rfc3339(time.Now().UTC())
@@ -61,21 +85,73 @@ func (s *AlbumStore) Create(ctx context.Context, name, description string) (*Alb
 // GetByID returns an album by its ID.
 func (s *AlbumStore) GetByID(ctx context.Context, id string) (*Album, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, description, cover_file_id, created_at, updated_at
-		 FROM albums WHERE id = ?`, id)
+		`SELECT `+albumColumns+` FROM albums a WHERE a.id = ?`, id)
 	return s.scanAlbum(row)
 }
 
 // List returns all albums ordered by name.
 func (s *AlbumStore) List(ctx context.Context) ([]*Album, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, description, cover_file_id, created_at, updated_at
-		 FROM albums ORDER BY name COLLATE NOCASE`)
+		`SELECT `+albumColumns+` FROM albums a ORDER BY a.name COLLATE NOCASE`)
 	if err != nil {
 		return nil, fmt.Errorf("list albums: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return s.scanAlbums(rows)
+}
+
+// AlbumUpdate is a partial change to an album. A nil field is left alone.
+type AlbumUpdate struct {
+	Name        *string
+	Description *string
+	// CoverFileID sets the cover; an empty string clears it, so the album is
+	// previewed by its first photo again.
+	CoverFileID *string
+}
+
+// Update renames an album, changes its description, or sets its cover. The
+// cover must be a file already in the album.
+func (s *AlbumStore) Update(ctx context.Context, id string, u AlbumUpdate) (*Album, error) {
+	if _, err := s.GetByID(ctx, id); err != nil {
+		return nil, err
+	}
+	sets := []string{}
+	args := []any{}
+	if u.Name != nil {
+		if *u.Name == "" {
+			return nil, ErrEmptyName
+		}
+		sets = append(sets, "name = ?")
+		args = append(args, *u.Name)
+	}
+	if u.Description != nil {
+		sets = append(sets, "description = ?")
+		args = append(args, nullStr(*u.Description))
+	}
+	if u.CoverFileID != nil {
+		if *u.CoverFileID != "" {
+			var n int
+			if err := s.db.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM album_files WHERE album_id = ? AND file_id = ?`,
+				id, *u.CoverFileID).Scan(&n); err != nil {
+				return nil, fmt.Errorf("check album cover: %w", err)
+			}
+			if n == 0 {
+				return nil, ErrFileNotInAlbum
+			}
+		}
+		sets = append(sets, "cover_file_id = ?")
+		args = append(args, nullStr(*u.CoverFileID))
+	}
+	if len(sets) > 0 {
+		sets = append(sets, "updated_at = ?")
+		args = append(args, rfc3339(time.Now().UTC()), id)
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE albums SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
+			return nil, fmt.Errorf("update album: %w", err)
+		}
+	}
+	return s.GetByID(ctx, id)
 }
 
 // Delete removes an album and all its file associations.
@@ -160,8 +236,10 @@ func (s *AlbumStore) scanAlbum(row rowScanner) (*Album, error) {
 		coverFileID sql.NullString
 		createdStr  string
 		updatedStr  string
+		previewID   sql.NullString
 	)
-	err := row.Scan(&a.ID, &a.Name, &desc, &coverFileID, &createdStr, &updatedStr)
+	err := row.Scan(&a.ID, &a.Name, &desc, &coverFileID, &createdStr, &updatedStr,
+		&a.FileCount, &previewID)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -170,6 +248,7 @@ func (s *AlbumStore) scanAlbum(row rowScanner) (*Album, error) {
 	}
 	a.Description = desc.String
 	a.CoverFileID = coverFileID.String
+	a.PreviewFileID = previewID.String
 	if err := parseTime(createdStr, &a.CreatedAt); err != nil {
 		return nil, err
 	}

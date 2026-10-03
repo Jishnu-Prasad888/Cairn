@@ -1,110 +1,122 @@
 /**
- * Favorites — everything the signed-in user has starred.
- *
- * Favorites are per-user, not per-album, so this is a flat view over one
- * library with the same viewer, tags, and file operations as anywhere else.
+ * Favorites — everything the signed-in user has starred. Per person: nobody
+ * else sees your favorites.
  */
 
-import { useLibraryGate } from '../api/libraries';
+import { useCallback, useState } from 'react';
+
 import { useLibraryResource } from '../api/resources';
 import { listFavorites } from '../api/queries';
-import { useAuth } from '../auth/authContext';
-import { FileGrid } from '../components/FileGrid';
+import type { Library } from '../api/types';
 import { useFileOperations } from '../components/FileOperations';
-import LibraryPicker from '../components/LibraryPicker';
-import {
-  EmptyState,
-  ErrorState,
-  LibraryOfflineNotice,
-  LoadingState,
-  NoLibrariesState,
-  PageHeader,
-} from '../components/States';
+import { LibraryGatePage } from '../components/LibraryGatePage';
+import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
+import { SelectionToolbar } from '../components/media/SelectionToolbar';
+import { useFavorites } from '../components/media/useFavorites';
+import { useMediaActions } from '../components/media/useMediaActions';
+import { useSelection } from '../components/media/useSelection';
+import { EmptyState, ErrorState, LibraryOfflineNotice, PageHeader } from '../components/States';
+import { Menu, type MenuAnchor, type MenuEntry } from '../components/ui/Menu';
 import { ViewerModal } from '../components/ViewerModal';
-import './MediaPage.css';
 
 export default function FavoritesPage() {
-  const gate = useLibraryGate();
-  const { user } = useAuth();
+  return (
+    <LibraryGatePage title="Favorites">
+      {(library) => <Favorites library={library} />}
+    </LibraryGatePage>
+  );
+}
 
-  const favorites = useLibraryResource(async (libraryId: string) => {
-    return (await listFavorites(libraryId)).files ?? [];
+function Favorites({ library }: { library: Library }) {
+  const libraryId = library.id;
+  const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
+  const favorites = useLibraryResource(
+    useCallback(async (id: string) => (await listFavorites(id)).files ?? [], []),
+  );
+  const files = favorites.data ?? [];
+
+  const starred = useFavorites(libraryId, files.length);
+  const selection = useSelection(files, libraryId);
+  const ops = useFileOperations(libraryId, favorites.reload);
+  const actions = useMediaActions({
+    libraryId,
+    selection,
+    favorites: starred,
+    ops,
+    onChanged: favorites.reload,
   });
 
-  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', favorites.reload);
-
-  if (gate.kind === 'loading') {
-    return (
-      <main className="media-page">
-        <LoadingState label="Loading libraries…" />
-      </main>
-    );
-  }
-
-  const header = (
-    <PageHeader
-      title="Favorites"
-      subtitle="The files you have starred. Only you see your favorites."
-      controls={<LibraryPicker />}
-    />
-  );
-
-  if (gate.kind === 'error') {
-    return (
-      <main className="media-page">
-        {header}
-        <ErrorState message={gate.message} onRetry={favorites.reload} />
-      </main>
-    );
-  }
-
-  if (gate.kind === 'empty') {
-    return (
-      <main className="media-page">
-        {header}
-        <NoLibrariesState isAdmin={user?.role === 'admin'} />
-      </main>
-    );
-  }
+  const count = favorites.data?.length ?? 0;
 
   return (
-    <main className="media-page">
-      {header}
+    <main className="page media-page">
+      {selection.active && (
+        <SelectionToolbar
+          count={selection.size}
+          total={files.length}
+          actions={actions.selectionActions}
+          onClear={selection.clear}
+          onSelectAll={selection.selectAll}
+          onDeleteKey={actions.onDeleteKey}
+        />
+      )}
+      <PageHeader
+        title="Favorites"
+        subtitle={count > 0 ? `${count} ${count === 1 ? 'favorite' : 'favorites'}` : undefined}
+      />
 
-      {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
-      {favorites.error && <ErrorState message={favorites.error} onRetry={favorites.reload} />}
-      {favorites.loading && <LoadingState />}
+      {library.status === 'offline' && <LibraryOfflineNotice library={library} />}
+      {favorites.error && (
+        <ErrorState
+          message={favorites.error}
+          onRetry={favorites.reload}
+          title="Couldn't load your favorites"
+        />
+      )}
+      {favorites.loading && <MediaGridSkeleton />}
 
       {favorites.data !== null && favorites.data.length === 0 && (
-        <EmptyState title="No favorites yet" testId="favorites-empty">
-          <p className="muted">
-            Open any file and press the star to keep it here. Favorites are yours alone — nobody
-            else sees them.
-          </p>
+        <EmptyState title="No favorites yet" testId="favorites-empty" icon="star">
+          <p>Tap the star on any photo to keep it here. Only you see your favorites.</p>
         </EmptyState>
       )}
 
-      {favorites.data !== null && favorites.data.length > 0 && (
-        <>
-          <FileGrid libraryId={gate.libraryId} files={favorites.data} onOpen={ops.openViewer} />
-          <p className="muted media-pagination">
-            {favorites.data.length} {favorites.data.length === 1 ? 'favorite' : 'favorites'}
-          </p>
-        </>
+      {files.length > 0 && (
+        <MediaGrid
+          libraryId={libraryId}
+          files={files}
+          onOpen={ops.openViewer}
+          selection={selection}
+          favorites={starred.ids}
+          onContextMenu={(file, x, y) =>
+            setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
+          }
+          label="Favorites"
+          testId="file-grid"
+        />
       )}
 
       {ops.viewer && (
         <ViewerModal
-          libraryId={gate.libraryId}
+          libraryId={libraryId}
           file={ops.viewer}
-          siblings={favorites.data ?? []}
+          siblings={files}
           onNavigate={ops.openViewer}
           onChanged={favorites.reload}
           onRequestAction={ops.requestAction}
           onClose={ops.closeViewer}
         />
       )}
+      {menu && (
+        <Menu
+          anchor={menu.anchor}
+          items={menu.items}
+          onClose={() => setMenu(null)}
+          label="Photo actions"
+        />
+      )}
       {ops.dialogs}
+      {actions.dialogs}
     </main>
   );
 }

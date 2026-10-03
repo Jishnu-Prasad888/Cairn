@@ -1,308 +1,284 @@
 /**
- * Home — the landing page, and the first thing anyone sees after signing in.
+ * Home — a living view of the library, not a dashboard.
  *
- * It answers the three questions a person actually opens Cairn with: what is in
- * my library, what do I want to look at now, and is anything broken. So: a row
- * of counts, a strip of recent photos, and a small server-status block.
+ * What a person opens Cairn for is their photos, so the page leads with the
+ * most recent ones and then the things they have made from them: albums,
+ * memories, the people in them. Sections only appear when they have something
+ * to show; there are no counters or status tiles — the library's status lives
+ * in the sidebar and Settings.
  *
- * The counts come from one page-limited listing each rather than a full scan, so
- * the page stays fast on a library of a hundred thousand files. Collections are
- * small by nature (tags, albums, people) so those are counted directly.
+ * Every section is one small request, so the page stays quick on a Raspberry
+ * Pi with a hundred thousand files.
  */
 
 import { useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
-import { apiGet } from '../api/client';
-import { useLibraryGate } from '../api/libraries';
-import { useLibraryResource, useResource } from '../api/resources';
-import { getFileCounts, listFiles, listMemories, listPeople } from '../api/queries';
-import type {
-  FileListResponse,
-  FileSummary,
-  HealthResponse,
-  Memory,
-  VersionResponse,
-} from '../api/types';
-import {
-  IconAlbum,
-  IconFile,
-  IconMemory,
-  IconPeople,
-  IconPhoto,
-  IconStar,
-  IconTag,
-  IconVideo,
-} from '../components/icons';
+import { useLibraryResource } from '../api/resources';
+import { faceImageUrl, listAlbums, listFiles, listMemories, listPeople } from '../api/queries';
+import type { Album, FileSummary, Library, Memory, Person } from '../api/types';
+import { AlbumCard } from '../components/albums/AlbumCard';
+import { useFileOperations } from '../components/FileOperations';
+import { LibraryGatePage } from '../components/LibraryGatePage';
+import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
+import { EmptyState, ErrorState, LibraryOfflineNotice } from '../components/States';
+import { Icon } from '../components/ui/Icon';
+import { ViewerModal } from '../components/ViewerModal';
+import { formatDate, greeting } from '../lib/dates';
+import { extractExcerpt } from '../lib/markdown';
 import { thumbnailUrl } from '../components/media';
-import LibraryPicker from '../components/LibraryPicker';
-import {
-  EmptyState,
-  ErrorState,
-  LibraryOfflineNotice,
-  LoadingState,
-  NoLibrariesState,
-  PageHeader,
-} from '../components/States';
 import './HomePage.css';
 
-/** Everything the dashboard shows, fetched together so it loads once. */
+const RECENT_LIMIT = 15;
+
 interface HomeData {
-  photoCount: number;
-  videoCount: number;
-  fileCount: number;
-  albumCount: number;
-  tagCount: number;
-  memoryCount: number;
-  favoriteCount: number;
-  /** Null when the server has no face support, so the tile is hidden. */
-  personCount: number | null;
   recent: FileSummary[];
-  /** The most recently edited memories, newest first. */
-  recentMemories: Memory[];
+  albums: Album[];
+  memories: Memory[];
+  /** Null when the server has no face support. */
+  people: Person[] | null;
 }
 
 export default function HomePage() {
-  const gate = useLibraryGate();
   const { user } = useAuth();
+  // The greeting is there even while there is no library to greet you with.
+  const title = `${greeting()}${user?.username ? `, ${user.username}` : ''}`;
+  return <LibraryGatePage title={title}>{(library) => <Home library={library} />}</LibraryGatePage>;
+}
+
+function Home({ library }: { library: Library }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const libraryId = library.id;
+  const offline = library.status === 'offline';
 
   const home = useLibraryResource<HomeData>(
-    useCallback(async (libraryId: string) => {
-      const [summary, memories, people, recentPage] = await Promise.all([
-        getFileCounts(libraryId),
-        listMemories(libraryId).then((r) => r.memories ?? []),
-        // A server without face support 404s this route; that is "not
-        // available", not "zero people", so it resolves to null.
-        listPeople(libraryId)
-          .then((r) => r.people?.length ?? 0)
-          .catch(() => null),
-        listFiles(libraryId, {
+    useCallback(async (id: string) => {
+      const [recent, albums, memories, people] = await Promise.all([
+        listFiles(id, {
           type: 'photo',
           recursive: true,
           sort: 'mod_time',
           order: 'desc',
-          limit: 12,
-        }),
+          limit: RECENT_LIMIT,
+        })
+          .then((r) => r.files ?? [])
+          .catch(() => [] as FileSummary[]),
+        listAlbums(id)
+          .then((r) => r.albums ?? [])
+          .catch(() => [] as Album[]),
+        listMemories(id, { limit: 12 })
+          .then((r) => r.memories ?? [])
+          .catch(() => [] as Memory[]),
+        // A server without face support has no people route; that is "not
+        // available", not "nobody".
+        listPeople(id)
+          .then((r) => r.people ?? [])
+          .catch(() => null),
       ]);
-
-      const counts = summary.counts ?? {};
       return {
-        photoCount: counts.photo ?? 0,
-        videoCount: counts.video ?? 0,
-        fileCount: counts.other ?? 0,
-        albumCount: summary.albums ?? 0,
-        tagCount: summary.tags ?? 0,
-        memoryCount: memories.length,
-        recentMemories: [...memories]
+        recent,
+        albums: [...albums].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 6),
+        memories: [...memories]
           .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
           .slice(0, 4),
-        favoriteCount: summary.favorites ?? 0,
-        personCount: people,
-        recent: (recentPage as FileListResponse).files ?? [],
+        people: people
+          ? [...people]
+              .filter((p) => p.name)
+              .sort((a, b) => b.face_count - a.face_count)
+              .slice(0, 8)
+          : null,
       };
     }, []),
   );
 
-  const server = useResource(
-    useCallback(async () => {
-      const [health, version] = await Promise.all([
-        apiGet<HealthResponse>('/health'),
-        apiGet<VersionResponse>('/version'),
-      ]);
-      return { health, version };
-    }, []),
-  );
-
-  if (gate.kind === 'loading') {
-    return (
-      <main className="home">
-        <LoadingState label="Loading your libraries…" />
-      </main>
-    );
-  }
-
-  const header = (
-    <PageHeader
-      title={user?.username ? `Welcome back, ${user.username}` : 'Welcome back'}
-      subtitle="Your personal place for files, photos, videos, and memories."
-      controls={<LibraryPicker />}
-    />
-  );
-
-  if (gate.kind === 'error') {
-    return (
-      <main className="home">
-        {header}
-        <ErrorState message={gate.message} onRetry={home.reload} />
-      </main>
-    );
-  }
-
-  if (gate.kind === 'empty') {
-    return (
-      <main className="home">
-        {header}
-        <NoLibrariesState isAdmin={user?.role === 'admin'} />
-      </main>
-    );
-  }
-
+  const ops = useFileOperations(libraryId, home.reload);
   const data = home.data;
-  const count = (n: number | undefined) => (data ? (n ?? 0) : '—');
-  const tiles = [
-    {
-      to: '/media?type=photo',
-      label: 'Photos',
-      n: data?.photoCount,
-      tone: 'clay',
-      icon: IconPhoto,
-    },
-    {
-      to: '/media?type=video',
-      label: 'Videos',
-      n: data?.videoCount,
-      tone: 'blue',
-      icon: IconVideo,
-    },
-    { to: '/media?type=other', label: 'Files', n: data?.fileCount, tone: 'green', icon: IconFile },
-    { to: '/memories', label: 'Memories', n: data?.memoryCount, tone: 'yellow', icon: IconMemory },
-    { to: '/albums', label: 'Albums', n: data?.albumCount, tone: 'pink', icon: IconAlbum },
-    { to: '/tags', label: 'Tags', n: data?.tagCount, tone: 'blue', icon: IconTag },
-    { to: '/favorites', label: 'Favorites', n: data?.favoriteCount, tone: 'clay', icon: IconStar },
-    {
-      to: '/people',
-      label: 'People',
-      n: data?.personCount ?? undefined,
-      tone: 'green',
-      icon: IconPeople,
-    },
-  ].filter((tile) => tile.to !== '/people' || data?.personCount !== null);
+  const name = user?.username;
+
+  const nothingYet =
+    data !== null &&
+    data.recent.length === 0 &&
+    data.albums.length === 0 &&
+    data.memories.length === 0;
 
   return (
-    <main className="home">
-      {header}
+    <main className="page home">
+      <header className="home-hello">
+        <h1 className="home-greeting">
+          {greeting()}
+          {name ? `, ${name}` : ''}
+        </h1>
+      </header>
 
-      {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
+      {offline && <LibraryOfflineNotice library={library} />}
+      {home.error && (
+        <ErrorState message={home.error} onRetry={home.reload} title="Couldn't load your library" />
+      )}
 
-      {home.error && <ErrorState message={home.error} onRetry={home.reload} />}
-      {home.loading && <LoadingState label="Counting your library…" />}
+      {home.loading && (
+        <section className="section" aria-label="Loading recent photos">
+          <div className="skeleton home-skeleton-title" />
+          <MediaGridSkeleton count={12} />
+        </section>
+      )}
 
-      <section aria-label="Your library" className="home-tiles">
-        {tiles.map((tile) => (
-          <Link
-            className={`home-tile tone-${tile.tone}`}
-            to={tile.to}
-            key={tile.to}
-            data-testid={`home-tile-${tile.to}`}
-          >
-            <span className="home-tile-icon">{tile.icon}</span>
-            <span className="home-tile-label">{tile.label}</span>
-            <span className="home-tile-count">{count(tile.n)}</span>
-          </Link>
-        ))}
-      </section>
+      {nothingYet && !offline && (
+        <EmptyState
+          title="Your library is waking up"
+          testId="home-no-photos"
+          icon="photo"
+          action={
+            <Link className="button primary-button" to="/files">
+              Browse files
+            </Link>
+          }
+        >
+          <p>
+            Once Cairn has looked through {library.name}, your newest photos will gather here. You
+            can keep using Cairn while it works.
+          </p>
+        </EmptyState>
+      )}
 
-      <div className="home-columns">
-        <section aria-labelledby="home-recent-title" className="home-section">
-          <div className="home-section-head">
-            <h2 id="home-recent-title" className="home-heading">
-              Recently added photos
+      {data && data.recent.length > 0 && (
+        <section className="section" aria-labelledby="home-recent-title">
+          <div className="section-head">
+            <h2 id="home-recent-title" className="section-title">
+              Recently added
             </h2>
-            <Link to="/media?type=photo" className="link-button">
-              See all photos
+            <Link to="/photos" className="link-button">
+              All photos
+              <Icon name="chevron-right" size={16} />
             </Link>
           </div>
-          {data !== null && data.recent.length === 0 && !home.loading && (
-            <EmptyState title="No photos yet" testId="home-no-photos">
-              <p className="muted">
-                Once an index pass has run over a library, the photos it finds appear here.
-              </p>
-            </EmptyState>
-          )}
-          {data !== null && data.recent.length > 0 && (
-            <ul className="home-recent" data-testid="home-recent">
-              {data.recent.map((file) => (
-                <li key={file.id}>
-                  <Link to="/media?type=photo" title={file.name}>
-                    <img src={thumbnailUrl(gate.libraryId, file)} alt={file.name} loading="lazy" />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div data-testid="home-recent">
+            <MediaGrid
+              libraryId={libraryId}
+              files={data.recent}
+              onOpen={ops.openViewer}
+              label="Recently added photos"
+              testId="home-recent-grid"
+            />
+          </div>
         </section>
+      )}
 
-        <section aria-labelledby="home-memories-title" className="home-section">
-          <div className="home-section-head">
-            <h2 id="home-memories-title" className="home-heading">
-              Recent memories
+      {data && data.people && data.people.length > 0 && (
+        <section className="section" aria-labelledby="home-people-title">
+          <div className="section-head">
+            <h2 id="home-people-title" className="section-title">
+              People
+            </h2>
+            <Link to="/people" className="link-button">
+              All people
+              <Icon name="chevron-right" size={16} />
+            </Link>
+          </div>
+          <ul className="home-people" data-testid="home-people">
+            {data.people.map((person) => (
+              <li key={person.id}>
+                <Link to={`/search?person=${person.id}`} className="home-person">
+                  <span className="home-person-face">
+                    {person.cover_face_id ? (
+                      <img
+                        src={faceImageUrl(libraryId, person.cover_face_id)}
+                        alt=""
+                        loading="lazy"
+                      />
+                    ) : person.cover_file_id ? (
+                      <img
+                        src={thumbnailUrl(libraryId, { id: person.cover_file_id })}
+                        alt=""
+                        loading="lazy"
+                      />
+                    ) : (
+                      <Icon name="person" size={28} />
+                    )}
+                  </span>
+                  <span className="home-person-name">{person.name}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {data && data.albums.length > 0 && (
+        <section className="section" aria-labelledby="home-albums-title">
+          <div className="section-head">
+            <h2 id="home-albums-title" className="section-title">
+              Albums
+            </h2>
+            <Link to="/albums" className="link-button">
+              All albums
+              <Icon name="chevron-right" size={16} />
+            </Link>
+          </div>
+          <ul className="home-albums" data-testid="home-albums">
+            {data.albums.map((album) => (
+              <li key={album.id}>
+                <AlbumCard
+                  album={album}
+                  libraryId={libraryId}
+                  onOpen={(a) => navigate(`/albums/${a.id}`)}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {data && (data.memories.length > 0 || data.recent.length > 0) && (
+        <section className="section" aria-labelledby="home-memories-title">
+          <div className="section-head">
+            <h2 id="home-memories-title" className="section-title">
+              Memories
             </h2>
             <Link to="/memories" className="link-button">
               All memories
+              <Icon name="chevron-right" size={16} />
             </Link>
           </div>
-          {data !== null && data.recentMemories.length === 0 && !home.loading && (
-            <EmptyState title="No memories yet" testId="home-no-memories">
-              <p className="muted">Write down a day, a trip, or a thought.</p>
+          {data.memories.length === 0 ? (
+            <div className="home-memory-invite" data-testid="home-no-memories">
+              <p>Write down a day, a trip, or a story behind a photo.</p>
               <Link className="button" to="/memories">
-                Write the first one
+                <Icon name="edit" />
+                Write a memory
               </Link>
-            </EmptyState>
-          )}
-          {data !== null && data.recentMemories.length > 0 && (
-            <ul className="home-memory-list" data-testid="home-memories">
-              {data.recentMemories.map((memory) => (
+            </div>
+          ) : (
+            <ul className="home-memories" data-testid="home-memories">
+              {data.memories.map((memory) => (
                 <li key={memory.id}>
-                  <Link to="/memories" className="home-memory">
-                    <span className="home-memory-title">{memory.title || 'Untitled'}</span>
-                    <span className="home-memory-date muted">
-                      {new Date(memory.memory_date ?? memory.updated_at).toLocaleDateString()}
+                  <Link to={`/memories/${memory.id}`} className="home-memory">
+                    <span className="home-memory-date">
+                      {formatDate(memory.memory_date ?? memory.updated_at)}
                     </span>
+                    <span className="home-memory-title">{memory.title || 'Untitled'}</span>
+                    <span className="home-memory-excerpt">{extractExcerpt(memory.body, 120)}</span>
                   </Link>
                 </li>
               ))}
             </ul>
           )}
         </section>
-      </div>
+      )}
 
-      <section aria-labelledby="home-server-title" className="home-server-section">
-        <h2 id="home-server-title" className="visually-hidden">
-          Server status
-        </h2>
-        <div className="home-server" role="status" aria-live="polite">
-          {server.loading && <p className="muted">Checking the server…</p>}
-          {server.error && (
-            <p className="error-text">
-              {server.error}{' '}
-              <button type="button" className="link-button" onClick={server.reload}>
-                Retry
-              </button>
-            </p>
-          )}
-          {server.data && (
-            <dl className="home-server-rows">
-              <div className="status-row">
-                <dt>Status</dt>
-                <dd>{server.data.health.status}</dd>
-              </div>
-              <div className="status-row">
-                <dt>Database</dt>
-                <dd>{server.data.health.database}</dd>
-              </div>
-              <div className="status-row">
-                <dt>Version</dt>
-                <dd>{server.data.version.version}</dd>
-              </div>
-              <div className="status-row">
-                <dt>Commit</dt>
-                <dd>{server.data.version.commit}</dd>
-              </div>
-            </dl>
-          )}
-        </div>
-      </section>
+      {ops.viewer && data && (
+        <ViewerModal
+          libraryId={libraryId}
+          file={ops.viewer}
+          siblings={data.recent}
+          onNavigate={ops.openViewer}
+          onChanged={home.reload}
+          onRequestAction={ops.requestAction}
+          onClose={ops.closeViewer}
+        />
+      )}
+      {ops.dialogs}
     </main>
   );
 }

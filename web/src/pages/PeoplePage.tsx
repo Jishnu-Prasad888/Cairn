@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { ApiError } from '../api/client';
@@ -36,7 +36,6 @@ import {
 } from '../api/queries';
 import type { FaceStatus, FaceSummary, Person } from '../api/types';
 import { ConfirmDialog, Dialog, PromptDialog } from '../components/Dialog';
-import LibraryPicker from '../components/LibraryPicker';
 import {
   EmptyState,
   ErrorState,
@@ -45,6 +44,9 @@ import {
   NoLibrariesState,
   PageHeader,
 } from '../components/States';
+import { Icon } from '../components/ui/Icon';
+import { Menu, useMenuButton } from '../components/ui/Menu';
+import { useToast } from '../components/ui/Toast';
 import './PeoplePage.css';
 
 function message(error: unknown): string {
@@ -155,79 +157,106 @@ function PersonCard({
     };
   }, [libraryId, needsFetch, personId]);
 
+  const menu = useMenuButton();
   const faces = settled !== null && 'faces' in settled ? settled.faces : null;
   const facesError = settled !== null && 'error' in settled ? settled.error : null;
 
+  const label = person.name || 'Unnamed person';
+
   return (
     <article className="person-card" data-testid={`person-${person.id}`}>
-      <button
-        type="button"
-        className="person-cover"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-label={`${person.name}, ${person.face_count} faces`}
+      <Link
+        to={`/search?person=${person.id}`}
+        className="person-face"
+        aria-label={`${label}, ${person.face_count} ${person.face_count === 1 ? 'photo' : 'photos'}`}
       >
         {person.cover_face_id ? (
           <img src={faceImageUrl(libraryId, person.cover_face_id)} alt="" loading="lazy" />
         ) : (
-          <span className="person-cover-fallback" aria-hidden="true">
-            {person.name.slice(0, 1).toUpperCase()}
+          <span className="person-face-fallback" aria-hidden="true">
+            {person.name ? person.name.slice(0, 1).toUpperCase() : <Icon name="person" size={32} />}
           </span>
         )}
-      </button>
+      </Link>
       <div className="person-meta">
-        <strong>{person.name}</strong>
+        {person.name ? (
+          <span className="person-name">{person.name}</span>
+        ) : (
+          <button type="button" className="link-button person-name" onClick={onRename}>
+            Add a name
+          </button>
+        )}
         <span className="person-count">
-          {person.face_count} {person.face_count === 1 ? 'face' : 'faces'}
+          {person.face_count} {person.face_count === 1 ? 'photo' : 'photos'}
         </span>
       </div>
-      <div className="person-actions">
-        <button type="button" onClick={onToggle} aria-expanded={expanded}>
-          {expanded ? 'Hide' : 'Faces'}
-        </button>
-        <button type="button" onClick={onRename}>
-          Rename
-        </button>
-        <button type="button" onClick={onMerge}>
-          Merge
-        </button>
-        <button type="button" className="danger-button" onClick={onDelete}>
-          Delete
-        </button>
-      </div>
-
-      {expanded && (
-        <div className="person-faces" data-testid={`person-faces-${person.id}`}>
-          {settled === null && <span className="muted">Loading faces…</span>}
-          {facesError && (
-            <p className="error-text" role="alert">
-              {facesError}
-            </p>
-          )}
-          {faces !== null && faces.length === 0 && <span className="muted">No faces yet.</span>}
-          {faces !== null && faces.length > 0 && (
-            <div className="face-grid">
-              {faces.map((face) => (
-                <figure className="face-tile" key={face.id}>
-                  <img src={faceImageUrl(libraryId, face.id)} alt="" loading="lazy" />
-                  <figcaption>
-                    <button
-                      type="button"
-                      onClick={() => onSetCover(face.id)}
-                      disabled={person.cover_face_id === face.id}
-                    >
-                      {person.cover_face_id === face.id ? 'Cover' : 'Set cover'}
-                    </button>
-                    <button type="button" onClick={() => onUnassign(face.id)}>
-                      Unassign
-                    </button>
-                  </figcaption>
-                </figure>
-              ))}
-            </div>
-          )}
-        </div>
+      <button
+        type="button"
+        className="icon-button person-options"
+        aria-label={`Options for ${label}`}
+        aria-haspopup="menu"
+        aria-expanded={menu.open}
+        onClick={menu.toggle}
+      >
+        <Icon name="more" />
+      </button>
+      {menu.anchor && (
+        <Menu
+          anchor={menu.anchor}
+          align="end"
+          label={`Options for ${label}`}
+          onClose={menu.close}
+          items={[
+            { id: 'faces', label: 'Manage faces', icon: 'person', onSelect: onToggle },
+            { id: 'rename', label: 'Rename', icon: 'edit', onSelect: onRename },
+            { id: 'merge', label: 'Merge into…', icon: 'people', onSelect: onMerge },
+            'separator',
+            { id: 'delete', label: 'Delete', icon: 'trash', danger: true, onSelect: onDelete },
+          ]}
+        />
       )}
+
+      <Dialog
+        open={expanded}
+        title={`Faces of ${label}`}
+        onClose={onToggle}
+        size="medium"
+        testId={`person-faces-${person.id}`}
+      >
+        {settled === null && <LoadingState label="Loading faces…" />}
+        {facesError && (
+          <p className="error-text" role="alert">
+            {facesError}
+          </p>
+        )}
+        {faces !== null && faces.length === 0 && <p className="muted">No faces yet.</p>}
+        {faces !== null && faces.length > 0 && (
+          <div className="face-grid">
+            {faces.map((face) => (
+              <figure className="face-tile" key={face.id}>
+                <img src={faceImageUrl(libraryId, face.id)} alt="" loading="lazy" />
+                <figcaption>
+                  <button
+                    type="button"
+                    className="button button-sm"
+                    onClick={() => onSetCover(face.id)}
+                    disabled={person.cover_face_id === face.id}
+                  >
+                    {person.cover_face_id === face.id ? 'Cover' : 'Set cover'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button ghost-button button-sm"
+                    onClick={() => onUnassign(face.id)}
+                  >
+                    Not {label}
+                  </button>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </Dialog>
     </article>
   );
 }
@@ -244,7 +273,7 @@ export default function PeoplePage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
 
   const [renaming, setRenaming] = useState<Person | null>(null);
   const [renamingBusy, setRenamingBusy] = useState(false);
@@ -262,6 +291,7 @@ export default function PeoplePage() {
   const [purging, setPurging] = useState(false);
   const [purgingBusy, setPurgingBusy] = useState(false);
   const [purgingError, setPurgingError] = useState<string | null>(null);
+  const tools = useMenuButton();
 
   const people = useMemo(() => data.data?.people ?? [], [data.data]);
   const libraryId = data.libraryId;
@@ -290,11 +320,13 @@ export default function PeoplePage() {
     const call = kind === 'detect' ? runFacePass : clusterFaces;
     call(libraryId)
       .then(() => {
-        setNotice(
-          kind === 'detect'
-            ? 'Detection pass started. It runs in the background.'
-            : 'Clustering started. It runs in the background.',
-        );
+        toast({
+          message:
+            kind === 'detect'
+              ? 'Detection pass started. It runs in the background.'
+              : 'Clustering started. It runs in the background.',
+          tone: 'success',
+        });
         // The pass is asynchronous; give it a moment, then re-read.
         setTimeout(data.reload, 1200);
       })
@@ -322,7 +354,7 @@ export default function PeoplePage() {
     // The URL is the survivor; the source is the person being absorbed.
     mergePeople(libraryId, mergeTarget, merging.id)
       .then(() => {
-        setNotice(`Merged ${merging.name} into the person you chose.`);
+        toast({ message: `Merged ${merging.name} into the person you chose.`, tone: 'success' });
         setMerging(null);
         setMergeTarget('');
         data.reload();
@@ -350,7 +382,7 @@ export default function PeoplePage() {
     setPurgingError(null);
     purgeFaces(libraryId)
       .then((resp) => {
-        setNotice(`Removed ${resp.faces_removed} faces.`);
+        toast({ message: `Removed ${resp.faces_removed} faces.`, tone: 'success' });
         setPurging(false);
         data.reload();
       })
@@ -384,7 +416,7 @@ export default function PeoplePage() {
 
   if (gate.kind === 'loading') {
     return (
-      <main className="people-page">
+      <main className="page people-page">
         <LoadingState label="Loading libraries…" />
       </main>
     );
@@ -393,14 +425,74 @@ export default function PeoplePage() {
   const header = (
     <PageHeader
       title="People"
-      subtitle="Faces Cairn has detected, grouped into the people you name."
-      controls={<LibraryPicker />}
+      subtitle={
+        data.data?.status?.enabled ? (
+          <span data-testid="people-stats">
+            {data.data.status.people} {data.data.status.people === 1 ? 'person' : 'people'}
+            {data.data.status.unassigned > 0 && ` · ${data.data.status.unassigned} faces to review`}
+          </span>
+        ) : undefined
+      }
+      controls={
+        data.data?.status?.enabled && (
+          <>
+            <button
+              type="button"
+              className="button"
+              aria-haspopup="menu"
+              aria-expanded={tools.open}
+              onClick={tools.toggle}
+              disabled={busy !== null}
+            >
+              <Icon name="spark" />
+              {busy === 'detect'
+                ? 'Looking for faces…'
+                : busy === 'cluster'
+                  ? 'Grouping…'
+                  : 'Find people'}
+            </button>
+            {tools.anchor && (
+              <Menu
+                anchor={tools.anchor}
+                align="end"
+                label="Face tools"
+                onClose={tools.close}
+                items={[
+                  {
+                    id: 'detect',
+                    label: 'Look for new faces',
+                    icon: 'search',
+                    onSelect: () => runPass('detect'),
+                    testId: 'detect-faces',
+                  },
+                  {
+                    id: 'cluster',
+                    label: 'Group similar faces',
+                    icon: 'people',
+                    onSelect: () => runPass('cluster'),
+                    testId: 'cluster-faces',
+                  },
+                  'separator',
+                  {
+                    id: 'purge',
+                    label: 'Remove all face data…',
+                    icon: 'trash',
+                    danger: true,
+                    onSelect: () => setPurging(true),
+                    testId: 'purge-faces',
+                  },
+                ]}
+              />
+            )}
+          </>
+        )
+      }
     />
   );
 
   if (gate.kind === 'error') {
     return (
-      <main className="people-page">
+      <main className="page people-page">
         {header}
         <ErrorState message={gate.message} onRetry={data.reload} />
       </main>
@@ -409,7 +501,7 @@ export default function PeoplePage() {
 
   if (gate.kind === 'empty') {
     return (
-      <main className="people-page">
+      <main className="page people-page">
         {header}
         <NoLibrariesState isAdmin={user?.role === 'admin'} />
       </main>
@@ -422,7 +514,7 @@ export default function PeoplePage() {
   const unassigned = payload?.unassigned ?? [];
 
   return (
-    <main className="people-page">
+    <main className="page people-page">
       {header}
       {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
 
@@ -432,76 +524,48 @@ export default function PeoplePage() {
           {actionError}
         </p>
       )}
-      {notice && (
-        <p className="people-notice" role="status">
-          {notice}
-        </p>
+      {data.loading && (
+        <div className="people-grid" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, i) => (
+            <span key={i} className="skeleton person-skeleton" />
+          ))}
+        </div>
       )}
-      {data.loading && <LoadingState label="Loading people…" />}
 
       {!data.loading && payload?.unsupported && (
-        <EmptyState title="Face recognition is not available" testId="faces-unsupported">
-          <p className="muted">
-            This server was built without face support, so it cannot detect, group, or name faces.
-            Everything else about your library still works.
+        <EmptyState title="People isn't available here" testId="faces-unsupported" icon="people">
+          <p>
+            This Cairn server can't recognize faces, so it can't group photos by person. Everything
+            else in your library works as usual.
           </p>
         </EmptyState>
       )}
 
       {!data.loading && payload && !enabled && !payload.unsupported && (
-        <EmptyState title="Face recognition is off" testId="faces-disabled">
-          <p className="muted">
-            Cairn can detect and group faces, but detection is disabled on this server. An
-            administrator can turn it on with <code>CAIRN_ML_ENABLED</code> and{' '}
-            <code>CAIRN_ML_FACES</code>, then run a detection pass.
+        <EmptyState title="People is turned off" testId="faces-disabled" icon="people">
+          <p>
+            Cairn can group your photos by the people in them, but it's switched off on this server.
           </p>
+          {user?.role === 'admin' && (
+            <p>
+              To turn it on, set <code>CAIRN_ML_ENABLED</code> and <code>CAIRN_ML_FACES</code> and
+              restart Cairn.
+            </p>
+          )}
         </EmptyState>
       )}
 
       {enabled && status && (
         <>
-          <div className="people-toolbar">
-            <div className="people-actions">
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => runPass('detect')}
-                data-testid="detect-faces"
-              >
-                {busy === 'detect' ? 'Starting…' : 'Detect faces'}
-              </button>
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => runPass('cluster')}
-                data-testid="cluster-faces"
-              >
-                {busy === 'cluster' ? 'Starting…' : 'Cluster faces'}
-              </button>
-              <button
-                type="button"
-                className="danger-button"
-                disabled={busy !== null}
-                onClick={() => setPurging(true)}
-                data-testid="purge-faces"
-              >
-                Purge faces
-              </button>
-            </div>
-            <span className="people-stats" data-testid="people-stats">
-              {status.faces} faces · {status.people} people · {status.unassigned} unassigned
-            </span>
-          </div>
-
           {people.length === 0 ? (
-            <EmptyState title="No people yet" testId="people-empty">
-              <p className="muted">
-                Run a detection pass to find faces, then cluster them into people. Name the groups
-                and Cairn will keep recognising them.
+            <EmptyState title="No people yet" testId="people-empty" icon="people">
+              <p>
+                Use “Find people” to look for faces in your photos. Name the groups that appear, and
+                Cairn will keep recognizing them.
               </p>
             </EmptyState>
           ) : (
-            <section aria-label="Named people">
+            <section aria-label="People in your library">
               <div className="people-grid" data-testid="people-grid">
                 {people.map((person) => (
                   <PersonCard
@@ -534,9 +598,15 @@ export default function PeoplePage() {
           )}
 
           {unassigned.length > 0 && (
-            <section aria-label="Unassigned faces">
-              <h2>Unassigned faces</h2>
-              <p className="muted">Assign each face to a person, or leave it for clustering.</p>
+            <section className="section" aria-labelledby="unassigned-title">
+              <div className="section-head">
+                <h2 id="unassigned-title" className="section-title">
+                  Who is this?
+                </h2>
+              </div>
+              <p className="secondary-text">
+                Faces Cairn found but could not place. Choose who each one is.
+              </p>
               <div className="face-grid" data-testid="unassigned-faces">
                 {unassigned.map((face) => (
                   <figure className="face-tile" key={face.id}>
@@ -549,7 +619,7 @@ export default function PeoplePage() {
                           if (event.target.value) assign(face.id, event.target.value);
                         }}
                       >
-                        <option value="">Assign to…</option>
+                        <option value="">Choose a person…</option>
                         {people.map((person) => (
                           <option key={person.id} value={person.id}>
                             {person.name}

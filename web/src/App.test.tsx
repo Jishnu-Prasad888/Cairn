@@ -111,8 +111,8 @@ describe('App routing', () => {
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(await screen.findByTestId('app-shell')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByTestId('sign-out')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Settings' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Account: jishnu' })).toBeInTheDocument();
     expect(screen.getAllByText('jishnu').length).toBeGreaterThan(0);
   });
 
@@ -130,7 +130,7 @@ describe('App routing', () => {
 
     expect(await screen.findByTestId('app-shell')).toBeInTheDocument();
     expect(
-      await screen.findByText('Your personal place for files, photos, videos, and memories.'),
+      await screen.findByRole('heading', { name: /^Good (morning|afternoon|evening)/ }),
     ).toBeInTheDocument();
   });
 });

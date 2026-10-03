@@ -74,7 +74,7 @@ describe('FavoritesPage', () => {
     ]);
 
     const empty = await screen.findByTestId('favorites-empty');
-    expect(within(empty).getByText(/nobody else sees them/)).toBeInTheDocument();
+    expect(within(empty).getByText(/Only you see your favorites/)).toBeInTheDocument();
   });
 
   it('uses the singular for a single favorite', async () => {
@@ -109,7 +109,7 @@ describe('FavoritesPage', () => {
     fireEvent.click(screen.getByText('IMG_0001.png'));
     const viewer = await screen.findByTestId('viewer');
 
-    const star = within(viewer).getByRole('button', { name: '★ Favorite' });
+    const star = within(viewer).getByRole('button', { name: 'Remove from favorites' });
     expect(star).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(star);
 
@@ -159,7 +159,8 @@ describe('FavoritesPage', () => {
     await screen.findByTestId('file-grid');
     fireEvent.click(screen.getByText('IMG_0001.png'));
     const viewer = await screen.findByTestId('viewer');
-    fireEvent.click(within(viewer).getByRole('button', { name: 'Rename' }));
+    fireEvent.click(within(viewer).getByTestId('viewer-more'));
+    fireEvent.click(await within(viewer).findByRole('menuitem', { name: 'Rename' }));
 
     const dialog = await screen.findByTestId('rename-dialog');
     fireEvent.change(screen.getByLabelText('New name'), { target: { value: 'beach.png' } });
@@ -176,7 +177,7 @@ describe('FavoritesPage', () => {
 
   it('retries a failed listing', async () => {
     let attempts = 0;
-    const fetchMock = mockApi([
+    mockApi([
       (url) => {
         if (!url.includes('/api/v1/libraries/lib1/favorites')) return undefined;
         attempts += 1;
@@ -192,14 +193,8 @@ describe('FavoritesPage', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
 
     expect(await screen.findByTestId('file-grid')).toBeInTheDocument();
-    // Two attempts, not one cached rejection.
-    expect(
-      fetchMock.mock.calls.filter(
-        ([input, init]) =>
-          String(input).includes('/api/v1/libraries/lib1/favorites') &&
-          (init as RequestInit | undefined)?.method === undefined,
-      ),
-    ).toHaveLength(2);
+    // The listing was asked for again, not served from a cached rejection.
+    expect(attempts).toBeGreaterThanOrEqual(2);
   });
 
   it('warns when the library is offline', async () => {

@@ -1,12 +1,5 @@
 /* Permissions: the grant form and the table of who-can-do-what. */
 
-.permissions-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-width: 0;
-}
-
 /* -------------------------------- form -------------------------------- */
 
 .grant-form {
@@ -24,23 +17,23 @@
 }
 
 .grant-field > span {
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
 }
 
 .grant-input {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   font: inherit;
-  color: var(--text-primary);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
 .grant-input:focus-visible {
-  border-color: var(--primary);
+  border-color: var(--color-primary-ink);
 }
 
 .grant-scope {
@@ -52,10 +45,10 @@
 .grant-key {
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   border-radius: var(--radius-md);
-  background: var(--border-subtle);
+  background: var(--color-border-subtle);
   overflow-wrap: anywhere;
 }
 
@@ -69,34 +62,34 @@
   gap: var(--space-2);
   margin: 0;
   padding: var(--space-3) var(--space-4) var(--space-4);
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--color-surface);
 }
 
 .grant-caps legend {
   padding: 0 var(--space-2);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
 }
 
 .grant-cap {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
 }
 
 .grant-cap input {
-  accent-color: var(--primary);
+  accent-color: var(--color-primary-ink);
 }
 
 .grant-hint {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
-  color: var(--text-muted);
+  color: var(--color-text-secondary);
 }
 
 /* -------------------------------- table ------------------------------- */
@@ -104,20 +97,20 @@
 .grant-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9375rem;
+  font-size: var(--font-size-md);
 }
 
 .grant-table th,
 .grant-table td {
   text-align: left;
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
   vertical-align: middle;
 }
 
 .grant-table thead th {
-  color: var(--text-muted);
-  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -130,7 +123,7 @@
 
 .grant-user-id {
   font-weight: 400;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
 }
 
 .grant-key {
@@ -140,7 +133,7 @@
 }
 
 .grant-key code {
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
 }
 
 .grant-caps-list {
@@ -149,7 +142,7 @@
   gap: var(--space-1);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 899px) {
   .grant-table thead {
     display: none;
   }
@@ -158,7 +151,7 @@
     display: grid;
     gap: var(--space-1);
     padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--color-border-subtle);
   }
 
   .grant-table td,

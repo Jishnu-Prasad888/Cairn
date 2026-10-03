@@ -276,6 +276,10 @@ export interface Album {
   cover_file_id?: string;
   created_at: string;
   updated_at: string;
+  /** How many files the album holds. */
+  file_count?: number;
+  /** The file that represents the album: its cover, else its first photo. */
+  preview_file_id?: string;
 }
 
 export interface AlbumListResponse {

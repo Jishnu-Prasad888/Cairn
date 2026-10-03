@@ -584,7 +584,7 @@ export default function LibrariesPage() {
   const [adding, setAdding] = useState(false);
 
   return (
-    <main className="libraries-page">
+    <main className="page libraries-page">
       <PageHeader
         title="Libraries"
         subtitle="Folders of media that Cairn indexes in place."
