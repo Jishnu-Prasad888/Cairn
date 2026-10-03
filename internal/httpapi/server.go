@@ -31,6 +31,7 @@ type Server struct {
 	faces          *ml.FaceManager
 	mlRuntime      *ml.Runtime
 	faceModel      *ml.ModelDownloader
+	faceDetector   *ml.ModelDownloader
 	backups        *backups.Manager
 	keys           *crypto.Keys
 	secureCookies  bool
@@ -70,8 +71,10 @@ type Dependencies struct {
 	Faces *ml.FaceManager
 	// MLRuntime is the administrator's ML on/off switch. May be nil.
 	MLRuntime *ml.Runtime
-	// FaceModel downloads the face-recognition model on request. May be nil.
+	// FaceModel downloads the face-recognition (ArcFace) model on request. May be nil.
 	FaceModel *ml.ModelDownloader
+	// FaceDetector downloads the SCRFD face-detector model on request. May be nil.
+	FaceDetector *ml.ModelDownloader
 	// Backups runs server and library backups. It may be nil, in which case
 	// the backup-management endpoints return SERVICE_UNAVAILABLE.
 	Backups *backups.Manager
@@ -109,6 +112,7 @@ func New(deps Dependencies) *Server {
 		faces:          deps.Faces,
 		mlRuntime:      deps.MLRuntime,
 		faceModel:      deps.FaceModel,
+		faceDetector:   deps.FaceDetector,
 		backups:        deps.Backups,
 		keys:           deps.Keys,
 		secureCookies:  deps.SecureCookies,
@@ -216,6 +220,7 @@ func (s *Server) Handler() http.Handler {
 			mux.Handle("DELETE /api/v1/libraries/{id}/people/{personID}/faces/{faceID}", s.withAuth(allowAny, s.handleUnassignFace))
 			mux.Handle("GET /api/v1/libraries/{id}/faces", s.withAuth(allowAny, s.handleListFaces))
 			mux.Handle("GET /api/v1/libraries/{id}/faces/{faceID}/image", s.withAuth(allowAny, s.handleFaceImage))
+			mux.Handle("DELETE /api/v1/libraries/{id}/faces/{faceID}", s.withAuth(allowAny, s.handleDeleteFace))
 		}
 
 		// Permissions and shares administration (library scope).

@@ -30,6 +30,7 @@ import { ViewerModal } from '../components/ViewerModal';
 import { formatDate, greeting } from '../lib/dates';
 import { extractExcerpt } from '../lib/markdown';
 import { thumbnailUrl } from '../components/media';
+import { isIndexing, useIndexStatus } from '../components/app-shell/useIndexStatus';
 import './HomePage.css';
 
 /** Fetched per kind; only the rows that fit are shown (see `cleanRows`). */
@@ -81,11 +82,27 @@ interface HomeData {
   people: Person[] | null;
 }
 
+/** "Good evening, name" in the brand face, the same in every state. */
+function Greeting({ name }: { name: string | undefined }) {
+  return (
+    <header className="home-hello">
+      <h1 className="home-greeting">
+        {greeting()}
+        {name ? `, ${name}` : ''}
+      </h1>
+    </header>
+  );
+}
+
 export default function HomePage() {
   const { user } = useAuth();
   // The greeting is there even while there is no library to greet you with.
   const title = `${greeting()}${user?.username ? `, ${user.username}` : ''}`;
-  return <LibraryGatePage title={title}>{(library) => <Home library={library} />}</LibraryGatePage>;
+  return (
+    <LibraryGatePage title={title} className="home" header={<Greeting name={user?.username} />}>
+      {(library) => <Home library={library} />}
+    </LibraryGatePage>
+  );
 }
 
 function Home({ library }: { library: Library }) {
@@ -152,6 +169,13 @@ function Home({ library }: { library: Library }) {
   const ops = useFileOperations(libraryId, home.reload);
   const data = home.data;
 
+  // A freshly added library is empty until its first scan has run. The shell
+  // already watches the index and makes this page re-read as files arrive;
+  // here it only decides whether to say "scanning" rather than "empty".
+  const empty = data !== null && data.recent.length === 0 && data.albums.length === 0;
+  const indexStatus = useIndexStatus(libraryId, empty, false);
+  const scanning = empty && isIndexing(indexStatus);
+
   const [recentRef, recentWidth] = useWidth();
   const [memoriesRef, memoriesWidth] = useWidth();
   const photoColumns = gridMetrics(recentWidth, PHOTO_GAP).columns;
@@ -167,18 +191,14 @@ function Home({ library }: { library: Library }) {
 
   const nothingYet =
     data !== null &&
+    !scanning &&
     data.recent.length === 0 &&
     data.albums.length === 0 &&
     data.memories.length === 0;
 
   return (
     <main className="page home">
-      <header className="home-hello">
-        <h1 className="home-greeting">
-          {greeting()}
-          {name ? `, ${name}` : ''}
-        </h1>
-      </header>
+      <Greeting name={name} />
 
       {offline && <LibraryOfflineNotice library={library} />}
       {home.error && (
@@ -188,6 +208,16 @@ function Home({ library }: { library: Library }) {
       {home.loading && (
         <section className="section" aria-label="Loading recent photos">
           <div className="skeleton home-skeleton-title" />
+          <MediaGridSkeleton count={12} />
+        </section>
+      )}
+
+      {scanning && !home.loading && (
+        <section className="section home-scanning" aria-label="Scanning library" aria-live="polite">
+          <div className="home-scanning-inner">
+            <span className="home-scanning-spinner" aria-hidden="true" />
+            <p>Scanning your library… photos will appear here shortly.</p>
+          </div>
           <MediaGridSkeleton count={12} />
         </section>
       )}

@@ -135,22 +135,46 @@ func run() error {
 		Workers:           cfg.MLWorkers,
 		DistanceThreshold: cfg.MLDistanceThreshold,
 	}, ml.AverageHashProvider{})
-	modelPath := cfg.MLFaceModel
-	if modelPath == "" {
-		modelPath = filepath.Join(cfg.DataDir, "models", "face-recognition.onnx")
+
+	// Face recognition requires two models:
+	//   1. SCRFD detector  (face-detector.onnx  / CAIRN_ML_FACE_DETECTOR_MODEL)
+	//   2. ArcFace R50     (face-recognition.onnx / CAIRN_ML_FACE_MODEL)
+	// Both must be present for face recognition to work. If either is missing,
+	// the face manager is disabled and the app offers to download them.
+	detectorPath := cfg.MLFaceDetectorModel
+	if detectorPath == "" {
+		detectorPath = filepath.Join(cfg.DataDir, "models", "face-detector.onnx")
 	}
+	recognizerPath := cfg.MLFaceModel
+	if recognizerPath == "" {
+		recognizerPath = filepath.Join(cfg.DataDir, "models", "face-recognition.onnx")
+	}
+
 	var faceProvider ml.FaceProvider
-	if _, err := os.Stat(modelPath); err == nil {
-		ep, err := ml.NewEmbeddingFaceProvider(modelPath, cfg.MLFaceMinSize, cfg.MLFaceMinConfidence)
+	detectorInstalled := fileExists(detectorPath)
+	recognizerInstalled := fileExists(recognizerPath)
+	switch {
+	case detectorInstalled && recognizerInstalled:
+		ep, err := ml.NewSCRFDEmbeddingFaceProvider(detectorPath, recognizerPath)
 		if err != nil {
-			logger.Error("face recognition model unusable; using the basic appearance matcher", "error", err)
+			logger.Error("face recognition models unusable; face recognition disabled — "+
+				"re-download models from the ML settings page", "error", err)
 		} else {
 			faceProvider = ep
-			logger.Info("face recognition model loaded", "path", modelPath)
+			logger.Info("SCRFD + ArcFace face recognition loaded",
+				"detector", detectorPath, "recognizer", recognizerPath)
 		}
-	} else {
-		logger.Warn("no face recognition model; the app offers to download it", "expected", modelPath)
+	case detectorInstalled && !recognizerInstalled:
+		logger.Warn("ArcFace recognizer not installed; face recognition disabled",
+			"expected", recognizerPath)
+	case !detectorInstalled && recognizerInstalled:
+		logger.Warn("SCRFD detector not installed; face recognition disabled",
+			"expected", detectorPath)
+	default:
+		logger.Warn("face recognition models not installed; the app offers to download them",
+			"detector", detectorPath, "recognizer", recognizerPath)
 	}
+
 	faces := ml.NewFaceManager(logger, ml.FaceConfig{
 		Enabled:       cfg.MLEnabled,
 		Workers:       cfg.MLFaceWorkers,
@@ -158,12 +182,64 @@ func run() error {
 		MinSize:       cfg.MLFaceMinSize,
 		Threshold:     cfg.MLFaceThreshold,
 	}, faceProvider)
+
 	// The master switch is an administrator setting stored in the server
 	// database (Machine learning page); CAIRN_ML_ENABLED is only its default.
 	var mlRuntime *ml.Runtime
-	faceModel := ml.NewModelDownloader(logger, modelPath, cfg.MLFaceModelURL,
-		cfg.MLFaceMinSize, cfg.MLFaceMinConfidence,
-		func(p *ml.EmbeddingFaceProvider) { mlRuntime.ModelReady(p) })
+
+	// Detector downloader: when the detector arrives, attempt to load both
+	// models together (recognizer may also be present by then).
+	detectorURL := cfg.MLFaceDetectorURL
+	if detectorURL == "" {
+		detectorURL = ml.DefaultFaceDetectorURL
+	}
+	faceDetector := ml.NewModelDownloader(
+		logger, detectorPath, detectorURL,
+		func(part string) error {
+			_, err := ml.NewSCRFDDetector(part)
+			return err
+		},
+		func(path string) {
+			if !fileExists(recognizerPath) {
+				return
+			}
+			prov, err := ml.NewSCRFDEmbeddingFaceProvider(path, recognizerPath)
+			if err != nil {
+				logger.Error("face provider load after detector install", "error", err)
+				return
+			}
+			mlRuntime.ModelReady(prov)
+		},
+	)
+
+	// Recognizer downloader.
+	recognizerURL := cfg.MLFaceModelURL
+	if recognizerURL == "" {
+		recognizerURL = ml.DefaultFaceRecognizerURL
+	}
+	faceModel := ml.NewModelDownloader(
+		logger, recognizerPath, recognizerURL,
+		func(part string) error {
+			if !fileExists(detectorPath) {
+				return nil // detector not there yet; defer validation
+			}
+			_, err := ml.NewSCRFDEmbeddingFaceProvider(detectorPath, part)
+			return err
+		},
+		func(path string) {
+			if !fileExists(detectorPath) {
+				logger.Info("ArcFace recognizer installed; waiting for SCRFD detector")
+				return
+			}
+			prov, err := ml.NewSCRFDEmbeddingFaceProvider(detectorPath, path)
+			if err != nil {
+				logger.Error("face provider load after recognizer install", "error", err)
+				return
+			}
+			mlRuntime.ModelReady(prov)
+		},
+	)
+
 	mlRuntime = ml.NewRuntime(pool, logger, mlManager, faces, cfg.MLSimilarity,
 		func(ctx context.Context) ([]ml.Target, error) {
 			libs, err := libraries.List(ctx)
@@ -214,6 +290,7 @@ func run() error {
 		Faces:          faces,
 		MLRuntime:      mlRuntime,
 		FaceModel:      faceModel,
+		FaceDetector:   faceDetector,
 		Backups:        backupMgr,
 		Keys:           keys,
 		SecureCookies:  cfg.CookieSecure,
@@ -258,4 +335,11 @@ func run() error {
 	}
 	logger.Info("server stopped")
 	return nil
+}
+
+// fileExists reports whether a file exists and is non-empty. Used to check
+// whether model files have been downloaded before loading them.
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Size() > 0
 }

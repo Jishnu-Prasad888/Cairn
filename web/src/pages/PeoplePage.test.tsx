@@ -59,6 +59,21 @@ function setup(options: Options = {}) {
       /\/libraries\/lib1\/ml\/faces\/purge$/.test(url) && init?.method === 'POST'
         ? json({ library_id: 'lib1', faces_removed: 4 })
         : undefined,
+    (url, init) =>
+      /\/libraries\/lib1\/people$/.test(url) && init?.method === 'POST'
+        ? json(
+            {
+              person: {
+                id: 'p9',
+                name: 'Asha',
+                created_at: '2026-01-01T00:00:00Z',
+                updated_at: '2026-01-01T00:00:00Z',
+                face_count: 0,
+              },
+            },
+            201,
+          )
+        : undefined,
     (url) =>
       /\/libraries\/lib1\/people$/.test(url) ? json(options.peopleList ?? people) : undefined,
     (url) =>
@@ -76,8 +91,15 @@ function setup(options: Options = {}) {
         ? json({ merged: true })
         : undefined,
     (url) => (/\/people\/p1\/faces\/f\d$/.test(url) ? json({ assigned: true }) : undefined),
+    (url) => (/\/people\/p[29]\/faces\/[fu]\d$/.test(url) ? json({ assigned: true }) : undefined),
     (url, init) =>
-      /\/people\/p1$/.test(url) && init?.method === 'DELETE' ? json({ deleted: true }) : undefined,
+      /\/people\/p1(\?faces=delete)?$/.test(url) && init?.method === 'DELETE'
+        ? json({ deleted: true })
+        : undefined,
+    (url, init) =>
+      /\/libraries\/lib1\/faces\/[fu]\d$/.test(url) && init?.method === 'DELETE'
+        ? json({ deleted: true })
+        : undefined,
   ]);
   renderPage(<PeoplePage />);
   return fn;
@@ -119,11 +141,56 @@ describe('PeoplePage', () => {
     const pool = await screen.findByTestId('unassigned-faces');
     expect(pool).toBeInTheDocument();
 
-    const select = screen.getAllByLabelText('Assign face to person')[0] as HTMLSelectElement;
+    const select = within(pool).getAllByLabelText('Choose a person…')[0] as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'p1' } });
 
     await waitFor(() => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p1/faces/u1')).toBe(true);
+    });
+  });
+
+  it('adds an unplaced face as a new person', async () => {
+    const fetchMock = setup();
+    const pool = await screen.findByTestId('unassigned-faces');
+
+    const select = within(pool).getAllByLabelText('Choose a person…')[0] as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: '__new__' } });
+
+    const dialog = await screen.findByTestId('new-person-dialog');
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Asha' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people')).toBe(true);
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p9/faces/u1')).toBe(true);
+    });
+    expect(await screen.findByText(/^Added Asha\./)).toBeInTheDocument();
+  });
+
+  it("moves one of a person's faces to someone else or to a new person", async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+    await chooseFromPerson('p1', 'Mom', 'Manage faces');
+    const faces = await screen.findByTestId('person-faces-p1');
+
+    const first = (await within(faces).findAllByLabelText('Move to…'))[0] as HTMLSelectElement;
+    // The person the face already belongs to is not offered.
+    expect(within(first).queryByRole('option', { name: 'Mom' })).toBeNull();
+    fireEvent.change(first, { target: { value: 'p2' } });
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p2/faces/f1')).toBe(true);
+    });
+
+    // The page re-reads after the move, so look the pickers up again.
+    const second = (
+      await within(await screen.findByTestId('person-faces-p1')).findAllByLabelText('Move to…')
+    )[1] as HTMLSelectElement;
+    fireEvent.change(second, { target: { value: '__new__' } });
+    const dialog = await screen.findByTestId('new-person-dialog');
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Asha' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p9/faces/f2')).toBe(true);
     });
   });
 
@@ -256,10 +323,48 @@ describe('PeoplePage', () => {
     expect(within(dialog).getByText('Mom')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
+    // Their faces go too by default, so the group is not rebuilt.
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/people/p1?faces=delete')).toBe(
+        true,
+      );
+    });
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('can delete a person but keep their faces', async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    await chooseFromPerson('p1', 'Mom', 'Delete');
+    const dialog = await screen.findByTestId('delete-person-dialog');
+    fireEvent.click(within(dialog).getByTestId('delete-person-faces'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
     await waitFor(() => {
       expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/people/p1')).toBe(true);
     });
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(called(fetchMock, 'DELETE', 'faces=delete')).toBe(false);
+  });
+
+  it('deletes a face from "Who is this?" and from a person', async () => {
+    const fetchMock = setup();
+    const pool = await screen.findByTestId('unassigned-faces');
+    fireEvent.click(within(pool).getAllByRole('button', { name: 'Delete' })[0] as HTMLElement);
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/faces/u1')).toBe(true);
+    });
+    // The page re-reads after the delete.
+    await screen.findByTestId('person-p1');
+
+    await chooseFromPerson('p1', 'Mom', 'Manage faces');
+    const faces = await screen.findByTestId('person-faces-p1');
+    fireEvent.click(
+      (await within(faces).findAllByRole('button', { name: 'Delete face' }))[0] as HTMLElement,
+    );
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/faces/f1')).toBe(true);
+    });
   });
 
   it('purges every detected face after confirming, and reports how many', async () => {
@@ -278,7 +383,7 @@ describe('PeoplePage', () => {
     });
   });
 
-  it('starts a detection pass', async () => {
+  it('starts a detection pass and reports the result once it has finished', async () => {
     const fetchMock = setup();
     await screen.findByTestId('people-grid');
 
@@ -287,9 +392,8 @@ describe('PeoplePage', () => {
     await waitFor(() => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/faces/pass')).toBe(true);
     });
-    expect(
-      await screen.findByText('Detection pass started. It runs in the background.'),
-    ).toBeInTheDocument();
+    // The fixture status reports no pass running, so the summary follows.
+    expect(await screen.findByText(/people found; .* to review\./)).toBeInTheDocument();
   });
 
   it('starts a clustering pass', async () => {

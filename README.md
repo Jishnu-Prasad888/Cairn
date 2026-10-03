@@ -129,6 +129,10 @@ All settings use the `CAIRN_` prefix.
 | `CAIRN_ML_SIMILARITY`   | `true`                            | Run a similarity pass when ML is enabled    |
 | `CAIRN_ML_WORKERS`      | `2`                               | Bounded concurrency for the similarity pass |
 | `CAIRN_ML_DISTANCE_THRESHOLD` | `10`                        | Hamming distance for flagging near-duplicates |
+| `CAIRN_ML_FACE_DETECTOR_MODEL` | *(data dir)/models/face-detector.onnx* | Path to the SCRFD face-detector ONNX model. Download via the ML settings page. |
+| `CAIRN_ML_FACE_DETECTOR_URL` | *(InsightFace buffalo_l det_2.5g)* | URL to fetch the SCRFD detector from; override for a mirror or a different model size. |
+| `CAIRN_ML_FACE_MODEL`   | *(data dir)/models/face-recognition.onnx* | Path to the ArcFace R50 recognition ONNX model. Download via the ML settings page. |
+| `CAIRN_ML_FACE_MODEL_URL` | *(InsightFace buffalo_l w600k_r50)* | URL to fetch the ArcFace recognizer from; override for a mirror. |
 
 ## Repository layout
 

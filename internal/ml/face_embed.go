@@ -1,192 +1,152 @@
 package ml
 
 import (
-	_ "embed"
 	"fmt"
 	"image"
 	"math"
-	"sync"
-
-	pigo "github.com/esimov/pigo/core"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml/onnx"
 )
 
-//go:embed cascade/puploc
-var pupilCascade []byte
-
-// Reference eye positions of the 112x112 aligned face crop that ArcFace-style
-// networks (InsightFace MobileFaceNet / ResNet) are trained on.
+// Reference 5-point landmarks for the InsightFace 112×112 aligned face crop
+// that ArcFace-family networks are trained on (arcface_112v1 standard).
+// Order: left-eye, right-eye, nose-tip, left-mouth, right-mouth.
 const (
-	alignSize      = 112
-	refLeftEyeX    = 38.2946
-	refLeftEyeY    = 51.6963
-	refRightEyeX   = 73.5318
-	refRightEyeY   = 51.5014
-	pupilPerturbs  = 63
-	embedDimension = 512
-
-	// MinEmbeddingConfidence is the detector score floor (pigo Q/100) when the
-	// embedding model is in use.
-	MinEmbeddingConfidence = 0.12
+	alignSize = 112
 )
 
-var (
-	pupilOnce sync.Once
-	pupilCls  *pigo.PuplocCascade
-	pupilErr  error
-)
-
-func pupilClassifier() (*pigo.PuplocCascade, error) {
-	pupilOnce.Do(func() {
-		pupilCls, pupilErr = pigo.NewPuplocCascade().UnpackCascade(pupilCascade)
-	})
-	return pupilCls, pupilErr
+var arcfaceRef = [5][2]float64{
+	{38.2946, 51.6963}, // left eye
+	{73.5318, 51.5014}, // right eye
+	{56.0252, 71.7366}, // nose tip
+	{41.5493, 92.3655}, // left mouth corner
+	{70.7299, 92.2041}, // right mouth corner
 }
 
-// EmbeddingFaceProvider recognises faces with a learned embedding network
-// (an ArcFace-family ONNX model such as InsightFace's MobileFaceNet). Faces
-// are found by the same pigo detector as before, aligned on the eyes the way
-// the network was trained, and mapped to an L2-normalised 512-d vector. Two
-// photos of one person land close together across pose, lighting, expression
-// and age, which the old 16x16 pixel descriptor could not do.
-type EmbeddingFaceProvider struct {
-	*PigoFaceProvider
-	model *onnx.Model
-	path  string
+const embedDimension = 512
+
+// SCRFDEmbeddingFaceProvider runs SCRFD for detection (with 5-point landmarks)
+// and ArcFace ResNet50 (w600k_r50) for recognition. The two models are kept
+// in separate files so each can be upgraded independently. Detection and
+// embedding are combined in this single provider so the FaceProvider interface
+// is satisfied by one object.
+type SCRFDEmbeddingFaceProvider struct {
+	detector *SCRFDDetector
+	model    *onnx.Model // ArcFace recognition model
+	path     string      // recognition model path (for diagnostics)
+	detPath  string      // detector model path (for diagnostics)
 }
 
-// NewEmbeddingFaceProvider loads the ONNX recognition model at path.
-func NewEmbeddingFaceProvider(path string, minSize int, minConfidence float64) (*EmbeddingFaceProvider, error) {
-	m, err := onnx.Load(path)
+// NewSCRFDEmbeddingFaceProvider loads both the SCRFD detector and the ArcFace
+// recognition ONNX model. It validates both on load so a broken file is
+// caught immediately.
+func NewSCRFDEmbeddingFaceProvider(detectorPath, recognizerPath string) (*SCRFDEmbeddingFaceProvider, error) {
+	det, err := NewSCRFDDetector(detectorPath)
 	if err != nil {
-		return nil, fmt.Errorf("load face model %s: %w", path, err)
+		return nil, fmt.Errorf("SCRFD detector: %w", err)
 	}
-	// A dry run proves the network works and has the expected output width.
-	out, err := m.Run(alignedTensor(image.NewRGBA(image.Rect(0, 0, 8, 8)), eyePair{0, 0, 7, 0}))
+
+	m, err := onnx.Load(recognizerPath)
 	if err != nil {
-		return nil, fmt.Errorf("face model %s: %w", path, err)
+		return nil, fmt.Errorf("load ArcFace model %s: %w", recognizerPath, err)
+	}
+	// Dry-run to confirm shape and detect obvious corruption.
+	dummyImg := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	dummyLMs := defaultLandmarks(image.Rect(0, 0, 8, 8))
+	out, err := m.Run(alignedTensorLM(dummyImg, dummyLMs))
+	if err != nil {
+		return nil, fmt.Errorf("ArcFace model %s dry-run: %w", recognizerPath, err)
 	}
 	if len(out.Data) != embedDimension {
-		return nil, fmt.Errorf("face model %s: embedding has %d values, want %d", path, len(out.Data), embedDimension)
+		return nil, fmt.Errorf("ArcFace model %s: embedding has %d values, want %d",
+			recognizerPath, len(out.Data), embedDimension)
 	}
-	// pigo scores real faces well above its noise floor; the low default that
-	// suited the old matcher lets in textures and foliage, which would each
-	// become a "person". The embedding network makes no attempt to reject them.
-	minConfidence = max(minConfidence, MinEmbeddingConfidence)
-	return &EmbeddingFaceProvider{
-		PigoFaceProvider: NewPigoFaceProvider(minSize, minConfidence),
-		model:            m,
-		path:             path,
+
+	return &SCRFDEmbeddingFaceProvider{
+		detector: det,
+		model:    m,
+		path:     recognizerPath,
+		detPath:  detectorPath,
 	}, nil
 }
 
-// Name returns the provider identifier.
-func (*EmbeddingFaceProvider) Name() string { return "mobilefacenet" }
+// Name is the stable provider identifier.
+func (*SCRFDEmbeddingFaceProvider) Name() string { return "scrfd_arcface" }
 
-// Version is bumped whenever alignment or the network changes.
-func (*EmbeddingFaceProvider) Version() int { return 2 }
+// Version is bumped whenever the alignment algorithm or model changes.
+func (*SCRFDEmbeddingFaceProvider) Version() int { return 5 }
 
-// DefaultThreshold is the cosine similarity at which two embeddings are
-// treated as the same person when clustering.
-func (*EmbeddingFaceProvider) DefaultThreshold() float64 { return 0.5 }
+// DefaultThreshold is the cosine similarity at which two ArcFace R50
+// embeddings count as the same person. Measured on real photos, one person
+// across pose, lighting and glasses scores about 0.4–0.9 while different
+// people stay below about 0.35; grouping also needs two supporting matches
+// before a face joins a group (see face_cluster.go), which keeps 0.45 safe.
+func (*SCRFDEmbeddingFaceProvider) DefaultThreshold() float64 { return 0.45 }
 
-// Describe returns a short human-readable summary.
-func (*EmbeddingFaceProvider) Describe() string {
-	return "pigo face detection + eye alignment + MobileFaceNet 512-d embedding (local)"
+// Describe returns a human-readable summary.
+func (p *SCRFDEmbeddingFaceProvider) Describe() string {
+	return "SCRFD face detection + 5-point landmark alignment + ArcFace R50 512-d embedding (local)"
 }
 
-type eyePair struct{ lx, ly, rx, ry float64 } // image-left eye, image-right eye
+// Detect runs SCRFD on img.
+func (p *SCRFDEmbeddingFaceProvider) Detect(img image.Image) ([]FaceBox, error) {
+	return p.detector.Detect(img)
+}
 
-// Embed aligns the face on its eyes and runs the recognition network.
-func (p *EmbeddingFaceProvider) Embed(img image.Image, box FaceBox) ([]float32, error) {
+// Embed aligns the face on its 5 landmarks and runs the ArcFace network.
+func (p *SCRFDEmbeddingFaceProvider) Embed(img image.Image, box FaceBox) ([]float32, error) {
 	if box.Width <= 0 || box.Height <= 0 {
 		return nil, fmt.Errorf("degenerate face box %+v", box)
 	}
-	out, err := p.model.Run(alignedTensor(img, findEyes(img, box)))
+	lms := box.Landmarks
+	// Fall back to geometric defaults when landmarks are zero (legacy path or
+	// non-landmark detector).
+	if lms == ([5][2]float32{}) {
+		lms = defaultLandmarks(image.Rect(box.X, box.Y, box.X+box.Width, box.Y+box.Height))
+	}
+	out, err := p.model.Run(alignedTensorLM(img, lms))
 	if err != nil {
 		return nil, err
 	}
 	return l2Normalize(out.Data), nil
 }
 
-// findEyes locates both pupils inside a detected face. When the pupil
-// localiser gives up, the average eye position for a frontal face is used, so
-// a face is never dropped for lack of landmarks.
-func findEyes(img image.Image, box FaceBox) eyePair {
-	cx := float64(box.X) + float64(box.Width)/2
-	cy := float64(box.Y) + float64(box.Height)/2
-	s := float64(box.Width)
-	est := eyePair{cx - 0.185*s, cy - 0.085*s, cx + 0.185*s, cy - 0.085*s}
-
-	cls, err := pupilClassifier()
-	if err != nil {
-		return est
+// defaultLandmarks estimates the 5-point landmarks geometrically from a box
+// when the detector did not provide them. This keeps old stored faces
+// partially compatible when upgrading.
+func defaultLandmarks(r image.Rectangle) [5][2]float32 {
+	x0 := float32(r.Min.X)
+	y0 := float32(r.Min.Y)
+	w := float32(r.Dx())
+	h := float32(r.Dy())
+	return [5][2]float32{
+		{x0 + 0.3*w, y0 + 0.40*h},  // left eye
+		{x0 + 0.7*w, y0 + 0.40*h},  // right eye
+		{x0 + 0.5*w, y0 + 0.60*h},  // nose
+		{x0 + 0.35*w, y0 + 0.75*h}, // left mouth
+		{x0 + 0.65*w, y0 + 0.75*h}, // right mouth
 	}
-	b := img.Bounds()
-	// Work on the face neighbourhood only: the localiser samples a few
-	// face-widths around the eyes, and converting a whole photo per face would
-	// dominate the run time.
-	pad := box.Width
-	x0, y0 := max(b.Min.X, box.X-pad), max(b.Min.Y, box.Y-pad)
-	x1, y1 := min(b.Max.X, box.X+box.Width+pad), min(b.Max.Y, box.Y+box.Height+pad)
-	if x1-x0 < 8 || y1-y0 < 8 {
-		return est
-	}
-	region := image.Rect(x0, y0, x1, y1)
-	params := pigo.ImageParams{
-		Pixels: imageToGrayPixels(img, region),
-		Rows:   region.Dy(), Cols: region.Dx(), Dim: region.Dx(),
-	}
-	row := int(cy) - y0
-	col := int(cx) - x0
-	locate := func(dx float64) (float64, float64, bool) {
-		pl := cls.RunDetector(pigo.Puploc{
-			Row:      row - int(0.085*s),
-			Col:      col + int(dx*s),
-			Scale:    float32(s * 0.4),
-			Perturbs: pupilPerturbs,
-		}, params, 0.0, false)
-		if pl.Row <= 0 || pl.Col <= 0 {
-			return 0, 0, false
-		}
-		return float64(pl.Col + x0), float64(pl.Row + y0), true
-	}
-	lx, ly, okL := locate(-0.185)
-	rx, ry, okR := locate(0.185)
-	if !okL || !okR {
-		return est
-	}
-	// Reject implausible results: eyes must be roughly level and a sensible
-	// fraction of the face width apart, otherwise the localiser latched onto
-	// something else.
-	d := math.Hypot(rx-lx, ry-ly)
-	if d < 0.2*s || d > 0.6*s || math.Abs(ry-ly) > 0.5*d || rx <= lx {
-		return est
-	}
-	return eyePair{lx, ly, rx, ry}
 }
 
-// alignedTensor warps the image so the eyes land on the reference positions
-// of a 112x112 crop and returns the network input: RGB, channel-first,
-// (v-127.5)/127.5.
-func alignedTensor(img image.Image, e eyePair) *onnx.Tensor {
-	// Similarity transform (rotation + uniform scale + translation) taking the
-	// reference eyes to the detected ones; sampling runs output -> source.
-	dx, dy := e.rx-e.lx, e.ry-e.ly
-	rdx, rdy := refRightEyeX-refLeftEyeX, refRightEyeY-refLeftEyeY
-	scale := math.Hypot(dx, dy) / math.Hypot(rdx, rdy)
-	ang := math.Atan2(dy, dx) - math.Atan2(rdy, rdx)
-	cos, sin := math.Cos(ang)*scale, math.Sin(ang)*scale
-	// source = R*(out - refLeft) + leftEye
+// alignedTensorLM warps the source image so the 5 detected landmarks land on
+// the ArcFace reference positions inside a 112×112 crop. It uses a full
+// similarity transform (uniform scale + rotation + translation) estimated from
+// the two eye points (the most reliable pair) and returns the NCHW float32
+// input tensor expected by InsightFace networks: (v − 127.5) / 127.5.
+func alignedTensorLM(img image.Image, lms [5][2]float32) *onnx.Tensor {
+	// Estimate similarity transform from the 5 src→dst point correspondences
+	// using the closed-form least-squares solution (same as cv2.estimateAffinePartial2D
+	// in similarity mode). This gives a [cos, -sin, tx; sin, cos, ty] matrix.
+	cos, sin, tx, ty := similarityTransform5(lms, arcfaceRef)
+
 	b := img.Bounds()
 	t := &onnx.Tensor{Shape: []int{1, 3, alignSize, alignSize}, Data: make([]float32, 3*alignSize*alignSize)}
 	plane := alignSize * alignSize
 	for y := 0; y < alignSize; y++ {
 		for x := 0; x < alignSize; x++ {
-			ox, oy := float64(x)-refLeftEyeX, float64(y)-refLeftEyeY
-			sx := cos*ox - sin*oy + e.lx
-			sy := sin*ox + cos*oy + e.ly
+			// Inverse transform: output (x,y) → source coordinates
+			sx := cos*float64(x) + sin*float64(y) + tx
+			sy := -sin*float64(x) + cos*float64(y) + ty
 			r, g, bl := bilinear(img, b, sx, sy)
 			i := y*alignSize + x
 			t.Data[i] = (r - 127.5) / 127.5
@@ -197,14 +157,81 @@ func alignedTensor(img image.Image, e eyePair) *onnx.Tensor {
 	return t
 }
 
+// similarityTransform5 estimates the inverse similarity transform (from
+// output aligned space back to source image) that maps the ArcFace reference
+// points to the detected landmarks. It uses the closed-form solution for
+// 5-point similarity (least-squares normal equations on all 5 pairs).
+//
+// Returns (a, b, tx, ty) such that:
+//
+//	src_x = a * out_x + b * out_y + tx
+//	src_y = -b * out_x + a * out_y + ty
+//
+// where (a=cosθ·s, b=sinθ·s) captures rotation and scale.
+func similarityTransform5(src [5][2]float32, dst [5][2]float64) (a, b, tx, ty float64) {
+	// Solve:  [ Σ(xi²+yi²)  0         Σxi  Σyi ] [a ]   [Σ(xi*ui + yi*vi)]
+	//         [ 0           Σ(xi²+yi²) Σyi -Σxi ] [b ]   [Σ(yi*ui - xi*vi)]
+	//         [ Σxi         Σyi        N    0   ] [tx]   [Σui             ]
+	//         [ Σyi        -Σxi        0    N   ] [ty]   [Σvi             ]
+	// where (xi,yi) are reference (dst) points and (ui,vi) are source points.
+	N := 5
+	var sxx, sx, sy, sxu, sxv, su, sv float64
+	for i := 0; i < N; i++ {
+		xi, yi := dst[i][0], dst[i][1]
+		ui, vi := float64(src[i][0]), float64(src[i][1])
+		sxx += xi*xi + yi*yi
+		sx += xi
+		sy += yi
+		sxu += xi*ui + yi*vi
+		sxv += yi*ui - xi*vi
+		su += ui
+		sv += vi
+	}
+	_ = sxu // used below
+
+	// With N=5, the normal equations reduce to:
+	//   sxx·a  + sx·tx + sy·ty = sxu
+	//   sxx·b  + sy·tx - sx·ty = sxv
+	//   sx·a   + sy·b  + N·tx  = su
+	//   sy·a   - sx·b  + N·ty  = sv
+	//
+	// Solve for a, b, tx, ty using Cramer's rule on the 4×4 system,
+	// or (simpler) recognize that with the symmetric structure:
+	//
+	//   det = sxx * float64(N) - sx*sx - sy*sy
+	if sxx == 0 {
+		// degenerate: identity
+		return 1, 0, 0, 0
+	}
+	det := sxx*float64(N) - sx*sx - sy*sy
+	if math.Abs(det) < 1e-10 {
+		return 1, 0, 0, 0
+	}
+	a = (float64(N)*sxu - sx*su - sy*sv) / det
+	b = (float64(N)*sxv - sy*su + sx*sv) / det
+	tx = (su - a*sx - b*sy) / float64(N)
+	ty = (sv + b*sx - a*sy) / float64(N)
+	return
+}
+
 // bilinear samples the image at a fractional position, clamping at the edges,
 // and returns 0..255 channel values.
 func bilinear(img image.Image, b image.Rectangle, x, y float64) (r, g, bl float32) {
 	x0, y0 := math.Floor(x), math.Floor(y)
 	fx, fy := float32(x-x0), float32(y-y0)
 	px := func(ix, iy int) (float32, float32, float32) {
-		ix = min(max(ix, b.Min.X), b.Max.X-1)
-		iy = min(max(iy, b.Min.Y), b.Max.Y-1)
+		if ix < b.Min.X {
+			ix = b.Min.X
+		}
+		if ix >= b.Max.X {
+			ix = b.Max.X - 1
+		}
+		if iy < b.Min.Y {
+			iy = b.Min.Y
+		}
+		if iy >= b.Max.Y {
+			iy = b.Max.Y - 1
+		}
 		cr, cg, cb, _ := img.At(ix, iy).RGBA()
 		return float32(cr >> 8), float32(cg >> 8), float32(cb >> 8)
 	}

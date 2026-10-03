@@ -159,12 +159,14 @@ purge action without touching names or photos.
 ### Pipeline
 
 1. **Detection pass** (`POST .../ml/faces/pass`, and automatically after a
-   scan finishes when faces are enabled) — selects `present` files with
-   `media_metadata.media_type = 'photo'` that have no face row for the current
-   provider/version, decodes each, runs `pigo` (`MinSize` bounded, shift
-   factor `0.15`, scale factor `1.1`, `ClusterDetections` IoU `0.2`), and
-   stores one `faces` row per detection: source file, box, confidence, and the
-   appearance descriptor.
+   scan finishes) — selects `present` photos not yet recorded in `face_scans`
+   for the current provider/version, decodes each, runs SCRFD, drops faces
+   smaller than `CAIRN_ML_FACE_MIN_SIZE`, and stores the file's `faces` rows
+   and its `face_scans` record in one transaction. Photos without faces are
+   recorded too, so they are not analysed again; a photo that cannot be
+   decoded is logged and skipped without stopping the pass. Passes (detection
+   and grouping, however started) run one at a time per server, and a
+   detection pass started from the API is followed by a grouping pass.
 2. **Face embedding** — when a recognition model is installed (see
    [Recognition model](#recognition-model)) each face is aligned on its eyes
    (pigo pupil localisation, similarity-warped to the 112×112 ArcFace layout)
@@ -179,11 +181,25 @@ purge action without touching names or photos.
    16×16, z-normalized; 256 `float32` values in the row.
    Changing provider or version discards faces from the old algorithm (their
    descriptors are not comparable) and re-scans; user-chosen names survive.
-3. **Clustering pass** (`POST .../ml/faces/cluster`) — incremental online
-   clustering of unassigned faces: cosine similarity against per-person mean
-   descriptors (`CAIRN_ML_FACE_THRESHOLD`, default `0.82`); a match assigns to
-   that person, otherwise a new `Person N` is created. Assigned faces are
-   stable across passes; manual assignments are never overwritten.
+3. **Grouping pass** (`POST .../ml/faces/cluster`, after every detection
+   pass, and when the threshold changes) — re-plans the automatic groups
+   from scratch so the result never depends on scan order
+   (`internal/ml/face_cluster.go`). Named people and hand-assigned faces are
+   anchors and never move; untouched `Person N` groups are dissolved and
+   rebuilt. Free faces first join an anchor they match; the rest are
+   clustered agglomeratively, strongest pairs first, where two groups merge
+   once enough pairs between them reach the threshold (one for two lone
+   faces, two otherwise), so one person's frontal, side-on and glasses-off
+   photos chain together without a single odd match pulling in a stranger.
+   Groups of two or more faces become people, reusing the id and name of the
+   old group they overlap most; a lone face stays under "Who is this?".
+   Anchors take part in the clustering as ready-made groups, so a person
+   created by hand from one face immediately attracts the group that matches
+   them. Hand edits (assigning, moving, merging, deleting a person) start a
+   grouping pass in the background. A face taken off a person ("Not …") is
+   held in `face_holds` and never grouped automatically again until a person
+   places it. `DELETE …/people/{personID}?faces=delete` removes the person's
+   faces too, so the group is not rebuilt.
    **Learning from merges.** Dragging one person onto another (or *Merge into…*)
    tells Cairn they are the same. The merged faces are recorded as hand-assigned
    evidence, and new faces are matched against up to 40 individual faces of each
@@ -202,8 +218,8 @@ purge action without touching names or photos.
 | `CAIRN_ML_FACES` | `false` | Face capability (requires `CAIRN_ML_ENABLED`). |
 | `CAIRN_ML_FACE_WORKERS` | `2` | Max concurrent files per detection pass. |
 | `CAIRN_ML_FACE_MIN_CONFIDENCE` | `0.05` | Detector score floor (pigo `Q/100`). |
-| `CAIRN_ML_FACE_MIN_SIZE` | `60` | Detector minimum window (px). |
-| `CAIRN_ML_FACE_THRESHOLD` | provider default (`0.5` embeddings, `0.82` fallback) | Clustering cosine similarity. |
+| `CAIRN_ML_FACE_MIN_SIZE` | `48` | Smallest face kept, in source pixels (smaller faces are ignored). |
+| `CAIRN_ML_FACE_THRESHOLD` | provider default (`0.45` for SCRFD + ArcFace) | Grouping cosine similarity; the Machine learning page's slider overrides it. |
 | `CAIRN_ML_FACE_MODEL` | `<data dir>/models/face-recognition.onnx` | ONNX recognition model; used when the file exists. |
 
 ### Recognition model
@@ -224,6 +240,7 @@ permission capabilities for the rest:
 - `POST /api/v1/libraries/{id}/ml/faces/purge` — delete all faces and assignments (names survive).
 - `GET /api/v1/libraries/{id}/faces` — unassigned faces (the clustering pool); `?person=` filters media by person in search.
 - `GET /api/v1/libraries/{id}/faces/{faceID}/image` — derived JPEG crop, gated on the owning file's read permission.
+- `DELETE /api/v1/libraries/{id}/faces/{faceID}` — delete one face for good (its photo stays recorded as scanned, so it is not detected again).
 - `GET /api/v1/libraries/{id}/people` / `POST` — list people / create a person.
 - `GET /api/v1/libraries/{id}/people/{personID}` — person detail with faces.
 - `POST /api/v1/libraries/{id}/people/{personID}/rename` — rename.

@@ -130,6 +130,7 @@ func newFacesTestServer(t *testing.T) (http.Handler, *testClient, *sql.DB, strin
 		Enabled:   true,
 		Workers:   2,
 		Threshold: 0.9,
+		MinSize:   20,
 	}, testFaceProvider{})
 
 	handler := New(Dependencies{
@@ -208,9 +209,12 @@ func TestFaceStatusPassClusterAndPurge(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("POST faces/pass = %d body=%s", rec.Code, rec.Body.String())
 	}
-	waitForFaceStatus(t, client, libID, func(s ml.FaceStatus) bool { return s.Faces == 3 })
+	// Detection is followed by grouping: the two bright photos share a person
+	// and the lone face waits in the unassigned pool.
+	waitForFaceStatus(t, client, libID, func(s ml.FaceStatus) bool {
+		return s.Faces == 3 && !s.Running && s.People == 1 && s.Unassigned == 1
+	})
 
-	// Unassigned pool has all three faces.
 	rec = client.roundTrip(t, http.MethodGet, "/api/v1/libraries/"+libID+"/faces", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /faces = %d", rec.Code)
@@ -221,17 +225,18 @@ func TestFaceStatusPassClusterAndPurge(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &pool); err != nil {
 		t.Fatal(err)
 	}
-	if len(pool.Faces) != 3 {
-		t.Fatalf("unassigned faces = %d, want 3", len(pool.Faces))
+	if len(pool.Faces) != 1 {
+		t.Fatalf("unassigned faces = %d, want 1", len(pool.Faces))
 	}
+	lone := pool.Faces[0]["id"].(string)
 
-	// Clustering splits into two people (the two bright photos share one).
+	// Regrouping changes nothing.
 	rec = client.roundTrip(t, http.MethodPost, "/api/v1/libraries/"+libID+"/ml/faces/cluster", "")
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("POST faces/cluster = %d body=%s", rec.Code, rec.Body.String())
 	}
 	waitForFaceStatus(t, client, libID, func(s ml.FaceStatus) bool {
-		return s.People == 2 && s.Unassigned == 0
+		return !s.Running && s.People == 1 && s.Unassigned == 1
 	})
 
 	// People list.
@@ -245,8 +250,8 @@ func TestFaceStatusPassClusterAndPurge(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.People) != 2 {
-		t.Fatalf("people = %d, want 2", len(list.People))
+	if len(list.People) != 1 {
+		t.Fatalf("people = %d, want 1", len(list.People))
 	}
 	var twoFace *ml.Person
 	for i := range list.People {
@@ -311,12 +316,22 @@ func TestFaceStatusPassClusterAndPurge(t *testing.T) {
 		t.Error("renamed person Missing from list")
 	}
 
-	// Merge the single-face person into Mom.
-	var sourceID string
-	for _, p := range list.People {
-		if p.ID != twoFace.ID {
-			sourceID = p.ID
-		}
+	// Place the lone face on a new person by hand, then merge them into Mom.
+	rec = client.roundTrip(t, http.MethodPost, "/api/v1/libraries/"+libID+"/people", `{"name":"Visitor"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create person = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var visitor struct {
+		Person ml.Person `json:"person"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &visitor); err != nil {
+		t.Fatal(err)
+	}
+	sourceID := visitor.Person.ID
+	rec = client.roundTrip(t, http.MethodPost,
+		"/api/v1/libraries/"+libID+"/people/"+sourceID+"/faces/"+lone, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign = %d body=%s", rec.Code, rec.Body.String())
 	}
 	rec = client.roundTrip(t, http.MethodPost,
 		"/api/v1/libraries/"+libID+"/people/"+twoFace.ID+"/merge",

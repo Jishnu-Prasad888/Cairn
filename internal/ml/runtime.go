@@ -84,20 +84,46 @@ func (r *Runtime) Load(ctx context.Context, def bool) error {
 }
 
 // SetFaceThreshold stores and applies the face-matching threshold (0 resets
-// it to the recognition model's default). It affects faces grouped from now
-// on; people already formed are left as they are.
+// it to the recognition model's default) and regroups every online library
+// with it in the background. Named people and hand-placed faces are kept.
 func (r *Runtime) SetFaceThreshold(ctx context.Context, v float64) error {
 	r.faces.SetThreshold(v)
+	var err error
 	if v <= 0 {
-		_, err := r.db.ExecContext(ctx, `DELETE FROM server_settings WHERE key = ?`, thresholdKey)
+		_, err = r.db.ExecContext(ctx, `DELETE FROM server_settings WHERE key = ?`, thresholdKey)
+	} else {
+		raw, _ := json.Marshal(v)
+		_, err = r.db.ExecContext(ctx, `
+			INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+			thresholdKey, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+	}
+	if err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(v)
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		thresholdKey, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+	if r.faces.Enabled() {
+		r.regroupAll()
+	}
+	return nil
+}
+
+// regroupAll runs a grouping pass over every online library in the background.
+func (r *Runtime) regroupAll() {
+	go func() {
+		libs, err := r.libraries(context.Background())
+		if err != nil {
+			r.logger.Warn("ml: list libraries", "error", err)
+			return
+		}
+		for _, l := range libs {
+			if !l.Online {
+				continue
+			}
+			if _, err := r.faces.ClusterPass(context.Background(), l.Root); err != nil && !errors.Is(err, ErrFacesDisabled) {
+				r.logger.Warn("ml: face grouping", "library_id", l.ID, "error", err)
+			}
+		}
+	}()
 }
 
 // FaceThreshold reports the active threshold and the model's default.
@@ -174,7 +200,7 @@ func (r *Runtime) UsesFaceModel() bool { return r.faces.UsesEmbeddings() }
 
 // ModelReady swaps in a freshly downloaded recognition model and, when ML is
 // on, re-processes every online library with it.
-func (r *Runtime) ModelReady(p *EmbeddingFaceProvider) {
+func (r *Runtime) ModelReady(p *SCRFDEmbeddingFaceProvider) {
 	r.faces.SetProvider(p)
 	if r.Enabled() {
 		r.StartAll()

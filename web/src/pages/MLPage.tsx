@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
+import { waitForFacePasses } from '../api/facePasses';
 import { openFaceModelDialog, useFaceModel } from '../api/faceModel';
 import { updateMLSwitch, useMLSwitch } from '../api/mlSwitch';
 import { ApiError } from '../api/client';
@@ -123,10 +124,11 @@ export default function MLPage() {
           saved: m.face_threshold,
           def: m.face_threshold_default,
         });
-        setJob({
-          message:
-            'Matching threshold saved. It applies to faces grouped from now on; people already formed are unchanged.',
-          error: null,
+        setJob({ message: 'Matching threshold saved. Regrouping people…', error: null });
+        if (gate.kind !== 'ready') return;
+        return waitForFacePasses(gate.libraryId).then(() => {
+          faces.reload();
+          setJob({ message: 'Matching threshold saved and people regrouped.', error: null });
         });
       })
       .catch((e: unknown) =>
@@ -158,11 +160,12 @@ export default function MLPage() {
     setBusy(key);
     setJob({ message: 'Working…', error: null });
     action(gate.libraryId)
-      .then(() => {
+      .then(async () => {
         setJob({ message, error: null });
-        // The passes run in the background, so refresh the counters once now
-        // and let the user reload when they want a fresh number.
         status.reload();
+        // Face passes run in the background: refresh the counters once
+        // they are done rather than showing a half-finished number.
+        await waitForFacePasses(gate.libraryId);
         faces.reload();
       })
       .catch((e: unknown) =>
@@ -427,8 +430,8 @@ export default function MLPage() {
                 </div>
                 <p className="ml-note">
                   If different people end up in one group, make it stricter; if one person is split
-                  into several, make it looser. Applies to faces grouped from now on — to regroup,
-                  discard face data and detect again.
+                  into several, make it looser. Saving regroups the people Cairn made; people you
+                  named and faces you placed by hand stay as they are.
                   {user?.role !== 'admin' && ' Only an administrator can change this.'}
                 </p>
               </div>

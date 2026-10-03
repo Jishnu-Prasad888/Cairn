@@ -6,6 +6,10 @@
  * enough to notice a scan started from another tab or device. Polling pauses
  * while the tab is hidden — a Raspberry Pi should not answer status requests
  * for a window nobody is looking at.
+ *
+ * Whenever the counts move — during a scan too, so a new library fills in as
+ * it is indexed — and once more when a scan finishes, the library is announced
+ * as changed and open pages re-read it.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -22,10 +26,17 @@ export function isIndexing(status: IndexStatus | null): boolean {
   return job !== undefined && (job.Status === 'running' || job.Status === 'queued');
 }
 
-export function useIndexStatus(libraryId: string | null, enabled = true): IndexStatus | null {
+export function useIndexStatus(
+  libraryId: string | null,
+  enabled = true,
+  /** Announce changes; only one watcher per library should. */
+  announce = true,
+): IndexStatus | null {
   const [state, setState] = useState<{ libraryId: string; status: IndexStatus } | null>(null);
   // What the index looked like last time, to notice when a rescan changed it.
-  const lastSignature = useRef<{ libraryId: string; value: string } | null>(null);
+  const lastSignature = useRef<{ libraryId: string; value: string; indexing: boolean } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!libraryId || !enabled) return;
@@ -48,13 +59,14 @@ export function useIndexStatus(libraryId: string | null, enabled = true): IndexS
           setState({ libraryId, status: resp.status });
           const s = resp.status;
           const value = `${s.present}|${s.missing}|${s.deleted}`;
+          const indexing = isIndexing(s);
           const before = lastSignature.current;
-          lastSignature.current = { libraryId, value };
+          lastSignature.current = { libraryId, value, indexing };
           if (
+            announce &&
             before &&
             before.libraryId === libraryId &&
-            before.value !== value &&
-            !isIndexing(s)
+            (before.value !== value || (before.indexing && !indexing))
           ) {
             notifyLibraryChanged(libraryId);
           }
@@ -80,7 +92,7 @@ export function useIndexStatus(libraryId: string | null, enabled = true): IndexS
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [libraryId, enabled]);
+  }, [libraryId, enabled, announce]);
 
   return state && state.libraryId === libraryId ? state.status : null;
 }

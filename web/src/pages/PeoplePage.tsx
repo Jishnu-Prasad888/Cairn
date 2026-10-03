@@ -16,12 +16,15 @@ import { Link, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { ApiError } from '../api/client';
+import { waitForFacePasses } from '../api/facePasses';
 import { useLibraryGate } from '../api/libraries';
 import { mlWorthAsking } from '../api/mlSwitch';
 import { useLibraryResource } from '../api/resources';
 import {
   assignFace,
   clusterFaces,
+  createPerson,
+  deleteFace,
   deletePerson,
   faceImageUrl,
   getFaceStatus,
@@ -141,6 +144,53 @@ interface PersonCardProps {
   onDelete: () => void;
   onUnassign: (faceId: string) => void;
   onSetCover: (faceId: string) => void;
+  /** Everyone, for the "Move to…" choice on each face. */
+  people: Person[];
+  onMove: (faceId: string, personId: string) => void;
+  onMoveToNew: (faceId: string) => void;
+  onDeleteFace: (faceId: string) => void;
+}
+
+/** Option value of the picker entry that starts a new person. */
+const NEW_PERSON = '__new__';
+
+interface FacePersonPickerProps {
+  people: Person[];
+  /** The person the face belongs to now, left out of the choices. */
+  currentId?: string;
+  placeholder: string;
+  onPick: (personId: string) => void;
+  onNewPerson: () => void;
+}
+
+/** Choose who a face is: someone already known, or a new person. */
+function FacePersonPicker({
+  people,
+  currentId,
+  placeholder,
+  onPick,
+  onNewPerson,
+}: FacePersonPickerProps) {
+  const choices = people.filter((p) => p.id !== currentId);
+  return (
+    <select
+      aria-label={placeholder}
+      value=""
+      onChange={(event) => {
+        const value = event.target.value;
+        if (value === NEW_PERSON) onNewPerson();
+        else if (value) onPick(value);
+      }}
+    >
+      <option value="">{placeholder}</option>
+      {choices.map((person) => (
+        <option key={person.id} value={person.id}>
+          {person.name || 'Unnamed person'}
+        </option>
+      ))}
+      <option value={NEW_PERSON}>New person…</option>
+    </select>
+  );
 }
 
 function PersonCard({
@@ -154,6 +204,10 @@ function PersonCard({
   onDelete,
   onUnassign,
   onSetCover,
+  people,
+  onMove,
+  onMoveToNew,
+  onDeleteFace,
 }: PersonCardProps) {
   const [dropActive, setDropActive] = useState(false);
   // A person's faces are only fetched when their card is open, so a library with
@@ -166,7 +220,9 @@ function PersonCard({
   >(null);
 
   const personId = person.id;
-  const settled = request?.key === personId ? request : null;
+  // Keyed on the face count too, so moving a face in or out re-reads the list.
+  const requestKey = `${personId}:${person.face_count}`;
+  const settled = request?.key === requestKey ? request : null;
   const needsFetch = expanded && settled === null;
 
   useEffect(() => {
@@ -174,15 +230,15 @@ function PersonCard({
     let cancelled = false;
     getPerson(libraryId, personId)
       .then((resp) => {
-        if (!cancelled) setRequest({ key: personId, faces: resp.faces ?? [] });
+        if (!cancelled) setRequest({ key: requestKey, faces: resp.faces ?? [] });
       })
       .catch((e: unknown) => {
-        if (!cancelled) setRequest({ key: personId, error: message(e) });
+        if (!cancelled) setRequest({ key: requestKey, error: message(e) });
       });
     return () => {
       cancelled = true;
     };
-  }, [libraryId, needsFetch, personId]);
+  }, [libraryId, needsFetch, personId, requestKey]);
 
   const menu = useMenuButton();
   const faces = settled !== null && 'faces' in settled ? settled.faces : null;
@@ -304,12 +360,27 @@ function PersonCard({
                   >
                     {person.cover_face_id === face.id ? 'Cover' : 'Set cover'}
                   </button>
+                  <FacePersonPicker
+                    people={people}
+                    currentId={person.id}
+                    placeholder="Move to…"
+                    onPick={(to) => onMove(face.id, to)}
+                    onNewPerson={() => onMoveToNew(face.id)}
+                  />
                   <button
                     type="button"
                     className="button ghost-button button-sm"
                     onClick={() => onUnassign(face.id)}
                   >
                     Not {label}
+                  </button>
+                  <button
+                    type="button"
+                    className="button ghost-button button-sm"
+                    onClick={() => onDeleteFace(face.id)}
+                    title="Delete this face. Cairn will not suggest it again; the photo is kept."
+                  >
+                    Delete face
                   </button>
                 </figcaption>
               </figure>
@@ -350,6 +421,9 @@ export default function PeoplePage() {
   const [deleting, setDeleting] = useState<Person | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [deletingError, setDeletingError] = useState<string | null>(null);
+  // Deleting a group usually means "forget these faces"; without them gone,
+  // the next regroup would form the same group again.
+  const [deleteFaces, setDeleteFaces] = useState(true);
 
   const [purging, setPurging] = useState(false);
   const [purgingBusy, setPurgingBusy] = useState(false);
@@ -376,22 +450,37 @@ export default function PeoplePage() {
     [merging, people],
   );
 
+  // A pass may already be running (after a scan, an upload, or a threshold
+  // change): show it, and refresh once it is done.
+  const runningOnLoad = data.data?.status.running === true;
+  const working = busy ?? (runningOnLoad ? 'working' : null);
+  useEffect(() => {
+    if (!runningOnLoad || !libraryId) return;
+    let live = true;
+    void waitForFacePasses(libraryId).then(() => {
+      if (live) data.reload();
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningOnLoad, libraryId]);
+
   const runPass = (kind: 'detect' | 'cluster') => {
     if (!libraryId) return;
     setBusy(kind);
     setActionError(null);
     const call = kind === 'detect' ? runFacePass : clusterFaces;
     call(libraryId)
-      .then(() => {
+      // The pass runs on the server; wait for it rather than guessing.
+      .then(() => waitForFacePasses(libraryId))
+      .then((status) => {
+        data.reload();
+        if (!status) return;
         toast({
-          message:
-            kind === 'detect'
-              ? 'Detection pass started. It runs in the background.'
-              : 'Clustering started. It runs in the background.',
+          message: `${status.people} ${status.people === 1 ? 'person' : 'people'} found; ${status.unassigned} ${status.unassigned === 1 ? 'face' : 'faces'} to review.`,
           tone: 'success',
         });
-        // The pass is asynchronous; give it a moment, then re-read.
-        setTimeout(data.reload, 1200);
       })
       .catch((e: unknown) => setActionError(message(e)))
       .finally(() => setBusy(null));
@@ -454,10 +543,10 @@ export default function PeoplePage() {
     if (!deleting || !libraryId) return;
     setDeletingBusy(true);
     setDeletingError(null);
-    deletePerson(libraryId, deleting.id)
+    deletePerson(libraryId, deleting.id, deleteFaces)
       .then(() => {
         setDeleting(null);
-        data.reload();
+        refreshAfterRegroup();
       })
       .catch((e: unknown) => setDeletingError(message(e)))
       .finally(() => setDeletingBusy(false));
@@ -475,6 +564,24 @@ export default function PeoplePage() {
       })
       .catch((e: unknown) => setPurgingError(message(e)))
       .finally(() => setPurgingBusy(false));
+  };
+
+  // Hand edits make the server regroup in the background (so a new person is
+  // used for matching at once): show the edit now, and the regroup when done.
+  const refreshAfterRegroup = () => {
+    data.reload();
+    if (libraryId) void waitForFacePasses(libraryId).then(() => data.reload());
+  };
+
+  const removeFace = (faceId: string) => {
+    if (!libraryId) return;
+    setActionError(null);
+    deleteFace(libraryId, faceId)
+      .then(() => {
+        toast({ message: 'Face deleted. The photo itself is kept.', tone: 'success' });
+        data.reload();
+      })
+      .catch((e: unknown) => setActionError(message(e)));
   };
 
   const unassign = (personId: string, faceId: string) => {
@@ -497,8 +604,42 @@ export default function PeoplePage() {
     if (!libraryId) return;
     setActionError(null);
     assignFace(libraryId, personId, faceId)
-      .then(data.reload)
+      .then(refreshAfterRegroup)
       .catch((e: unknown) => setActionError(message(e)));
+  };
+
+  // "New person…" on a face: ask for a name, create them, and place the face.
+  const [naming, setNaming] = useState<string | null>(null);
+  const [namingBusy, setNamingBusy] = useState(false);
+  const [namingError, setNamingError] = useState<string | null>(null);
+
+  const startNewPerson = (faceId: string) => {
+    setNamingError(null);
+    setNaming(faceId);
+  };
+
+  const submitNewPerson = (name: string) => {
+    const faceId = naming;
+    const trimmed = name.trim();
+    if (!faceId || !libraryId) return;
+    if (!trimmed) {
+      setNamingError('Enter a name.');
+      return;
+    }
+    setNamingBusy(true);
+    setNamingError(null);
+    createPerson(libraryId, trimmed)
+      .then((resp) => assignFace(libraryId, resp.person.id, faceId))
+      .then(() => {
+        setNaming(null);
+        toast({
+          message: `Added ${trimmed}. Cairn is looking for them in your other photos.`,
+          tone: 'success',
+        });
+        refreshAfterRegroup();
+      })
+      .catch((e: unknown) => setNamingError(message(e)))
+      .finally(() => setNamingBusy(false));
   };
 
   if (gate.kind === 'loading') {
@@ -529,14 +670,16 @@ export default function PeoplePage() {
               aria-haspopup="menu"
               aria-expanded={tools.open}
               onClick={tools.toggle}
-              disabled={busy !== null}
+              disabled={working !== null}
             >
               <Icon name="spark" />
-              {busy === 'detect'
+              {working === 'detect'
                 ? 'Looking for faces…'
-                : busy === 'cluster'
+                : working === 'cluster'
                   ? 'Grouping…'
-                  : 'Find people'}
+                  : working === 'working'
+                    ? 'Finding people…'
+                    : 'Find people'}
             </button>
             {tools.anchor && (
               <Menu
@@ -680,10 +823,15 @@ export default function PeoplePage() {
                     }}
                     onDelete={() => {
                       setDeletingError(null);
+                      setDeleteFaces(true);
                       setDeleting(person);
                     }}
                     onUnassign={(faceId) => unassign(person.id, faceId)}
                     onSetCover={(faceId) => setCover(person.id, faceId)}
+                    people={people}
+                    onMove={assign}
+                    onMoveToNew={startNewPerson}
+                    onDeleteFace={removeFace}
                   />
                 ))}
               </div>
@@ -698,27 +846,28 @@ export default function PeoplePage() {
                 </h2>
               </div>
               <p className="secondary-text">
-                Faces Cairn found but could not place. Choose who each one is.
+                Faces Cairn found but could not place. Choose who each one is, or add them as a new
+                person.
               </p>
               <div className="face-grid" data-testid="unassigned-faces">
                 {unassigned.map((face) => (
                   <figure className="face-tile" key={face.id}>
                     <img src={faceImageUrl(gate.libraryId, face.id)} alt="" loading="lazy" />
                     <figcaption>
-                      <select
-                        aria-label="Assign face to person"
-                        value=""
-                        onChange={(event) => {
-                          if (event.target.value) assign(face.id, event.target.value);
-                        }}
+                      <FacePersonPicker
+                        people={people}
+                        placeholder="Choose a person…"
+                        onPick={(personId) => assign(face.id, personId)}
+                        onNewPerson={() => startNewPerson(face.id)}
+                      />
+                      <button
+                        type="button"
+                        className="button ghost-button button-sm"
+                        onClick={() => removeFace(face.id)}
+                        title="Delete this face. Cairn will not suggest it again; the photo is kept."
                       >
-                        <option value="">Choose a person…</option>
-                        {people.map((person) => (
-                          <option key={person.id} value={person.id}>
-                            {person.name}
-                          </option>
-                        ))}
-                      </select>
+                        Delete
+                      </button>
                     </figcaption>
                   </figure>
                 ))}
@@ -727,6 +876,21 @@ export default function PeoplePage() {
           )}
         </>
       )}
+
+      <PromptDialog
+        open={naming !== null}
+        title="New person"
+        label="Name"
+        initialValue=""
+        placeholder="Who is this?"
+        hint="Cairn will use this face to recognise them in your other photos."
+        confirmLabel="Add"
+        busy={namingBusy}
+        error={namingError}
+        onCancel={() => setNaming(null)}
+        onConfirm={submitNewPerson}
+        testId="new-person-dialog"
+      />
 
       <PromptDialog
         open={renaming !== null}
@@ -825,10 +989,29 @@ export default function PeoplePage() {
         busy={deletingBusy}
         error={deletingError}
         message={
-          <p>
-            <strong>{deleting?.name}</strong> will no longer be a person in this library. The
-            detected faces stay on disk and can be re-assigned later.
-          </p>
+          <>
+            <p>
+              <strong>{deleting?.name}</strong> will no longer be a person in this library. Your
+              photos are not touched.
+            </p>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={deleteFaces}
+                onChange={(e) => setDeleteFaces(e.target.checked)}
+                data-testid="delete-person-faces"
+              />
+              <span>
+                Also delete their {deleting?.face_count ?? 0}{' '}
+                {deleting?.face_count === 1 ? 'face' : 'faces'}
+              </span>
+            </label>
+            <p className="muted">
+              {deleteFaces
+                ? 'Cairn forgets these faces and will not group them again.'
+                : 'The faces go back to the pool and may be grouped again.'}
+            </p>
+          </>
         }
         onCancel={() => setDeleting(null)}
         onConfirm={confirmDelete}

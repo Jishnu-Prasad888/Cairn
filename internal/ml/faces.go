@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"math"
 	"path/filepath"
@@ -32,7 +33,7 @@ type FaceConfig struct {
 const (
 	DefaultFaceWorkers       = 2
 	DefaultFaceMinConfidence = 0.05
-	DefaultFaceMinSize       = 60
+	DefaultFaceMinSize       = 48
 	DefaultFaceThreshold     = 0.82
 )
 
@@ -47,7 +48,16 @@ type FaceManager struct {
 	cfg      FaceConfig
 	provider FaceProvider // guarded by mu: swapped when the model is downloaded
 	mu       sync.RWMutex
-	enabled  atomic.Bool
+	// passMu serializes detection and clustering passes however they were
+	// started (scan hook, model install, API buttons). Overlapping passes both
+	// see a photo as unscanned and store its faces twice, and clustering while
+	// detection is still inserting leaves faces ungrouped.
+	passMu  sync.Mutex
+	running atomic.Int32 // passes running or waiting to run
+	// pending marks libraries with a RegroupSoon pass queued but not started.
+	pendingMu sync.Mutex
+	pending   map[string]bool
+	enabled   atomic.Bool
 	// threshold holds the clustering similarity as float64 bits so an
 	// administrator can change it while passes are running.
 	threshold atomic.Uint64
@@ -72,8 +82,11 @@ func (m *FaceManager) SetThreshold(v float64) {
 	m.threshold.Store(math.Float64bits(v))
 }
 
-// NewFaceManager returns a face manager using provider (defaults to the
-// built-in PigoFaceProvider). Zero config values become the defaults.
+// NewFaceManager returns a face manager using provider. When provider is nil
+// the manager starts with no face capability: Pass() will return
+// ErrFacesDisabled until a working provider is installed via SetProvider().
+// This replaces the old behaviour of silently falling back to the basic
+// appearance descriptor, which produced low-quality groupings.
 func NewFaceManager(logger *slog.Logger, cfg FaceConfig, provider FaceProvider) *FaceManager {
 	if cfg.Workers <= 0 {
 		cfg.Workers = DefaultFaceWorkers
@@ -84,14 +97,11 @@ func NewFaceManager(logger *slog.Logger, cfg FaceConfig, provider FaceProvider) 
 	if cfg.MinSize <= 0 {
 		cfg.MinSize = DefaultFaceMinSize
 	}
-	if provider == nil {
-		provider = NewPigoFaceProvider(cfg.MinSize, cfg.MinConfidence)
-	} else if p, ok := provider.(interface{ setDetection(int, float64) }); ok {
-		p.setDetection(cfg.MinSize, cfg.MinConfidence)
-	}
+	// Do NOT fall back to PigoFaceProvider when provider is nil. A nil provider
+	// means "model not yet installed": face passes are disabled until the model
+	// arrives. Wrong face grouping is worse than no face grouping.
 	configThresholdSet := cfg.Threshold > 0 && cfg.Threshold <= 1
 	if !configThresholdSet {
-		// Each provider's descriptors have their own similarity scale.
 		cfg.Threshold = DefaultFaceThreshold
 		if d, ok := provider.(interface{ DefaultThreshold() float64 }); ok {
 			cfg.Threshold = d.DefaultThreshold()
@@ -103,7 +113,7 @@ func NewFaceManager(logger *slog.Logger, cfg FaceConfig, provider FaceProvider) 
 	}
 	m.threshold.Store(math.Float64bits(cfg.Threshold))
 	m.customThreshold.Store(configThresholdSet)
-	m.enabled.Store(cfg.Enabled)
+	m.enabled.Store(cfg.Enabled && provider != nil)
 	return m
 }
 
@@ -114,10 +124,22 @@ func (m *FaceManager) Enabled() bool { return m.enabled.Load() }
 func (m *FaceManager) SetEnabled(on bool) { m.enabled.Store(on) }
 
 // ProviderName returns the active face provider identifier.
-func (m *FaceManager) ProviderName() string { return m.prov().Name() }
+func (m *FaceManager) ProviderName() string {
+	p := m.prov()
+	if p == nil {
+		return "none"
+	}
+	return p.Name()
+}
 
 // ProviderVersion returns the active face provider's algorithm version.
-func (m *FaceManager) ProviderVersion() int { return m.prov().Version() }
+func (m *FaceManager) ProviderVersion() int {
+	p := m.prov()
+	if p == nil {
+		return 0
+	}
+	return p.Version()
+}
 
 // FaceStatus describes the current face state for a library.
 type FaceStatus struct {
@@ -127,14 +149,24 @@ type FaceStatus struct {
 	Faces           int    `json:"faces"`
 	People          int    `json:"people"`
 	Unassigned      int    `json:"unassigned"`
+	// Running is true while a detection or grouping pass is running or
+	// queued, so the UI can wait for it instead of guessing.
+	Running bool `json:"running"`
 }
 
 // Status reports the face state for the library at root.
 func (m *FaceManager) Status(ctx context.Context, root string) (*FaceStatus, error) {
+	provName := "none"
+	provVersion := 0
+	if p := m.prov(); p != nil {
+		provName = p.Name()
+		provVersion = p.Version()
+	}
 	st := &FaceStatus{
 		Enabled:         m.Enabled(),
-		Provider:        m.prov().Name(),
-		ProviderVersion: m.prov().Version(),
+		Provider:        provName,
+		ProviderVersion: provVersion,
+		Running:         m.running.Load() > 0,
 	}
 	if !st.Enabled {
 		return st, nil
@@ -162,12 +194,25 @@ func (m *FaceManager) Status(ctx context.Context, root string) (*FaceStatus, err
 
 // Pass runs face detection over every present photo missing a signature for
 // the current provider version, with bounded concurrency, writing one face
-// row per detection. Files that decode or detect nothing are skipped and
-// retried on the next pass. Returns the number of files scanned.
+// row per detection and recording each scanned file. Returns the number of
+// files scanned.
+//
+// Pass returns ErrFacesDisabled when the face capability is off or when no
+// model has been installed yet. In the latter case the error message is more
+// specific.
 func (m *FaceManager) Pass(ctx context.Context, root string) (int, error) {
 	if !m.Enabled() {
 		return 0, ErrFacesDisabled
 	}
+	if m.prov() == nil {
+		return 0, fmt.Errorf("%w: face recognition model not installed — "+
+			"download the SCRFD detector and ArcFace recognizer models from the ML settings page",
+			ErrFacesDisabled)
+	}
+	m.running.Add(1)
+	defer m.running.Add(-1)
+	m.passMu.Lock()
+	defer m.passMu.Unlock()
 	db, err := openLibraryDB(root)
 	if err != nil {
 		return 0, err
@@ -176,6 +221,11 @@ func (m *FaceManager) Pass(ctx context.Context, root string) (int, error) {
 	store := NewFaceStore(db.DB())
 
 	prov := m.prov()
+	if n, err := store.DedupeFaces(ctx); err != nil {
+		return 0, err
+	} else if n > 0 {
+		m.logger.Info("removed duplicate faces", "faces", n)
+	}
 	if n, err := store.PurgeStaleFaces(ctx, prov.Name(), prov.Version()); err != nil {
 		return 0, err
 	} else if n > 0 {
@@ -195,6 +245,10 @@ func (m *FaceManager) Pass(ctx context.Context, root string) (int, error) {
 	if workers > len(files) {
 		workers = len(files)
 	}
+	// A storage failure stops the pass; a photo that cannot be read or
+	// analysed is only skipped, so one bad file never stalls the library.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	jobs := make(chan UnsignedFaceFile)
 	var wg sync.WaitGroup
 	var (
@@ -213,7 +267,8 @@ func (m *FaceManager) Pass(ctx context.Context, root string) (int, error) {
 						firstErr = err
 					}
 					mu.Unlock()
-					return
+					cancel()
+					continue
 				}
 				mu.Lock()
 				scanned++
@@ -231,64 +286,85 @@ feed:
 	}
 	close(jobs)
 	wg.Wait()
-	if firstErr != nil {
-		return scanned, firstErr
-	}
-	return scanned, nil
+	return scanned, firstErr
 }
 
-// scanFile detects faces in one file and stores them.
+// scanFile detects faces in one file and stores them together with a record
+// that the file was scanned, so photos without faces are not analysed again
+// on every pass. Only storage errors are returned: a photo that cannot be
+// decoded is recorded as scanned (it would fail the same way next time), and
+// a detector failure is logged and retried on a later pass.
 func (m *FaceManager) scanFile(ctx context.Context, store *FaceStore, root string, uf UnsignedFaceFile) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	prov := m.prov()
 	abs := filepath.Join(root, filepath.FromSlash(uf.RelPath))
 	img, err := openImage(abs)
 	if err != nil {
-		return err
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			m.logger.Warn("face scan: cannot open photo", "path", uf.RelPath, "error", err)
+			return nil
+		}
+		m.logger.Warn("face scan: cannot decode photo; skipping it", "path", uf.RelPath, "error", err)
+		return store.RecordFaceScan(ctx, uf.FileID, prov.Name(), prov.Version(), nil)
 	}
-	prov := m.prov()
 	boxes, err := prov.Detect(img)
 	if err != nil {
-		return err
+		m.logger.Warn("face scan: detection failed", "path", uf.RelPath, "error", err)
+		return nil
 	}
+	faces := make([]FaceRecord, 0, len(boxes))
 	for _, box := range boxes {
+		// Faces this small are background passers-by; their descriptors are
+		// too unreliable to group and would only clutter "Who is this?".
+		if box.Width < m.cfg.MinSize || box.Height < m.cfg.MinSize {
+			continue
+		}
 		desc, err := prov.Embed(img, box)
 		if err != nil {
-			return err
+			m.logger.Warn("face scan: embedding failed", "path", uf.RelPath, "error", err)
+			return nil
 		}
 		id, err := newID()
 		if err != nil {
 			return err
 		}
-		if err := store.InsertFace(ctx, FaceRecord{
+		faces = append(faces, FaceRecord{
 			ID:         id,
 			FileID:     uf.FileID,
 			Provider:   prov.Name(),
 			Version:    prov.Version(),
 			Box:        box,
 			Descriptor: desc,
-		}); err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+	return store.RecordFaceScan(ctx, uf.FileID, prov.Name(), prov.Version(), faces)
 }
 
-// FaceClusterResult reports a clustering pass outcome.
+// FaceClusterResult reports a grouping pass outcome.
 type FaceClusterResult struct {
+	// Inspected is the number of faces that were free to be (re)grouped.
 	Inspected int `json:"inspected"`
-	Assigned  int `json:"assigned"`
-	Created   int `json:"created"`
+	// Assigned is the number of faces placed with an existing person.
+	Assigned int `json:"assigned"`
+	// Created is the number of new people.
+	Created int `json:"created"`
 }
 
-// ClusterPass incrementally groups unassigned faces into people: each face is
-// matched against existing people (by mean descriptor similarity); matches at
-// or above Threshold join the person, otherwise a new person is created
-// ("Person N"). All assignments are stored as 'auto'; manual assignments are
-// never touched, and people with no faces (post-purge) are skipped. The
-// unassigned set is processed oldest-first so results are deterministic.
+// ClusterPass (re)groups faces into people; see face_cluster.go for the
+// algorithm. People with a chosen name, and faces a human placed, are never
+// changed; untouched "Person N" groups are rebuilt so the result does not
+// depend on the order photos were scanned in and follows the current
+// threshold. Running it again without new faces changes nothing.
 func (m *FaceManager) ClusterPass(ctx context.Context, root string) (*FaceClusterResult, error) {
 	if !m.Enabled() {
 		return nil, ErrFacesDisabled
 	}
+	m.running.Add(1)
+	defer m.running.Add(-1)
+	m.passMu.Lock()
+	defer m.passMu.Unlock()
 	db, err := openLibraryDB(root)
 	if err != nil {
 		return nil, err
@@ -296,81 +372,17 @@ func (m *FaceManager) ClusterPass(ctx context.Context, root string) (*FaceCluste
 	defer func() { _ = db.Close() }()
 	store := NewFaceStore(db.DB())
 
-	unassigned, err := store.FacesUnassigned(ctx)
+	faces, anchors, auto, err := store.groupingState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if len(unassigned) == 0 {
-		return &FaceClusterResult{}, nil
-	}
-	means, err := store.PersonMeans(ctx)
-	if err != nil {
+	plan := planGroups(faces, anchors, auto, m.Threshold())
+	if err := store.applyGroupPlan(ctx, faces, plan); err != nil {
 		return nil, err
 	}
-	peopleCount, err := store.CountPeople(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	exemplars, err := store.PersonExemplars(ctx, maxExemplars)
-	if err != nil {
-		return nil, err
-	}
-	counts := make(map[string]int, len(means))
-	for pid := range means {
-		counts[pid] = 1
-	}
-	threshold := m.Threshold()
-	res := &FaceClusterResult{Inspected: len(unassigned)}
-	next := peopleCount + 1
-	for _, f := range unassigned {
-		var bestID string
-		bestSim := float64(0)
-		for pid, mean := range means {
-			if sim := matchScore(f.Descriptor, mean, exemplars[pid]); sim > bestSim {
-				bestSim = sim
-				bestID = pid
-			}
-		}
-		if bestID != "" && bestSim >= threshold {
-			if err := store.AssignPerson(ctx, bestID, f.ID, "auto"); err != nil {
-				return res, err
-			}
-			// Let the person's centroid follow its members, so a later face is
-			// compared with everyone already grouped, not just the first.
-			w := float32(min(counts[bestID], 20))
-			mean := means[bestID]
-			upd := make([]float32, len(mean))
-			for i := range mean {
-				upd[i] = mean[i]*w + f.Descriptor[i]
-			}
-			means[bestID] = l2Normalize(upd)
-			if len(exemplars[bestID]) < maxExemplars {
-				exemplars[bestID] = append(exemplars[bestID], Exemplar{Descriptor: f.Descriptor})
-			}
-			counts[bestID]++
-			res.Assigned++
-		} else {
-			name := fmt.Sprintf("Person %d", next)
-			next++
-			p, err := store.CreatePerson(ctx, name)
-			if err != nil {
-				return res, err
-			}
-			if err := store.SetCover(ctx, p.ID, f.ID); err != nil {
-				return res, err
-			}
-			if err := store.AssignPerson(ctx, p.ID, f.ID, "auto"); err != nil {
-				return res, err
-			}
-			means[p.ID] = f.Descriptor
-			exemplars[p.ID] = []Exemplar{{Descriptor: f.Descriptor}}
-			counts[p.ID] = 1
-			res.Created++
-		}
-	}
-	m.logger.Info("face clustering finished", "inspected", res.Inspected,
-		"assigned", res.Assigned, "created", res.Created)
+	res := &FaceClusterResult{Inspected: plan.Inspected, Assigned: plan.Assigned, Created: plan.Created}
+	m.logger.Info("face grouping finished", "inspected", res.Inspected,
+		"assigned", res.Assigned, "created", res.Created, "threshold", m.Threshold())
 	return res, nil
 }
 
@@ -493,6 +505,65 @@ func (m *FaceManager) DeletePerson(ctx context.Context, root, personID string) e
 	return NewFaceStore(db.DB()).DeletePerson(ctx, personID)
 }
 
+// DeletePersonAndFaces removes a person and every face assigned to them, so
+// the group does not come back on the next grouping pass.
+func (m *FaceManager) DeletePersonAndFaces(ctx context.Context, root, personID string) (int, error) {
+	if !m.Enabled() {
+		return 0, ErrFacesDisabled
+	}
+	db, err := openLibraryDB(root)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = db.Close() }()
+	return NewFaceStore(db.DB()).DeletePersonAndFaces(ctx, personID)
+}
+
+// DeleteFace removes one face for good; it is not detected again.
+func (m *FaceManager) DeleteFace(ctx context.Context, root, faceID string) error {
+	if !m.Enabled() {
+		return ErrFacesDisabled
+	}
+	db, err := openLibraryDB(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	return NewFaceStore(db.DB()).DeleteFace(ctx, faceID)
+}
+
+// RegroupSoon runs a grouping pass for the library in the background, so a
+// hand edit (a new person, a moved face, a merge) is taken into account at
+// once. Requests that arrive while one is already waiting are folded into it.
+func (m *FaceManager) RegroupSoon(root string) {
+	if !m.Enabled() {
+		return
+	}
+	m.pendingMu.Lock()
+	if m.pending == nil {
+		m.pending = map[string]bool{}
+	}
+	if m.pending[root] {
+		m.pendingMu.Unlock()
+		return
+	}
+	m.pending[root] = true
+	m.pendingMu.Unlock()
+	// Count it as running from now, so the UI waits for it.
+	m.running.Add(1)
+	go func() {
+		defer m.running.Add(-1)
+		m.passMu.Lock()
+		m.pendingMu.Lock()
+		delete(m.pending, root)
+		m.pendingMu.Unlock()
+		m.passMu.Unlock()
+		if _, err := m.ClusterPass(context.Background(), root); err != nil && !errors.Is(err, ErrFacesDisabled) {
+			m.logger.Warn("face regroup after edit", "error", err)
+		}
+	}()
+}
+
 // MergePerson folds source into keep (used for consolidating duplicates).
 func (m *FaceManager) MergePerson(ctx context.Context, root, keepID, sourceID string) (consolidated int, err error) {
 	if !m.Enabled() {
@@ -601,7 +672,7 @@ func (m *FaceManager) Purge(ctx context.Context, root string) (int, error) {
 // UsesEmbeddings reports whether people are matched with the learned
 // recognition model (true) or the basic appearance fallback (false).
 func (m *FaceManager) UsesEmbeddings() bool {
-	_, ok := m.prov().(*EmbeddingFaceProvider)
+	_, ok := m.prov().(*SCRFDEmbeddingFaceProvider)
 	return ok
 }
 
@@ -612,8 +683,9 @@ func (m *FaceManager) prov() FaceProvider {
 }
 
 // SetProvider swaps the recognition algorithm at runtime (the model finished
-// downloading). Faces made by the old one are discarded by the next pass. The
-// clustering threshold follows the new provider unless an administrator set one.
+// downloading). Faces made by the old provider are discarded by the next pass.
+// If ML is globally enabled, SetProvider also enables the face capability
+// (which was suspended while waiting for the model).
 func (m *FaceManager) SetProvider(p FaceProvider) {
 	m.mu.Lock()
 	m.provider = p
@@ -624,6 +696,11 @@ func (m *FaceManager) SetProvider(p FaceProvider) {
 	}
 	if !m.customThreshold.Load() {
 		m.threshold.Store(math.Float64bits(m.defaultThreshold))
+	}
+	// A newly installed model should make the face capability usable without
+	// requiring a server restart.
+	if m.cfg.Enabled {
+		m.enabled.Store(true)
 	}
 }
 

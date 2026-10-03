@@ -595,4 +595,22 @@ CREATE TABLE IF NOT EXISTS person_faces (
 );
 
 CREATE INDEX IF NOT EXISTS person_faces_face_idx ON person_faces (face_id);
+
+-- face_scans records which photos face detection has already analysed (and
+-- with which algorithm), including photos where it found no face, so they
+-- are not analysed again on every pass.
+CREATE TABLE IF NOT EXISTS face_scans (
+	file_id    TEXT PRIMARY KEY REFERENCES indexed_files(id) ON DELETE CASCADE,
+	provider   TEXT NOT NULL,
+	version    INTEGER NOT NULL,
+	faces      INTEGER NOT NULL,
+	scanned_at TEXT NOT NULL
+);
+
+-- face_holds lists faces a person took off someone ("Not …"): automatic
+-- grouping leaves them alone until a person places them by hand.
+CREATE TABLE IF NOT EXISTS face_holds (
+	face_id    TEXT PRIMARY KEY REFERENCES faces(id) ON DELETE CASCADE,
+	created_at TEXT NOT NULL
+);
 `

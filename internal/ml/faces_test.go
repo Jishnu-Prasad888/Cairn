@@ -267,34 +267,35 @@ func TestFaceManagerPassClusterPurge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClusterPass: %v", err)
 	}
-	if res.Inspected != 3 || res.Assigned != 1 || res.Created != 2 {
-		t.Errorf("ClusterPass = %+v; want inspected 3 assigned 1 created 2", res)
+	// The two matching faces form a person; the lone face waits under
+	// "Who is this?" rather than becoming a person of its own.
+	if res.Inspected != 3 || res.Assigned != 0 || res.Created != 1 {
+		t.Errorf("ClusterPass = %+v; want inspected 3 assigned 0 created 1", res)
 	}
 
 	people, err := m.People(ctx, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(people) != 2 {
-		t.Fatalf("people = %+v; want 2", people)
+	if len(people) != 1 || people[0].FaceCount != 2 {
+		t.Fatalf("people = %+v; want one person with 2 faces", people)
 	}
-	// Sizes must be one person of 2 faces and one of 1.
-	if people[0].FaceCount+people[1].FaceCount != 3 || people[0].FaceCount == people[1].FaceCount {
-		t.Errorf("person sizes = %d,%d; want {2,1}", people[0].FaceCount, people[1].FaceCount)
+	if un, _ := m.Unassigned(ctx, root); len(un) != 1 {
+		t.Errorf("unassigned = %d, want 1", len(un))
 	}
+	first := people[0].ID
 
+	// Regrouping without new faces changes nothing and keeps the person's id.
 	res2, err := m.ClusterPass(ctx, root)
-	if err != nil || res2.Inspected != 0 {
-		t.Errorf("second ClusterPass = %+v, %v; want inspected 0", res2, err)
+	if err != nil || res2.Created != 0 || res2.Assigned != 0 {
+		t.Errorf("second ClusterPass = %+v, %v; want nothing created or moved", res2, err)
 	}
-
 	people, _ = m.People(ctx, root)
-	for _, p := range people {
-		if p.FaceCount == 2 {
-			if err := m.RenamePerson(ctx, root, p.ID, "Mom"); err != nil {
-				t.Fatal(err)
-			}
-		}
+	if len(people) != 1 || people[0].ID != first {
+		t.Fatalf("after regroup people = %+v; want the same single person %s", people, first)
+	}
+	if err := m.RenamePerson(ctx, root, first, "Mom"); err != nil {
+		t.Fatal(err)
 	}
 
 	mOff := ml.NewFaceManager(tLog(), ml.FaceConfig{Enabled: false}, fakeFaceProvider{})
@@ -307,8 +308,8 @@ func TestFaceManagerPassClusterPurge(t *testing.T) {
 		t.Errorf("Purge = %d, %v; want 3", n, err)
 	}
 	people, _ = m.People(ctx, root)
-	if len(people) != 2 {
-		t.Errorf("after purge people = %d, want 2 (names survive)", len(people))
+	if len(people) != 1 {
+		t.Errorf("after purge people = %d, want 1 (names survive)", len(people))
 	}
 	var mom bool
 	for _, p := range people {
@@ -406,5 +407,152 @@ func TestFilesToScanDoesNotNeedMediaMetadata(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].FileID != "p1" {
 		t.Fatalf("FilesToScan = %+v, want only the photo p1", files)
+	}
+}
+
+// One photo that cannot be decoded must not stop the pass, and photos already
+// analysed (with or without faces) are not analysed again.
+func TestFacePassSkipsBrokenPhotosAndRemembersScans(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	blank := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	face := image.NewRGBA(image.Rect(0, 0, 200, 200))
+	face.Set(40, 40, color.RGBA{R: 250, G: 250, B: 250, A: 255})
+	seedFiles(t, root, []imgSeed{
+		{id: "a", rel: "a.png", img: face},
+		{id: "b", rel: "broken.png"},
+		{id: "c", rel: "blank.png", img: blank},
+	})
+	if err := os.WriteFile(filepath.Join(root, "broken.png"), []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := ml.NewFaceManager(tLog(), ml.FaceConfig{Enabled: true, Workers: 1, MinSize: 20}, fakeFaceProvider{})
+	n, err := m.Pass(ctx, root)
+	if err != nil || n != 3 {
+		t.Fatalf("Pass = %d, %v; want 3 files, no error", n, err)
+	}
+	if st, _ := m.Status(ctx, root); st.Faces != 1 || st.Running {
+		t.Errorf("status = %+v; want 1 face, not running", st)
+	}
+	if n, err := m.Pass(ctx, root); err != nil || n != 0 {
+		t.Errorf("second Pass = %d, %v; want nothing left to scan", n, err)
+	}
+}
+
+// Moving a person's cover face to someone else re-picks the old person's
+// cover, gives the new person one, and removes an automatic group left empty.
+func TestAssignPersonKeepsCoversAndDropsEmptyGroups(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	seedFiles(t, root, []imgSeed{{id: "f1", rel: "a.png"}, {id: "f2", rel: "b.png"}})
+	db, err := librarydb.OpenDB(filepath.Join(root, ".cairn"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	store := ml.NewFaceStore(db.DB())
+	for i, id := range []string{"a", "b", "c"} {
+		if err := store.InsertFace(ctx, ml.FaceRecord{
+			ID: id, FileID: []string{"f1", "f2", "f2"}[i], Provider: "p", Version: 1,
+			Box:        ml.FaceBox{Width: 50 + i*10, Height: 50, Confidence: 0.9},
+			Descriptor: []float32{1, 0},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	auto, _ := store.CreatePerson(ctx, "Person 1")
+	solo, _ := store.CreatePerson(ctx, "Person 2")
+	asha, _ := store.CreatePerson(ctx, "Asha")
+	for _, a := range []struct{ p, f string }{{auto.ID, "a"}, {auto.ID, "b"}, {solo.ID, "c"}} {
+		if err := store.AssignPerson(ctx, a.p, a.f, "auto"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SetCover(ctx, auto.ID, "a"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.AssignPerson(ctx, asha.ID, "a", "manual"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AssignPerson(ctx, asha.ID, "c", "manual"); err != nil {
+		t.Fatal(err)
+	}
+	people, err := store.ListPeople(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ml.Person{}
+	for _, p := range people {
+		got[p.Name] = p
+	}
+	if p := got["Person 1"]; p.FaceCount != 1 || p.CoverFaceID != "b" {
+		t.Errorf("Person 1 = %+v; want 1 face with cover b", p)
+	}
+	if p := got["Asha"]; p.FaceCount != 2 || (p.CoverFaceID != "a" && p.CoverFaceID != "c") {
+		t.Errorf("Asha = %+v; want 2 faces and a cover of her own", p)
+	}
+	if _, ok := got["Person 2"]; ok {
+		t.Error("empty automatic Person 2 should have been removed")
+	}
+}
+
+// "Not this person" holds the face back from automatic grouping, a deleted
+// face is not detected again, and deleting a person with their faces keeps the
+// group from coming back.
+func TestHoldsAndDeletesStick(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	var files []imgSeed
+	for i, name := range []string{"a.png", "b.png", "c.png"} {
+		img := image.NewRGBA(image.Rect(0, 0, 200, 200))
+		img.Set(40, 40, color.RGBA{R: 250, G: 250, B: 250, A: 255})
+		files = append(files, imgSeed{id: string(rune('a' + i)), rel: name, img: img})
+	}
+	seedFiles(t, root, files)
+	m := ml.NewFaceManager(tLog(), ml.FaceConfig{Enabled: true, Workers: 1, MinSize: 20, Threshold: 0.9}, fakeFaceProvider{})
+	if _, err := m.Pass(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ClusterPass(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	people, _ := m.People(ctx, root)
+	if len(people) != 1 || people[0].FaceCount != 3 {
+		t.Fatalf("people = %+v; want one person with 3 faces", people)
+	}
+	faces, _ := m.PersonFaces(ctx, root, people[0].ID)
+
+	// Not this person: the face stays out after regrouping.
+	if err := m.UnassignFace(ctx, root, people[0].ID, faces[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ClusterPass(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if un, _ := m.Unassigned(ctx, root); len(un) != 1 || un[0].ID != faces[0].ID {
+		t.Fatalf("unassigned = %+v; want the held face only", un)
+	}
+
+	// Deleting it removes it for good: the next detection pass skips the photo.
+	if err := m.DeleteFace(ctx, root, faces[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := m.Pass(ctx, root); err != nil || n != 0 {
+		t.Errorf("Pass after delete = %d, %v; want nothing re-detected", n, err)
+	}
+	if st, _ := m.Status(ctx, root); st.Faces != 2 {
+		t.Errorf("faces = %d, want 2", st.Faces)
+	}
+
+	// Deleting the person with their faces leaves nothing to regroup.
+	if n, err := m.DeletePersonAndFaces(ctx, root, people[0].ID); err != nil || n != 2 {
+		t.Fatalf("DeletePersonAndFaces = %d, %v; want 2", n, err)
+	}
+	if _, err := m.ClusterPass(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := m.Status(ctx, root); st.Faces != 0 || st.People != 0 {
+		t.Errorf("status = %+v; want no faces and no people", st)
 	}
 }
