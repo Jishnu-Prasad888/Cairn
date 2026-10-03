@@ -8,8 +8,8 @@
  * everyone else's way.
  */
 
-import { type FormEvent, type ReactNode, useCallback, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { apiGet } from '../api/client';
@@ -104,6 +104,13 @@ function LinkRow({
 export default function SettingsPage() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const { hash } = useLocation();
+
+  // Arriving from the settings search (or a link) at /settings#section.
+  useEffect(() => {
+    if (!hash) return;
+    document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' });
+  }, [hash]);
 
   const [theme, setTheme] = useState<ThemePreference>(() => readStoredTheme());
 
@@ -252,11 +259,7 @@ export default function SettingsPage() {
             </Row>
           </Section>
 
-          <Section
-            id="library"
-            title="Library"
-            description="These act on the library selected in the sidebar."
-          >
+          <Section id="library" title="Library" description="These act on your current library.">
             <LinkRow
               to="/tags"
               icon="tag"

@@ -49,5 +49,5 @@ export const MOBILE_NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: 'home', end: true },
   { to: '/photos', label: 'Photos', icon: 'photo' },
   { to: '/albums', label: 'Albums', icon: 'album' },
-  { to: '/search', label: 'Search', icon: 'search' },
+  { to: '/settings', label: 'Settings', icon: 'settings' },
 ];

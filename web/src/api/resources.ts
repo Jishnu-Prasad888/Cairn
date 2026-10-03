@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useLibraryChangeTick } from './libraryEvents';
 import { useLibraryGate } from './libraries';
 
 /** The states every page has to handle. */
@@ -73,6 +74,8 @@ export function useLibraryResource<T>(
 
   const libraryId = gate.kind === 'ready' ? gate.libraryId : null;
   const active = enabled && libraryId !== null;
+  // Files changed on disk: fetch again behind the data already on screen.
+  const changeTick = useLibraryChangeTick(libraryId);
 
   // Serialising the inputs gives a cheap, stable identity for "the request this
   // result belongs to". It is a plain string, so comparing it in the effect's
@@ -96,7 +99,7 @@ export function useLibraryResource<T>(
       cancelled = true;
     };
     // The key encodes every input, so it is the only dependency that matters.
-  }, [key, libraryId]);
+  }, [key, libraryId, changeTick]);
 
   const current = key !== null && settled?.key === key ? settled : null;
 

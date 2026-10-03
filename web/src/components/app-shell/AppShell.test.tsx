@@ -15,7 +15,7 @@ function shell(route = '/') {
           <Route element={<AppShell />}>
             <Route path="/" element={<p>home content</p>} />
             <Route path="/photos" element={<p>photos content</p>} />
-            <Route path="/search" element={<p>search content</p>} />
+            <Route path="/settings" element={<p>settings content</p>} />
           </Route>
         </Routes>
       </Providers>
@@ -118,22 +118,22 @@ describe('AppShell', () => {
     expect(toggle).toHaveFocus();
   });
 
-  it('sends the search box to the results page', async () => {
+  it('sends the settings search to the matching settings section', async () => {
     mockApi();
     shell();
 
-    fireEvent.change(screen.getByLabelText('Search Cairn'), { target: { value: 'beach' } });
+    fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'theme' } });
     fireEvent.submit(screen.getByRole('search'));
 
-    expect(await screen.findByText('search content')).toBeInTheDocument();
+    expect(await screen.findByText('settings content')).toBeInTheDocument();
   });
 
-  it('focuses the search box with the slash key', () => {
+  it('focuses the settings search with the slash key', () => {
     mockApi();
     shell();
 
     fireEvent.keyDown(window, { key: '/' });
-    expect(screen.getByLabelText('Search Cairn')).toHaveFocus();
+    expect(screen.getByLabelText('Search settings')).toHaveFocus();
   });
 
   it('shows who is signed in and lets them sign out', async () => {

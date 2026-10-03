@@ -253,7 +253,7 @@ describe('MediaPicker', () => {
     fireEvent.click(c);
     fireEvent.click(screen.getByRole('button', { name: 'a.jpg' }));
     expect(screen.getByRole('status')).toHaveTextContent('2 selected');
-    fireEvent.click(screen.getByRole('button', { name: 'Add to memory (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add media (2)' }));
     expect(onConfirm.mock.calls[0]![0].map((m: { id: string }) => m.id)).toEqual(['a', 'c']);
   });
 });
@@ -276,8 +276,8 @@ describe('ImageBlockEditor', () => {
       </MemoryRouter>,
     );
     const dialog = screen.getByTestId('image-block-editor');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Move photo 2 to the beginning' }));
-    fireEvent.change(within(dialog).getByLabelText('Caption for photo 1'), {
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move item 2 to the beginning' }));
+    fireEvent.change(within(dialog).getByLabelText('Caption for item 1'), {
       target: { value: 'Tea after rain' },
     });
     fireEvent.click(within(dialog).getByRole('radio', { name: /Masonry/ }));

@@ -28,9 +28,20 @@ export function ImageBlockView({
   onImageActivate,
 }: Props) {
   const [view, setView] = useState<'slideshow' | 'layout'>('slideshow');
+  // One broken photo takes the whole section out of the page: a section with
+  // holes in it reads as a mistake, so say so plainly instead.
+  const unavailable = block.images.some((i) => !i.media.available);
   const slideshow = block.slideshow.enabled && block.images.length > 1;
   const showSlides = slideshow && view === 'slideshow';
   const interval = block.slideshow.interval_seconds ?? defaultInterval;
+
+  if (unavailable) {
+    return (
+      <p className="image-unavailable" role="alert">
+        Image unavailable
+      </p>
+    );
+  }
 
   return (
     <div className={`image-block image-block-${block.layout}`}>

@@ -11,6 +11,7 @@ import type { Album, FileSummary, Folder } from '../../api/types';
 import { Dialog } from '../Dialog';
 import { Breadcrumbs } from '../files/Breadcrumbs';
 import { thumbnailUrl, mediaTypeIcon } from '../media';
+import { VideoThumb } from '../media/VideoThumb';
 import { Icon } from '../ui/Icon';
 import './AddFilesDialog.css';
 
@@ -231,7 +232,9 @@ export function AddFilesDialog({
                       disabled={inAlbum}
                       onChange={() => toggle(f.id)}
                     />
-                    {f.media_type === 'photo' ? (
+                    {f.media_type === 'video' ? (
+                      <VideoThumb libraryId={libraryId} fileId={f.id} className="picker-thumb" />
+                    ) : f.media_type === 'photo' ? (
                       <img className="picker-thumb" src={thumbnailUrl(libraryId, f)} alt="" />
                     ) : (
                       <span className="picker-thumb picker-glyph" aria-hidden="true">

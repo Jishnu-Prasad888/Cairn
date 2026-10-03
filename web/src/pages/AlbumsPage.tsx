@@ -398,7 +398,7 @@ function AlbumDetail({
               data-testid="add-files-button"
             >
               <Icon name="plus" />
-              Add photos
+              Add media
             </button>
             <button
               type="button"
@@ -432,7 +432,7 @@ function AlbumDetail({
                 className="button primary-button"
                 onClick={() => setAdding(true)}
               >
-                Add photos
+                Add media
               </button>
             )
           }
