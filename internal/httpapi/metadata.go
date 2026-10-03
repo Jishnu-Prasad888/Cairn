@@ -245,3 +245,56 @@ func (n *nullableFloat) Scan(value any) error {
 	}
 	return nil
 }
+
+// handlePutThumbnail — PUT /api/v1/libraries/{id}/files/{fileID}/thumbnail
+// Stores a video's poster frame captured by the client, for servers without
+// ffmpeg. Only videos accept one, only when no thumbnail exists yet, and only
+// from someone who may edit the file: the poster is shown to every viewer.
+// The body (JPEG, PNG or GIF) is decoded and re-encoded, never stored as sent.
+func (s *Server) handlePutThumbnail(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeLibraryError(w, r, err)
+		return
+	}
+
+	cairnDir := filepath.Join(lib.Root, ".cairn")
+	fileID := r.PathValue("fileID")
+	db, err := librarydb.Open(cairnDir)
+	if err != nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to open library database.")
+		return
+	}
+	defer func() { _ = db.Close() }()
+
+	store := media.NewFileStore(db, lib.ID)
+	f, err := store.GetByID(r.Context(), fileID)
+	if err != nil {
+		s.writeMediaError(w, r, err)
+		return
+	}
+	if !s.requireCap(w, r, u, authz.FileKey(lib.ID, f.RelPath), authz.CapRead, authz.CapEdit) {
+		return
+	}
+	if f.MediaType != media.MediaTypeVideo {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+			CodeBadRequest, "Only videos accept a captured thumbnail.")
+		return
+	}
+
+	stored, err := metadata.StorePoster(http.MaxBytesReader(w, r.Body, metadata.MaxPosterBytes),
+		cairnDir, f.ID, s.keys)
+	if err != nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+			CodeBadRequest, "The thumbnail could not be read as an image.")
+		return
+	}
+	if stored {
+		if _, err := db.ExecContext(r.Context(),
+			`UPDATE media_metadata SET has_thumbnail = 1 WHERE file_id = ?`, f.ID); err != nil {
+			s.logger.Warn("mark poster thumbnail", "file_id", f.ID, "error", err)
+		}
+	}
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{"stored": stored})
+}

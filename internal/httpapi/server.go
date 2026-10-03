@@ -29,6 +29,7 @@ type Server struct {
 	indexer        *indexer.IndexManager
 	ml             *ml.Manager
 	faces          *ml.FaceManager
+	mlRuntime      *ml.Runtime
 	backups        *backups.Manager
 	keys           *crypto.Keys
 	secureCookies  bool
@@ -66,6 +67,8 @@ type Dependencies struct {
 	// It may be nil, in which case the face endpoints return
 	// SERVICE_UNAVAILABLE.
 	Faces *ml.FaceManager
+	// MLRuntime is the administrator's ML on/off switch. May be nil.
+	MLRuntime *ml.Runtime
 	// Backups runs server and library backups. It may be nil, in which case
 	// the backup-management endpoints return SERVICE_UNAVAILABLE.
 	Backups *backups.Manager
@@ -101,6 +104,7 @@ func New(deps Dependencies) *Server {
 		indexer:        deps.Indexer,
 		ml:             deps.ML,
 		faces:          deps.Faces,
+		mlRuntime:      deps.MLRuntime,
 		backups:        deps.Backups,
 		keys:           deps.Keys,
 		secureCookies:  deps.SecureCookies,
@@ -172,6 +176,10 @@ func (s *Server) Handler() http.Handler {
 		// Local ML surface (admin): similarity passing, status, and purge are
 		// server operations like indexing. Reading "similar files" follows
 		// per-resource capabilities like any other content route.
+		if s.mlRuntime != nil {
+			mux.Handle("GET /api/v1/ml/settings", s.withAuth(allowAny, s.handleGetMLSettings))
+			mux.Handle("PUT /api/v1/ml/settings", s.withAuth(allowAdmin, s.handlePutMLSettings))
+		}
 		if s.ml != nil {
 			mux.Handle("GET /api/v1/libraries/{id}/ml", s.withAuth(allowAdmin, s.handleMLStatus))
 			mux.Handle("POST /api/v1/libraries/{id}/ml/similarity/pass", s.withAuth(allowAdmin, s.handleMLPass))
@@ -224,6 +232,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/permanent", s.withAuth(allowAny, s.handlePermanentDeleteFile))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/metadata", s.withAuth(allowAny, s.handleGetFileMetadata))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handleGetThumbnail))
+		mux.Handle("PUT /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handlePutThumbnail))
 
 		// Per-file Markdown notes (captions).
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/note", s.withAuth(allowAny, s.handleGetFileNote))

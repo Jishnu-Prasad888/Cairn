@@ -229,3 +229,21 @@ permission capabilities for the rest:
 - Learned embeddings and ANN search.
 - Cross-library similarity.
 - Removing per-image derived data via the web UI (API-only in this phase).
+## Runtime switch (Machine learning page)
+
+`CAIRN_ML_ENABLED` is only the **default**. An administrator turns ML on or off
+from **Machine learning → Recognise people automatically**; the choice is stored
+in the server database (`server_settings`, key `ml.enabled`, migration 0008) and
+wins over the environment from then on.
+
+- **On** — similarity and people recognition both run. A pass starts at once
+  over every online library, and every finished library scan (uploads included)
+  runs detect → cluster for the new images, in the background. At startup, if
+  ML is on, anything added while the server was off is caught up.
+- **Off** — nothing is analysed and the **People** entry disappears from the
+  sidebar. People, names and signatures already stored are kept.
+- New faces are matched against existing people first, so a person you renamed
+  is recognised by that name in later photos; anyone new becomes `Person N`.
+
+API: `GET /api/v1/ml/settings` (any signed-in user) and
+`PUT /api/v1/ml/settings {"enabled": bool}` (administrator).

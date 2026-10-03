@@ -3,13 +3,16 @@ package metadata
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/jobs"
+	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 )
 
 // KindProcessMedia is the job kind for extracting metadata and generating
@@ -57,6 +60,14 @@ func (p *Processor) Handle(ctx context.Context, job *jobs.Job) error {
 		// Inaccessible file — not fatal; the file may be missing.
 		p.logger.Warn("metadata extraction failed", "file_id", fileID, "error", err)
 		return fmt.Errorf("extract metadata: %w", err)
+	}
+
+	// A new or changed video on a server without ffmpeg gets its poster from
+	// the next client that shows it; drop any poster of the old content.
+	if media.DetectMediaType(relPath) == media.MediaTypeVideo && !VideoFramesAvailable() {
+		if err := os.Remove(ThumbPath(cairnDir, fileID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			p.logger.Warn("remove stale video poster", "file_id", fileID, "error", err)
+		}
 	}
 
 	// Generate thumbnail (also read-only; writes only to .cairn/thumbs/).

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 )
 
 // FaceConfig controls the local face capability off the Phase 11 ML seam.
@@ -44,6 +45,7 @@ type FaceManager struct {
 	logger   *slog.Logger
 	cfg      FaceConfig
 	provider FaceProvider
+	enabled  atomic.Bool
 }
 
 // NewFaceManager returns a face manager using provider (defaults to the
@@ -67,11 +69,16 @@ func NewFaceManager(logger *slog.Logger, cfg FaceConfig, provider FaceProvider) 
 		p.MinSize = cfg.MinSize
 		p.MinConfidence = cfg.MinConfidence
 	}
-	return &FaceManager{logger: logger, cfg: cfg, provider: provider}
+	m := &FaceManager{logger: logger, cfg: cfg, provider: provider}
+	m.enabled.Store(cfg.Enabled)
+	return m
 }
 
 // Enabled reports whether the face capability is on.
-func (m *FaceManager) Enabled() bool { return m.cfg.Enabled }
+func (m *FaceManager) Enabled() bool { return m.enabled.Load() }
+
+// SetEnabled flips the face capability at runtime (see Runtime).
+func (m *FaceManager) SetEnabled(on bool) { m.enabled.Store(on) }
 
 // ProviderName returns the active face provider identifier.
 func (m *FaceManager) ProviderName() string { return m.provider.Name() }
