@@ -53,6 +53,11 @@ type Config struct {
 	// hardening). Zero falls back to media.DefaultMaxUploadBytes (2 GiB).
 	MaxUploadBytes int64
 
+	// ScanIntervalSeconds is how often every online library is rescanned so
+	// changes made outside Cairn (a file manager, a sync tool) appear on their
+	// own. Zero or negative disables the automatic rescan.
+	ScanIntervalSeconds int
+
 	// BackupDir is where library and server backups are written. Empty means
 	// backups are disabled until configured.
 	BackupDir string
@@ -127,6 +132,7 @@ func Load() Config {
 		WebDistDir:            envOrDefaultTrim("WEB_DIST", ""),
 		CookieSecure:          envOrDefaultBool("COOKIE_SECURE", false),
 		MaxUploadBytes:        envOrDefaultInt64("MAX_UPLOAD_BYTES", 2<<30),
+		ScanIntervalSeconds:   envOrDefaultInt("SCAN_INTERVAL_SEC", 60),
 		BackupDir:             envOrDefaultTrim("BACKUP_DIR", ""),
 		BackupKeep:            envOrDefaultInt("BACKUP_KEEP", 4),
 		BackupIntervalMinutes: envOrDefaultInt("BACKUP_INTERVAL_MIN", 0),

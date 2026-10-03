@@ -59,14 +59,15 @@ func NewFaceStore(db *sql.DB) *FaceStore {
 }
 
 // FilesToScan returns present photos with no faces recorded for the given
-// provider version yet.
+// provider version yet. The photo test uses the type the scanner recorded on
+// the file itself: the post-scan hook runs before media-metadata jobs have
+// filled media_metadata, so depending on it would find nothing on first scan.
 func (s *FaceStore) FilesToScan(ctx context.Context, provider string, version int) ([]UnsignedFaceFile, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT f.id, f.rel_path
 		FROM indexed_files f
-		JOIN media_metadata m ON m.file_id = f.id
 		WHERE f.status = 'present'
-		  AND m.media_type = 'photo'
+		  AND f.media_type = 'photo'
 		  AND NOT EXISTS (
 		      SELECT 1 FROM faces fa
 		      WHERE fa.file_id = f.id AND fa.provider = ? AND fa.version = ?

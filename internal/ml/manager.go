@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
@@ -31,6 +32,7 @@ type Manager struct {
 	logger   *slog.Logger
 	cfg      Config
 	provider Provider
+	enabled  atomic.Bool
 }
 
 // NewManager returns an ML manager for the given provider. The provider must
@@ -45,11 +47,16 @@ func NewManager(logger *slog.Logger, cfg Config, provider Provider) *Manager {
 	if provider == nil {
 		provider = AverageHashProvider{}
 	}
-	return &Manager{logger: logger, cfg: cfg, provider: provider}
+	m := &Manager{logger: logger, cfg: cfg, provider: provider}
+	m.enabled.Store(cfg.Enabled)
+	return m
 }
 
 // Enabled reports whether ML is on.
-func (m *Manager) Enabled() bool { return m.cfg.Enabled }
+func (m *Manager) Enabled() bool { return m.enabled.Load() }
+
+// SetEnabled flips the master switch at runtime (see Runtime).
+func (m *Manager) SetEnabled(on bool) { m.enabled.Store(on) }
 
 // ProviderName returns the active provider identifier (one provider is compiled
 // in this phase; a registry follows when more exist).

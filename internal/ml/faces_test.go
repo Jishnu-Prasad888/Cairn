@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
@@ -376,5 +377,34 @@ func writePNGImage(t *testing.T, path string, img image.Image) {
 	defer func() { _ = f.Close() }()
 	if err := png.Encode(f, img); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The post-scan hook runs before media-metadata jobs have written anything,
+// so a freshly scanned photo must already be eligible for face detection.
+func TestFilesToScanDoesNotNeedMediaMetadata(t *testing.T) {
+	root := t.TempDir()
+	cairnDir := filepath.Join(root, ".cairn")
+	if err := os.MkdirAll(cairnDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := librarydb.OpenDB(cairnDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	n := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.DB().Exec(`
+		INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, status, media_type, first_seen_at, last_seen_at, indexed_at)
+		VALUES ('p1', 'a.jpg', 1, ?, 'present', 'photo', ?, ?, ?),
+		       ('v1', 'a.mp4', 1, ?, 'present', 'video', ?, ?, ?)`, n, n, n, n, n, n, n, n); err != nil {
+		t.Fatal(err)
+	}
+	files, err := ml.NewFaceStore(db.DB()).FilesToScan(context.Background(), "pigo", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].FileID != "p1" {
+		t.Fatalf("FilesToScan = %+v, want only the photo p1", files)
 	}
 }

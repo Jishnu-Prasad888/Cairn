@@ -117,6 +117,15 @@ func run() error {
 		logger.Warn("list libraries for job workers", "error", err)
 	}
 
+	// Pick up files added or removed outside Cairn: rescan on a timer.
+	idxManager.StartAutoScan(ctx, time.Duration(cfg.ScanIntervalSeconds)*time.Second,
+		func(c context.Context) ([]library.Library, error) {
+			if err := libraries.RefreshAll(c); err != nil {
+				logger.Warn("refresh libraries before scan", "error", err)
+			}
+			return libraries.List(c)
+		})
+
 	// Local ML: optional similarity signatures. The manager is inert unless
 	// CAIRN_ML_ENABLED is set; similarity passes run after index scans and on
 	// explicit API calls.
@@ -126,28 +135,33 @@ func run() error {
 		DistanceThreshold: cfg.MLDistanceThreshold,
 	}, ml.AverageHashProvider{})
 	faces := ml.NewFaceManager(logger, ml.FaceConfig{
-		Enabled:       cfg.MLEnabled && cfg.MLFaces,
+		Enabled:       cfg.MLEnabled,
 		Workers:       cfg.MLFaceWorkers,
 		MinConfidence: cfg.MLFaceMinConfidence,
 		MinSize:       cfg.MLFaceMinSize,
 		Threshold:     cfg.MLFaceThreshold,
 	}, nil)
-	{
-		after := func(libraryID, root string) {
-			if cfg.MLSimilarity {
-				if _, err := mlManager.Pass(context.Background(), libraryID, root); err != nil {
-					logger.Warn("similarity pass after index", "library_id", libraryID, "error", err)
-				}
+	// The master switch is an administrator setting stored in the server
+	// database (Machine learning page); CAIRN_ML_ENABLED is only its default.
+	mlRuntime := ml.NewRuntime(pool, logger, mlManager, faces, cfg.MLSimilarity,
+		func(ctx context.Context) ([]ml.Target, error) {
+			libs, err := libraries.List(ctx)
+			if err != nil {
+				return nil, err
 			}
-			if faces.Enabled() {
-				if _, err := faces.Pass(context.Background(), root); err != nil {
-					logger.Warn("face pass after index", "library_id", libraryID, "error", err)
-				}
+			out := make([]ml.Target, 0, len(libs))
+			for _, l := range libs {
+				out = append(out, ml.Target{ID: l.ID, Root: l.Root, Online: l.Status == library.StatusOnline})
 			}
-		}
-		if (cfg.MLEnabled && cfg.MLSimilarity) || faces.Enabled() {
-			idxManager.AfterScan = after
-		}
+			return out, nil
+		})
+	if err := mlRuntime.Load(ctx, cfg.MLEnabled); err != nil {
+		return err
+	}
+	idxManager.AfterScan = mlRuntime.AfterScan
+	if mlRuntime.Enabled() {
+		// Catch up on anything added while the server was off.
+		mlRuntime.StartAll()
 	}
 
 	// Backups: one-shot, scheduled, and restore operations over the server
@@ -177,6 +191,7 @@ func run() error {
 		Indexer:        idxManager,
 		ML:             mlManager,
 		Faces:          faces,
+		MLRuntime:      mlRuntime,
 		Backups:        backupMgr,
 		Keys:           keys,
 		SecureCookies:  cfg.CookieSecure,

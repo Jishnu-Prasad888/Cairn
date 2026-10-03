@@ -403,3 +403,12 @@ key. A session without the required capability gets `403 FORBIDDEN`.
 - [sharing.md](sharing.md) — public share links for files and folders.
 - [mobile-development.md](mobile-development.md) — client guidance built on
   these endpoints (streaming, caches, offline behavior).
+## Video thumbnails
+
+A video's thumbnail is its first frame. The server extracts it with `ffmpeg`
+when that binary is on `PATH` (stored in `.cairn/thumbs/` like photo
+thumbnails, sealed when at-rest encryption is on). Without ffmpeg the web
+client draws the first frame in the browser and uploads it with
+`PUT /api/v1/libraries/{id}/files/{fileID}/thumbnail` (needs `read` + `edit`
+on the file; videos only; the body is decoded and re-encoded, and an existing
+thumbnail is never replaced), so every later viewer gets it from the server.

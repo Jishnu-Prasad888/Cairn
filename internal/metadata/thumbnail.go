@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
+	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 	"github.com/Jishnu-Prasad888/Cairn/internal/safeimage"
 	"golang.org/x/image/draw"
 )
@@ -32,11 +34,26 @@ func ThumbPath(cairnDir, fileID string) string {
 }
 
 // GenerateThumbnail creates a JPEG thumbnail from srcPath and writes it to
-// ThumbPath(cairnDir, fileID). The original file is never modified; when keys
-// are enabled the on-disk thumbnail is sealed with the at-rest key. Returns
-// (true, nil) when the thumbnail was written, (false, nil) when the file is
-// not a supported image type.
+// ThumbPath(cairnDir, fileID). Photos are decoded directly; videos use their
+// first frame, extracted with ffmpeg when it is installed. The original file
+// is never modified; when keys are enabled the on-disk thumbnail is sealed
+// with the at-rest key. Returns (true, nil) when the thumbnail was written,
+// (false, nil) when the file has no thumbnail this server can make.
 func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (bool, error) {
+	if media.DetectMediaType(srcPath) == media.MediaTypeVideo {
+		if !VideoFramesAvailable() {
+			return false, nil
+		}
+		frame, err := extractVideoFrame(context.Background(), srcPath)
+		if err != nil {
+			return false, fmt.Errorf("video thumbnail: %w", err)
+		}
+		if err := writeThumb(frame, cairnDir, fileID, keys); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return false, fmt.Errorf("open source for thumbnail: %w", err)
@@ -46,33 +63,41 @@ func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (boo
 	img, _, err := safeimage.Decode(src)
 	if err != nil {
 		// Not a supported image (or exceeds safety limits) — skip silently
-		// (video, audio, docs, etc.).
+		// (audio, docs, etc.).
 		return false, nil
 	}
+	if err := writeThumb(img, cairnDir, fileID, keys); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
+// writeThumb resizes img, encodes it as JPEG and commits it atomically to
+// ThumbPath(cairnDir, fileID), sealed when keys are enabled.
+func writeThumb(img image.Image, cairnDir, fileID string, keys *crypto.Keys) error {
 	thumb := resizeToFit(img, ThumbnailSize)
 
 	thumbsDir := filepath.Join(cairnDir, ThumbsDirName)
 	if err := os.MkdirAll(thumbsDir, 0o755); err != nil {
-		return false, fmt.Errorf("create thumbs dir: %w", err)
+		return fmt.Errorf("create thumbs dir: %w", err)
 	}
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: ThumbnailQuality}); err != nil {
-		return false, fmt.Errorf("encode thumbnail: %w", err)
+		return fmt.Errorf("encode thumbnail: %w", err)
 	}
 	data := keys.Seal(buf.Bytes())
 
 	destPath := ThumbPath(cairnDir, fileID)
 	tmp := destPath + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return false, fmt.Errorf("write thumbnail: %w", err)
+		return fmt.Errorf("write thumbnail: %w", err)
 	}
 	if err := os.Rename(tmp, destPath); err != nil {
 		_ = os.Remove(tmp)
-		return false, fmt.Errorf("commit thumbnail: %w", err)
+		return fmt.Errorf("commit thumbnail: %w", err)
 	}
-	return true, nil
+	return nil
 }
 
 // ReadThumb reads and decrypts the thumbnail for fileID, returning the JPEG
