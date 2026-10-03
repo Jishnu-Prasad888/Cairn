@@ -17,10 +17,13 @@ import { ErrorState, NoLibrariesState, PageHeader } from './States';
 
 export function LibraryGatePage({
   title,
+  header,
   className = '',
   children,
 }: {
   title: string;
+  /** Replaces the standard page header, for pages with their own (Home). */
+  header?: ReactNode;
   className?: string;
   children: (library: Library) => ReactNode;
 }) {
@@ -28,7 +31,7 @@ export function LibraryGatePage({
   const { user } = useAuth();
   const frame = (content: ReactNode) => (
     <main className={`page ${className}`.trim()}>
-      <PageHeader title={title} />
+      {header ?? <PageHeader title={title} />}
       {content}
     </main>
   );

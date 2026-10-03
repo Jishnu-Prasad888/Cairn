@@ -72,6 +72,11 @@ func (s *Server) runFacePass(w http.ResponseWriter, r *http.Request, lib *librar
 		}
 		if _, err := s.faces.Pass(ctx, lib.Root); err != nil {
 			s.logger.Error("face detection pass", "library_id", lib.ID, "error", err)
+			return
+		}
+		// New faces are only useful once grouped into people.
+		if _, err := s.faces.ClusterPass(ctx, lib.Root); err != nil {
+			s.logger.Error("face clustering pass", "library_id", lib.ID, "error", err)
 		}
 	}()
 	writeJSON(w, s.logger, http.StatusAccepted, map[string]any{
@@ -244,7 +249,34 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request, u *a
 	if !ok || !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapDelete) {
 		return
 	}
-	if err := s.faces.DeletePerson(r.Context(), lib.Root, r.PathValue("personID")); err != nil {
+	personID := r.PathValue("personID")
+	// ?faces=delete removes the person's faces too; otherwise they return to
+	// the pool and are grouped again.
+	if r.URL.Query().Get("faces") == "delete" {
+		n, err := s.faces.DeletePersonAndFaces(r.Context(), lib.Root, personID)
+		if err != nil {
+			s.writeFaceError(w, r, err)
+			return
+		}
+		writeJSON(w, s.logger, http.StatusOK, map[string]any{"deleted": true, "faces_removed": n})
+		return
+	}
+	if err := s.faces.DeletePerson(r.Context(), lib.Root, personID); err != nil {
+		s.writeFaceError(w, r, err)
+		return
+	}
+	s.faces.RegroupSoon(lib.Root)
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// handleDeleteFace — DELETE /api/v1/libraries/{id}/faces/{faceID}
+// Removes one face for good: it is not detected again.
+func (s *Server) handleDeleteFace(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	lib, ok := s.facesLib(w, r, u, true)
+	if !ok || !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapDelete) {
+		return
+	}
+	if err := s.faces.DeleteFace(r.Context(), lib.Root, r.PathValue("faceID")); err != nil {
 		s.writeFaceError(w, r, err)
 		return
 	}
@@ -304,6 +336,7 @@ func (s *Server) handleMergePeople(w http.ResponseWriter, r *http.Request, u *au
 		s.writeFaceError(w, r, err)
 		return
 	}
+	s.faces.RegroupSoon(lib.Root)
 	// "consolidated" counts other unnamed groups that were so similar they were
 	// folded in too.
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"merged": true, "consolidated": joined})
@@ -338,6 +371,8 @@ func (s *Server) handleAssignFace(w http.ResponseWriter, r *http.Request, u *aut
 		s.writeFaceError(w, r, err)
 		return
 	}
+	// The person now has a hand-placed face: let matching use it right away.
+	s.faces.RegroupSoon(lib.Root)
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"assigned": true})
 }
 

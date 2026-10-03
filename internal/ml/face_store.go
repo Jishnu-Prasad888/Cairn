@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -69,10 +71,14 @@ func (s *FaceStore) FilesToScan(ctx context.Context, provider string, version in
 		WHERE f.status = 'present'
 		  AND f.media_type = 'photo'
 		  AND NOT EXISTS (
+		      SELECT 1 FROM face_scans fs
+		      WHERE fs.file_id = f.id AND fs.provider = ? AND fs.version = ?
+		  )
+		  AND NOT EXISTS (
 		      SELECT 1 FROM faces fa
 		      WHERE fa.file_id = f.id AND fa.provider = ? AND fa.version = ?
 		  )
-		ORDER BY f.id`, provider, version)
+		ORDER BY f.id`, provider, version, provider, version)
 	if err != nil {
 		return nil, fmt.Errorf("list files to face-scan: %w", err)
 	}
@@ -107,6 +113,67 @@ func (s *FaceStore) InsertFace(ctx context.Context, f FaceRecord) error {
 		return fmt.Errorf("insert face: %w", err)
 	}
 	return nil
+}
+
+// RecordFaceScan stores the faces found in one file and marks the file as
+// scanned by provider/version, atomically: a file is either fully recorded or
+// not at all, so an interrupted pass never leaves half of a photo's faces.
+func (s *FaceStore) RecordFaceScan(ctx context.Context, fileID, provider string, version int, faces []FaceRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("record face scan begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := rfc3339(time.Now().UTC())
+	for _, f := range faces {
+		c, err := float32Bytes(f.Descriptor)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO faces (id, file_id, provider, version, x, y, width, height,
+			                   confidence, descriptor, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			f.ID, f.FileID, f.Provider, f.Version,
+			f.Box.X, f.Box.Y, f.Box.Width, f.Box.Height, f.Box.Confidence,
+			c, now, now); err != nil {
+			return fmt.Errorf("insert face: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO face_scans (file_id, provider, version, faces, scanned_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(file_id) DO UPDATE SET provider = excluded.provider,
+		    version = excluded.version, faces = excluded.faces, scanned_at = excluded.scanned_at`,
+		fileID, provider, version, len(faces), now); err != nil {
+		return fmt.Errorf("record face scan: %w", err)
+	}
+	return tx.Commit()
+}
+
+// DedupeFaces removes repeated observations of one face (same photo, provider,
+// version and box), keeping a grouped copy when there is one. Overlapping
+// passes used to store faces twice. Returns the number removed.
+func (s *FaceStore) DedupeFaces(ctx context.Context) (int, error) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM faces WHERE id IN (
+			SELECT fa.id FROM faces fa
+			WHERE NOT EXISTS (SELECT 1 FROM person_faces p WHERE p.face_id = fa.id)
+			  AND EXISTS (
+				SELECT 1 FROM faces o
+				WHERE o.file_id = fa.file_id AND o.provider = fa.provider
+				  AND o.version = fa.version AND o.x = fa.x AND o.y = fa.y
+				  AND o.width = fa.width AND o.height = fa.height
+				  AND o.id <> fa.id
+				  AND (o.rowid < fa.rowid
+				       OR EXISTS (SELECT 1 FROM person_faces p WHERE p.face_id = o.id))
+			  )
+		)`)
+	if err != nil {
+		return 0, fmt.Errorf("dedupe faces: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // FaceByID returns a face, or nil when not present.
@@ -460,7 +527,9 @@ func (s *FaceStore) MergeAs(ctx context.Context, keepID, sourceID, by string) er
 
 // AssignPerson assigns a face to a person. A face belongs to at most one
 // person; assigning it elsewhere moves it first. assignedBy is 'auto' or
-// 'manual' and is stored verbatim.
+// 'manual' and is stored verbatim (a face moved off another person is always
+// 'manual'). Covers of both people are kept pointing at one of their own
+// faces, and an automatic "Person N" left with no faces is removed.
 func (s *FaceStore) AssignPerson(ctx context.Context, personID, faceID, assignedBy string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -468,14 +537,30 @@ func (s *FaceStore) AssignPerson(ctx context.Context, personID, faceID, assigned
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM person_faces WHERE face_id = ? AND person_id <> ?`, faceID, personID)
+	var previous []string
+	rows, err := tx.QueryContext(ctx,
+		`SELECT person_id FROM person_faces WHERE face_id = ? AND person_id <> ?`, faceID, personID)
 	if err != nil {
-		return fmt.Errorf("assign unlink: %w", err)
+		return fmt.Errorf("assign lookup: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		// Moved a manually assigned face: keep it manual so the user's intent
-		// survives.
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("assign lookup: %w", err)
+		}
+		previous = append(previous, id)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("assign lookup: %w", err)
+	}
+	if len(previous) > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM person_faces WHERE face_id = ? AND person_id <> ?`, faceID, personID); err != nil {
+			return fmt.Errorf("assign unlink: %w", err)
+		}
+		// Moved a face from another person: that is a human decision, and it
+		// must survive regrouping.
 		assignedBy = "manual"
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -485,17 +570,136 @@ func (s *FaceStore) AssignPerson(ctx context.Context, personID, faceID, assigned
 		personID, faceID, assignedBy, rfc3339(time.Now().UTC())); err != nil {
 		return fmt.Errorf("assign insert: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM face_holds WHERE face_id = ?`, faceID); err != nil {
+		return fmt.Errorf("release face: %w", err)
+	}
+	if err := tidyPeopleTx(ctx, tx, append(previous, personID)...); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
 // UnassignPerson removes a face from a person (it becomes cluster-eligible).
 func (s *FaceStore) UnassignPerson(ctx context.Context, personID, faceID string) error {
-	res, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("unassign begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
 		`DELETE FROM person_faces WHERE person_id = ? AND face_id = ?`, personID, faceID)
 	if err != nil {
 		return fmt.Errorf("unassign face: %w", err)
 	}
-	return ensureAffected(res, "assignment")
+	if err := ensureAffected(res, "assignment"); err != nil {
+		return err
+	}
+	// "Not this person" is a decision: keep automatic grouping from putting
+	// the face straight back.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO face_holds (face_id, created_at) VALUES (?, ?)
+		ON CONFLICT(face_id) DO NOTHING`, faceID, rfc3339(time.Now().UTC())); err != nil {
+		return fmt.Errorf("hold face: %w", err)
+	}
+	if err := tidyPeopleTx(ctx, tx, personID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteFace removes one face for good (a false detection, or someone the
+// user does not want kept). Its photo stays recorded as scanned, so the face
+// is not detected again; the person it belonged to keeps a valid cover.
+func (s *FaceStore) DeleteFace(ctx context.Context, faceID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete face begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var owners []string
+	rows, err := tx.QueryContext(ctx, `SELECT person_id FROM person_faces WHERE face_id = ?`, faceID)
+	if err != nil {
+		return fmt.Errorf("delete face lookup: %w", err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("delete face lookup: %w", err)
+		}
+		owners = append(owners, id)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("delete face lookup: %w", err)
+	}
+	// Covers point at faces with ON DELETE SET NULL, so the cover refresh
+	// below picks a replacement.
+	res, err := tx.ExecContext(ctx, `DELETE FROM faces WHERE id = ?`, faceID)
+	if err != nil {
+		return fmt.Errorf("delete face: %w", err)
+	}
+	if err := ensureAffected(res, "face"); err != nil {
+		return err
+	}
+	if err := tidyPeopleTx(ctx, tx, owners...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeletePersonAndFaces removes a person together with every face assigned to
+// them, so the group is not rebuilt by the next grouping pass. Returns the
+// number of faces removed.
+func (s *FaceStore) DeletePersonAndFaces(ctx context.Context, personID string) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("delete person begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM faces WHERE id IN (SELECT face_id FROM person_faces WHERE person_id = ?)`, personID)
+	if err != nil {
+		return 0, fmt.Errorf("delete person faces: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	res, err = tx.ExecContext(ctx, `DELETE FROM people WHERE id = ?`, personID)
+	if err != nil {
+		return 0, fmt.Errorf("delete person: %w", err)
+	}
+	if err := ensureAffected(res, "person"); err != nil {
+		return 0, err
+	}
+	return int(n), tx.Commit()
+}
+
+// tidyPeopleTx keeps each person's cover on one of their own faces (the
+// largest, most confident one when it has to change) and deletes automatic
+// "Person N" entries that no longer have any face. Named people are kept even
+// when empty.
+func tidyPeopleTx(ctx context.Context, tx *sql.Tx, personIDs ...string) error {
+	now := rfc3339(time.Now().UTC())
+	for _, pid := range personIDs {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE people SET
+			    cover_face_id = (SELECT fa.id FROM person_faces pf JOIN faces fa ON fa.id = pf.face_id
+			                     WHERE pf.person_id = people.id
+			                     ORDER BY fa.width * fa.height * fa.confidence DESC, fa.id LIMIT 1),
+			    cover_file_id = (SELECT fa.file_id FROM person_faces pf JOIN faces fa ON fa.id = pf.face_id
+			                     WHERE pf.person_id = people.id
+			                     ORDER BY fa.width * fa.height * fa.confidence DESC, fa.id LIMIT 1),
+			    updated_at = ?
+			WHERE id = ? AND (cover_face_id IS NULL
+			      OR cover_face_id NOT IN (SELECT face_id FROM person_faces WHERE person_id = ?))`,
+			now, pid, pid); err != nil {
+			return fmt.Errorf("refresh cover: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM people WHERE id = ? AND name GLOB 'Person [0-9]*'
+			  AND NOT EXISTS (SELECT 1 FROM person_faces WHERE person_id = ?)`, pid, pid); err != nil {
+			return fmt.Errorf("drop empty person: %w", err)
+		}
+	}
+	return nil
 }
 
 // PurgeFaces deletes every face observation and assignment, leaving people
@@ -509,6 +713,9 @@ func (s *FaceStore) PurgeFaces(ctx context.Context) (int, error) {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM faces`); err != nil {
 		return 0, fmt.Errorf("purge faces: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM face_scans`); err != nil {
+		return 0, fmt.Errorf("purge face scans: %w", err)
+	}
 	// Person faces cascade with the faces above; empty them defensively too.
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM person_faces`); err != nil {
 		return 0, fmt.Errorf("purge assignments: %w", err)
@@ -521,6 +728,10 @@ func (s *FaceStore) PurgeFaces(ctx context.Context) (int, error) {
 // be mixed into clustering. People left with no faces and an automatic
 // "Person N" name go too; names a user chose are kept.
 func (s *FaceStore) PurgeStaleFaces(ctx context.Context, provider string, version int) (int, error) {
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM face_scans WHERE NOT (provider = ? AND version = ?)`, provider, version); err != nil {
+		return 0, fmt.Errorf("purge stale face scans: %w", err)
+	}
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM faces WHERE NOT (provider = ? AND version = ?)`, provider, version)
 	if err != nil {
@@ -680,4 +891,164 @@ func ensureAffected(res sql.Result, what string) error {
 		return ErrPersonNotFound
 	}
 	return nil
+}
+
+// groupingState loads what planGroups needs: every face with its current
+// assignment (free when unassigned or held by an untouched automatic group),
+// the exemplars of every anchored person, and the untouched automatic people.
+func (s *FaceStore) groupingState(ctx context.Context) ([]clusterFace, map[string][]Exemplar, map[string]bool, error) {
+	auto, err := s.AutoNamedPeople(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT fa.id, fa.width, fa.height, fa.confidence, fa.descriptor,
+		       COALESCE(pf.person_id, ''),
+		       EXISTS (SELECT 1 FROM face_holds h WHERE h.face_id = fa.id)
+		FROM faces fa
+		LEFT JOIN person_faces pf ON pf.face_id = fa.id
+		ORDER BY fa.created_at, fa.id`)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("list faces for grouping: %w", err)
+	}
+	var faces []clusterFace
+	seen := map[string]bool{}
+	for rows.Next() {
+		var (
+			f    clusterFace
+			w, h int
+			conf float64
+			raw  []byte
+			held bool
+		)
+		if err := rows.Scan(&f.ID, &w, &h, &conf, &raw, &f.PersonID, &held); err != nil {
+			_ = rows.Close()
+			return nil, nil, nil, fmt.Errorf("scan face for grouping: %w", err)
+		}
+		if seen[f.ID] {
+			continue
+		}
+		seen[f.ID] = true
+		if f.Desc, err = float32FromBytes(raw); err != nil {
+			_ = rows.Close()
+			return nil, nil, nil, err
+		}
+		f.Quality = float64(w*h) * conf
+		f.Free = (f.PersonID == "" && !held) || auto[f.PersonID]
+		faces = append(faces, f)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, nil, nil, fmt.Errorf("list faces for grouping: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, nil, err
+	}
+	all, err := s.PersonExemplars(ctx, maxExemplars)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	anchors := make(map[string][]Exemplar, len(all))
+	for pid, ex := range all {
+		if !auto[pid] {
+			anchors[pid] = ex
+		}
+	}
+	return faces, anchors, auto, nil
+}
+
+// applyGroupPlan writes a plan from planGroups in one transaction: moves free
+// faces, creates "Person N" for new groups, refreshes covers that no longer
+// show one of the person's faces, and deletes automatic people left empty.
+func (s *FaceStore) applyGroupPlan(ctx context.Context, faces []clusterFace, plan *groupPlan) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("grouping begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := rfc3339(time.Now().UTC())
+
+	// New people are numbered after the highest "Person N" in use.
+	next := 1
+	nameRows, err := tx.QueryContext(ctx, `SELECT name FROM people WHERE name GLOB 'Person [0-9]*'`)
+	if err != nil {
+		return fmt.Errorf("grouping names: %w", err)
+	}
+	for nameRows.Next() {
+		var name string
+		if err := nameRows.Scan(&name); err != nil {
+			_ = nameRows.Close()
+			return err
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, "Person ")); err == nil && n >= next {
+			next = n + 1
+		}
+	}
+	if err := nameRows.Close(); err != nil {
+		return err
+	}
+	created := make(map[string]string, len(plan.NewGroups))
+	for i := range plan.NewGroups {
+		id, err := newID()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO people (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+			id, fmt.Sprintf("Person %d", next), now, now); err != nil {
+			return fmt.Errorf("grouping create person: %w", err)
+		}
+		next++
+		created[newGroupKey(i)] = id
+	}
+	resolve := func(key string) string {
+		if id, ok := created[key]; ok {
+			return id
+		}
+		return key
+	}
+
+	for _, f := range faces {
+		if !f.Free {
+			continue
+		}
+		to := resolve(plan.Assign[f.ID])
+		if to == f.PersonID {
+			continue
+		}
+		if f.PersonID != "" {
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM person_faces WHERE face_id = ? AND assigned_by = 'auto'`, f.ID); err != nil {
+				return fmt.Errorf("grouping unlink: %w", err)
+			}
+		}
+		if to != "" {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO person_faces (person_id, face_id, assigned_by, created_at)
+				VALUES (?, ?, 'auto', ?)
+				ON CONFLICT(person_id, face_id) DO NOTHING`, to, f.ID, now); err != nil {
+				return fmt.Errorf("grouping assign: %w", err)
+			}
+		}
+	}
+
+	for key, faceID := range plan.Covers {
+		pid := resolve(key)
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE people
+			SET cover_face_id = ?, cover_file_id = (SELECT file_id FROM faces WHERE id = ?), updated_at = ?
+			WHERE id = ? AND (cover_face_id IS NULL
+			      OR cover_face_id NOT IN (SELECT face_id FROM person_faces WHERE person_id = ?))`,
+			faceID, faceID, now, pid, pid); err != nil {
+			return fmt.Errorf("grouping cover: %w", err)
+		}
+	}
+	for _, pid := range plan.Dropped {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM people WHERE id = ?
+			  AND NOT EXISTS (SELECT 1 FROM person_faces WHERE person_id = ?)`, pid, pid); err != nil {
+			return fmt.Errorf("grouping drop person: %w", err)
+		}
+	}
+	return tx.Commit()
 }

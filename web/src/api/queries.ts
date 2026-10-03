@@ -395,8 +395,15 @@ export const createPerson = (libraryId: string, name: string) =>
 export const renamePerson = (libraryId: string, personId: string, name: string) =>
   apiPost<{ renamed: boolean }>(`/libraries/${libraryId}/people/${personId}/rename`, { name });
 
-export const deletePerson = (libraryId: string, personId: string) =>
-  apiDelete<{ deleted: boolean }>(`/libraries/${libraryId}/people/${personId}`);
+/** Delete a person; with `withFaces` their faces go too, so the group is not rebuilt. */
+export const deletePerson = (libraryId: string, personId: string, withFaces = false) =>
+  apiDelete<{ deleted: boolean; faces_removed?: number }>(
+    `/libraries/${libraryId}/people/${personId}${withFaces ? '?faces=delete' : ''}`,
+  );
+
+/** Delete one detected face for good; it is not detected again. */
+export const deleteFace = (libraryId: string, faceId: string) =>
+  apiDelete<{ deleted: boolean }>(`/libraries/${libraryId}/faces/${faceId}`);
 
 export const getFaceStatus = (libraryId: string) =>
   apiGet<FaceStatus>(`/libraries/${libraryId}/ml/faces`);

@@ -175,6 +175,8 @@ export interface FaceStatus {
   faces: number;
   people: number;
   unassigned: number;
+  /** A detection or grouping pass is running or queued on the server. */
+  running?: boolean;
 }
 
 export interface Person {

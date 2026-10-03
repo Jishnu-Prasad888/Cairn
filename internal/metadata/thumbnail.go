@@ -46,7 +46,10 @@ func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (boo
 		}
 		frame, err := extractVideoFrame(context.Background(), srcPath)
 		if err != nil {
-			return false, fmt.Errorf("video thumbnail: %w", err)
+			// ffmpeg cannot decode this file (corrupt, unrecognised codec,
+			// not actually a video, etc.) — skip silently rather than
+			// treating it as a server error.
+			return false, nil
 		}
 		if err := writeThumb(frame, cairnDir, fileID, keys); err != nil {
 			return false, err

@@ -22,8 +22,6 @@ import { useAuth } from '../../auth/authContext';
 import { Dialog } from '../Dialog';
 import { useToast } from '../ui/Toast';
 
-const PROMPTED_KEY = 'cairn.faceModelPrompted';
-
 function mb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -37,18 +35,12 @@ export function FaceModelHost() {
   const mlOn = useMLSwitch();
   const previous = useRef<string | null>(null);
 
-  // Once ML is on: find out whether the model is there, and ask once per tab
+  // Once ML is on: find out whether the model is there, and ask
   // if not. Turning ML on later asks then.
   useEffect(() => {
     if (!isAdmin || mlOn !== true) return;
     void refreshFaceModel().then((s) => {
       if (!s || s.installed || s.state === 'downloading') return;
-      try {
-        if (sessionStorage.getItem(PROMPTED_KEY)) return;
-        sessionStorage.setItem(PROMPTED_KEY, '1');
-      } catch {
-        // Storage unavailable: asking each time beats never asking.
-      }
       openFaceModelDialog();
     });
   }, [isAdmin, mlOn]);
@@ -63,7 +55,7 @@ export function FaceModelHost() {
     if (now === 'done') {
       toast({
         message:
-          'Face-recognition model downloaded. People will now be matched with it — Cairn is re-scanning your photos.',
+          'Face-recognition models downloaded. People will now be matched with them — Cairn is re-scanning your photos.',
         tone: 'success',
         duration: 8000,
       });
@@ -131,14 +123,12 @@ export function FaceModelHost() {
           </p>
         )}
         <p>
-          To match the same person across your photos, Cairn needs a face-recognition model (about
-          13&nbsp;MB). It will be downloaded once from <code>{new URL(status.url).host}</code> and
-          kept on this server; your photos are never uploaded.
+          To match the same person across your photos, Cairn needs two face-recognition models
+          (SCRFD detector + ArcFace R50, about 180&nbsp;MB total). They will be downloaded once from{' '}
+          <code>{status.url ? new URL(status.url).host : 'huggingface.co'}</code> and kept on this
+          server; your photos are never uploaded.
         </p>
-        <p className="muted">
-          The model’s licence allows non-commercial research use only. Without it, people are
-          matched with a basic method that groups poorly.
-        </p>
+        <p className="muted">The models’ licence allows non-commercial research use only.</p>
       </>
     );
     footer = (

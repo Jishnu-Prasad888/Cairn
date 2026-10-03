@@ -13,12 +13,20 @@ import (
 	"time"
 )
 
-// DefaultFaceModelURL is where the recognition model is fetched from: the
-// InsightFace MobileFaceNet (buffalo_s), as redistributed by Immich. Its
-// weights are licensed for non-commercial research use.
-const DefaultFaceModelURL = "https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx"
+// Default URLs for the SCRFD-500MF detector (buffalo_s) and ArcFace R50 recognizer, as
+// redistributed by Immich from the InsightFace model zoo (buffalo_l pack).
+// These models are licensed for non-commercial research use unless a separate
+// commercial license is obtained from DeepGlint-AI.
+const (
+	DefaultFaceDetectorURL   = "https://huggingface.co/immich-app/buffalo_s/resolve/main/detection/model.onnx"
+	DefaultFaceRecognizerURL = "https://huggingface.co/immich-app/buffalo_l/resolve/main/recognition/model.onnx"
 
-// ModelState is where the model download stands.
+	// DefaultFaceModelURL is kept for back-compat but now points to the
+	// recognizer. New code should use DefaultFaceRecognizerURL.
+	DefaultFaceModelURL = DefaultFaceRecognizerURL
+)
+
+// ModelState is where a model download stands.
 type ModelState string
 
 const (
@@ -38,17 +46,20 @@ type ModelStatus struct {
 	URL        string     `json:"url"`
 }
 
-// ModelDownloader fetches the face-recognition model on request and, once it
-// has been checked, hands the ready provider to onReady. The download runs in
-// the background and is independent of any browser session: closing the page
-// does not stop it.
+// ModelDownloader fetches one ONNX model on request and hands it to an
+// onReady callback once it has been verified. The download runs in the
+// background and is independent of any browser session.
+//
+// Two downloaders are used in production: one for the SCRFD detector
+// (face-detector.onnx) and one for the ArcFace recognizer
+// (face-recognition.onnx). They are independent: either can be re-downloaded
+// without affecting the other.
 type ModelDownloader struct {
 	logger  *slog.Logger
 	path    string
 	url     string
-	minSize int
-	minConf float64
-	onReady func(*EmbeddingFaceProvider)
+	verify  func(path string) error // nil → accept any valid file
+	onReady func(path string)
 
 	mu         sync.Mutex
 	state      ModelState
@@ -57,27 +68,75 @@ type ModelDownloader struct {
 	err        string
 }
 
-// NewModelDownloader manages the model at path. onReady is called once a
-// downloaded model has been verified.
-func NewModelDownloader(logger *slog.Logger, path, url string, minSize int, minConf float64,
-	onReady func(*EmbeddingFaceProvider)) *ModelDownloader {
-	if url == "" {
-		url = DefaultFaceModelURL
+// NewModelDownloader manages the model at path. onReady is called (with the
+// installed path) once the downloaded model has been verified. verify, when
+// non-nil, is called with the temporary .part path before it is renamed into
+// place; return a non-nil error to reject the file.
+func NewModelDownloader(
+	logger *slog.Logger, path, url string,
+	verify func(string) error,
+	onReady func(string),
+) *ModelDownloader {
+	return &ModelDownloader{
+		logger:  logger,
+		path:    path,
+		url:     url,
+		verify:  verify,
+		onReady: onReady,
+		state:   ModelIdle,
 	}
-	return &ModelDownloader{logger: logger, path: path, url: url, minSize: minSize,
-		minConf: minConf, onReady: onReady, state: ModelIdle}
 }
 
-// Path is where the model lives (or will).
+// newRecognizerDownloader is a convenience constructor used by the wiring code
+// that keeps the old minSize/minConf signature but adapts it to the new
+// verifier/callback model.
+func newRecognizerDownloader(
+	logger *slog.Logger, path, url string,
+	minSize int, minConf float64,
+	onReady func(*SCRFDEmbeddingFaceProvider),
+	detectorPath func() string,
+) *ModelDownloader {
+	verify := func(part string) error {
+		_, err := NewSCRFDEmbeddingFaceProvider(detectorPath(), part)
+		return err
+	}
+	ready := func(p string) {
+		if onReady == nil {
+			return
+		}
+		detPath := detectorPath()
+		prov, err := NewSCRFDEmbeddingFaceProvider(detPath, p)
+		if err != nil {
+			logger.Error("face provider unusable after recognizer install", "error", err)
+			return
+		}
+		onReady(prov)
+	}
+	return NewModelDownloader(logger, path, url, verify, ready)
+}
+
+// newDetectorDownloader is the convenience constructor for the SCRFD detector.
+func newDetectorDownloader(
+	logger *slog.Logger, path, url string,
+	onReady func(string),
+) *ModelDownloader {
+	verify := func(part string) error {
+		_, err := NewSCRFDDetector(part)
+		return err
+	}
+	return NewModelDownloader(logger, path, url, verify, onReady)
+}
+
+// Path is where the model file lives (or will).
 func (d *ModelDownloader) Path() string { return d.path }
 
-// Installed reports whether a model file is present.
+// Installed reports whether a model file is present and non-empty.
 func (d *ModelDownloader) Installed() bool {
 	st, err := os.Stat(d.path)
 	return err == nil && st.Size() > 0
 }
 
-// Status returns the current state.
+// Status returns the current download state.
 func (d *ModelDownloader) Status() ModelStatus {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -102,14 +161,14 @@ func (d *ModelDownloader) Start() ModelStatus {
 }
 
 func (d *ModelDownloader) fail(err error) {
-	d.logger.Error("face model download failed", "error", err)
+	d.logger.Error("model download failed", "error", err, "path", d.path)
 	d.mu.Lock()
 	d.state, d.err = ModelFailed, err.Error()
 	d.mu.Unlock()
 }
 
 func (d *ModelDownloader) run() {
-	d.logger.Info("downloading face recognition model", "url", d.url)
+	d.logger.Info("downloading model", "url", d.url, "path", d.path)
 	if err := os.MkdirAll(filepath.Dir(d.path), 0o755); err != nil {
 		d.fail(err)
 		return
@@ -117,8 +176,6 @@ func (d *ModelDownloader) run() {
 	part := d.path + ".part"
 	defer func() { _ = os.Remove(part) }()
 
-	// No overall timeout (a slow link is fine); a stalled connection is caught
-	// by the idle watchdog in progressReader.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url, nil)
@@ -170,26 +227,23 @@ func (d *ModelDownloader) run() {
 		return
 	}
 
-	// Prove the file is a usable model before it replaces anything.
-	if _, err := NewEmbeddingFaceProvider(part, d.minSize, d.minConf); err != nil {
-		d.fail(fmt.Errorf("the downloaded file is not a usable model: %w", err))
-		return
+	// Verify before installing.
+	if d.verify != nil {
+		if err := d.verify(part); err != nil {
+			d.fail(fmt.Errorf("the downloaded file is not a usable model: %w", err))
+			return
+		}
 	}
 	if err := os.Rename(part, d.path); err != nil {
-		d.fail(err)
-		return
-	}
-	prov, err := NewEmbeddingFaceProvider(d.path, d.minSize, d.minConf)
-	if err != nil {
 		d.fail(err)
 		return
 	}
 	d.mu.Lock()
 	d.state = ModelDone
 	d.mu.Unlock()
-	d.logger.Info("face recognition model installed", "path", d.path)
+	d.logger.Info("model installed", "path", d.path)
 	if d.onReady != nil {
-		d.onReady(prov)
+		d.onReady(d.path)
 	}
 }
 

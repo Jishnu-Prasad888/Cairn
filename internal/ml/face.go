@@ -25,6 +25,12 @@ type FaceBox struct {
 	Width      int
 	Height     int
 	Confidence float64 // normalized detector score, 0..1
+
+	// Landmarks holds the 5-point facial landmarks returned by SCRFD:
+	// [0]=left_eye, [1]=right_eye, [2]=nose, [3]=left_mouth, [4]=right_mouth,
+	// each as (x, y) in source-image pixels. Zero when the detector does not
+	// provide landmarks (e.g. the legacy pigo provider).
+	Landmarks [5][2]float32
 }
 
 // FaceProvider computes face detections and per-face descriptors for images.

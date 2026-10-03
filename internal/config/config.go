@@ -111,20 +111,29 @@ type Config struct {
 	// that same raw threshold.
 	MLFaceMinConfidence float64
 
-	// MLFaceMinSize is the smallest detection window in pixels.
+	// MLFaceMinSize is the smallest face (width and height, source pixels) kept.
 	MLFaceMinSize int
 
 	// MLFaceThreshold is the minimum cosine similarity (0..1) for an
 	// unassigned face to join an existing person during clustering.
 	MLFaceThreshold float64
 
-	// MLFaceModel is the path of the ONNX face-recognition model. When the
-	// file exists, faces are matched with its embeddings; otherwise the
-	// built-in appearance descriptor is used.
+	// MLFaceModel is the path of the ONNX face-recognition (ArcFace) model. When the
+	// file exists, faces are matched with its embeddings; otherwise face
+	// recognition is unavailable until the model is downloaded.
 	MLFaceModel string
 
-	// MLFaceModelURL is where the model is downloaded from on request.
+	// MLFaceModelURL is where the ArcFace recognizer model is downloaded from on request.
 	MLFaceModelURL string
+
+	// MLFaceDetectorModel is the path of the SCRFD ONNX face-detector model.
+	// When both this and MLFaceModel are present, the SCRFD+ArcFace pipeline
+	// is used. When absent, face recognition is unavailable until the model
+	// is downloaded.
+	MLFaceDetectorModel string
+
+	// MLFaceDetectorURL is where the SCRFD detector model is downloaded from on request.
+	MLFaceDetectorURL string
 }
 
 // Load builds a Config from the process environment and platform defaults.
@@ -153,10 +162,12 @@ func Load() Config {
 		MLFaces:               envOrDefaultBool("ML_FACES", false),
 		MLFaceWorkers:         envOrDefaultInt("ML_FACE_WORKERS", 2),
 		MLFaceMinConfidence:   envOrDefaultFloat("ML_FACE_MIN_CONFIDENCE", 0.05),
-		MLFaceMinSize:         envOrDefaultInt("ML_FACE_MIN_SIZE", 60),
+		MLFaceMinSize:         envOrDefaultInt("ML_FACE_MIN_SIZE", 48),
 		MLFaceThreshold:       envOrDefaultFloat("ML_FACE_THRESHOLD", 0),
 		MLFaceModel:           envOrDefault("ML_FACE_MODEL", ""),
 		MLFaceModelURL:        envOrDefault("ML_FACE_MODEL_URL", ""),
+		MLFaceDetectorModel:   envOrDefault("ML_FACE_DETECTOR_MODEL", ""),
+		MLFaceDetectorURL:     envOrDefault("ML_FACE_DETECTOR_URL", ""),
 	}
 }
 

@@ -30,3 +30,6 @@ vendor/
 # Developer scratch
 # Python bytecode artifacts
 __pycache__/
+dev ntoes/
+todos/
+package-lock.json
