@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -44,8 +45,31 @@ var ErrFacesDisabled = errors.New("local face recognition is disabled")
 type FaceManager struct {
 	logger   *slog.Logger
 	cfg      FaceConfig
-	provider FaceProvider
+	provider FaceProvider // guarded by mu: swapped when the model is downloaded
+	mu       sync.RWMutex
 	enabled  atomic.Bool
+	// threshold holds the clustering similarity as float64 bits so an
+	// administrator can change it while passes are running.
+	threshold atomic.Uint64
+	// defaultThreshold is the provider's own default (reset target).
+	defaultThreshold float64
+	// customThreshold is set once an administrator (or the environment) chose one.
+	customThreshold atomic.Bool
+}
+
+// Threshold is the cosine similarity at which a face joins an existing person.
+func (m *FaceManager) Threshold() float64 { return math.Float64frombits(m.threshold.Load()) }
+
+// DefaultThreshold is the provider's recommended threshold.
+func (m *FaceManager) DefaultThreshold() float64 { return m.defaultThreshold }
+
+// SetThreshold changes the clustering similarity; 0 restores the default.
+func (m *FaceManager) SetThreshold(v float64) {
+	m.customThreshold.Store(v > 0)
+	if v <= 0 {
+		v = m.defaultThreshold
+	}
+	m.threshold.Store(math.Float64bits(v))
 }
 
 // NewFaceManager returns a face manager using provider (defaults to the
@@ -60,16 +84,25 @@ func NewFaceManager(logger *slog.Logger, cfg FaceConfig, provider FaceProvider) 
 	if cfg.MinSize <= 0 {
 		cfg.MinSize = DefaultFaceMinSize
 	}
-	if cfg.Threshold <= 0 || cfg.Threshold > 1 {
-		cfg.Threshold = DefaultFaceThreshold
-	}
 	if provider == nil {
 		provider = NewPigoFaceProvider(cfg.MinSize, cfg.MinConfidence)
-	} else if p, ok := provider.(*PigoFaceProvider); ok {
-		p.MinSize = cfg.MinSize
-		p.MinConfidence = cfg.MinConfidence
+	} else if p, ok := provider.(interface{ setDetection(int, float64) }); ok {
+		p.setDetection(cfg.MinSize, cfg.MinConfidence)
 	}
-	m := &FaceManager{logger: logger, cfg: cfg, provider: provider}
+	configThresholdSet := cfg.Threshold > 0 && cfg.Threshold <= 1
+	if !configThresholdSet {
+		// Each provider's descriptors have their own similarity scale.
+		cfg.Threshold = DefaultFaceThreshold
+		if d, ok := provider.(interface{ DefaultThreshold() float64 }); ok {
+			cfg.Threshold = d.DefaultThreshold()
+		}
+	}
+	m := &FaceManager{logger: logger, cfg: cfg, provider: provider, defaultThreshold: DefaultFaceThreshold}
+	if d, ok := provider.(interface{ DefaultThreshold() float64 }); ok {
+		m.defaultThreshold = d.DefaultThreshold()
+	}
+	m.threshold.Store(math.Float64bits(cfg.Threshold))
+	m.customThreshold.Store(configThresholdSet)
 	m.enabled.Store(cfg.Enabled)
 	return m
 }
@@ -81,10 +114,10 @@ func (m *FaceManager) Enabled() bool { return m.enabled.Load() }
 func (m *FaceManager) SetEnabled(on bool) { m.enabled.Store(on) }
 
 // ProviderName returns the active face provider identifier.
-func (m *FaceManager) ProviderName() string { return m.provider.Name() }
+func (m *FaceManager) ProviderName() string { return m.prov().Name() }
 
 // ProviderVersion returns the active face provider's algorithm version.
-func (m *FaceManager) ProviderVersion() int { return m.provider.Version() }
+func (m *FaceManager) ProviderVersion() int { return m.prov().Version() }
 
 // FaceStatus describes the current face state for a library.
 type FaceStatus struct {
@@ -100,8 +133,8 @@ type FaceStatus struct {
 func (m *FaceManager) Status(ctx context.Context, root string) (*FaceStatus, error) {
 	st := &FaceStatus{
 		Enabled:         m.Enabled(),
-		Provider:        m.provider.Name(),
-		ProviderVersion: m.provider.Version(),
+		Provider:        m.prov().Name(),
+		ProviderVersion: m.prov().Version(),
 	}
 	if !st.Enabled {
 		return st, nil
@@ -142,7 +175,15 @@ func (m *FaceManager) Pass(ctx context.Context, root string) (int, error) {
 	defer func() { _ = db.Close() }()
 	store := NewFaceStore(db.DB())
 
-	files, err := store.FilesToScan(ctx, m.provider.Name(), m.provider.Version())
+	prov := m.prov()
+	if n, err := store.PurgeStaleFaces(ctx, prov.Name(), prov.Version()); err != nil {
+		return 0, err
+	} else if n > 0 {
+		m.logger.Info("discarded faces from a previous recognition algorithm",
+			"faces", n, "provider", prov.Name(), "version", prov.Version())
+	}
+
+	files, err := store.FilesToScan(ctx, prov.Name(), prov.Version())
 	if err != nil {
 		return 0, err
 	}
@@ -203,12 +244,13 @@ func (m *FaceManager) scanFile(ctx context.Context, store *FaceStore, root strin
 	if err != nil {
 		return err
 	}
-	boxes, err := m.provider.Detect(img)
+	prov := m.prov()
+	boxes, err := prov.Detect(img)
 	if err != nil {
 		return err
 	}
 	for _, box := range boxes {
-		desc, err := m.provider.Embed(img, box)
+		desc, err := prov.Embed(img, box)
 		if err != nil {
 			return err
 		}
@@ -219,8 +261,8 @@ func (m *FaceManager) scanFile(ctx context.Context, store *FaceStore, root strin
 		if err := store.InsertFace(ctx, FaceRecord{
 			ID:         id,
 			FileID:     uf.FileID,
-			Provider:   m.provider.Name(),
-			Version:    m.provider.Version(),
+			Provider:   prov.Name(),
+			Version:    prov.Version(),
 			Box:        box,
 			Descriptor: desc,
 		}); err != nil {
@@ -270,21 +312,43 @@ func (m *FaceManager) ClusterPass(ctx context.Context, root string) (*FaceCluste
 		return nil, err
 	}
 
+	exemplars, err := store.PersonExemplars(ctx, maxExemplars)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(means))
+	for pid := range means {
+		counts[pid] = 1
+	}
+	threshold := m.Threshold()
 	res := &FaceClusterResult{Inspected: len(unassigned)}
 	next := peopleCount + 1
 	for _, f := range unassigned {
 		var bestID string
 		bestSim := float64(0)
 		for pid, mean := range means {
-			if sim := DescriptorCosine(f.Descriptor, mean); sim > bestSim {
+			if sim := matchScore(f.Descriptor, mean, exemplars[pid]); sim > bestSim {
 				bestSim = sim
 				bestID = pid
 			}
 		}
-		if bestID != "" && bestSim >= m.cfg.Threshold {
+		if bestID != "" && bestSim >= threshold {
 			if err := store.AssignPerson(ctx, bestID, f.ID, "auto"); err != nil {
 				return res, err
 			}
+			// Let the person's centroid follow its members, so a later face is
+			// compared with everyone already grouped, not just the first.
+			w := float32(min(counts[bestID], 20))
+			mean := means[bestID]
+			upd := make([]float32, len(mean))
+			for i := range mean {
+				upd[i] = mean[i]*w + f.Descriptor[i]
+			}
+			means[bestID] = l2Normalize(upd)
+			if len(exemplars[bestID]) < maxExemplars {
+				exemplars[bestID] = append(exemplars[bestID], Exemplar{Descriptor: f.Descriptor})
+			}
+			counts[bestID]++
 			res.Assigned++
 		} else {
 			name := fmt.Sprintf("Person %d", next)
@@ -300,6 +364,8 @@ func (m *FaceManager) ClusterPass(ctx context.Context, root string) (*FaceCluste
 				return res, err
 			}
 			means[p.ID] = f.Descriptor
+			exemplars[p.ID] = []Exemplar{{Descriptor: f.Descriptor}}
+			counts[p.ID] = 1
 			res.Created++
 		}
 	}
@@ -428,16 +494,63 @@ func (m *FaceManager) DeletePerson(ctx context.Context, root, personID string) e
 }
 
 // MergePerson folds source into keep (used for consolidating duplicates).
-func (m *FaceManager) MergePerson(ctx context.Context, root, keepID, sourceID string) error {
+func (m *FaceManager) MergePerson(ctx context.Context, root, keepID, sourceID string) (consolidated int, err error) {
 	if !m.Enabled() {
-		return ErrFacesDisabled
+		return 0, ErrFacesDisabled
 	}
 	db, err := openLibraryDB(root)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = db.Close() }()
-	return NewFaceStore(db.DB()).Merge(ctx, keepID, sourceID)
+	store := NewFaceStore(db.DB())
+	// A hand merge is the user saying "these are the same person".
+	if err := store.MergeAs(ctx, keepID, sourceID, "manual"); err != nil {
+		return 0, err
+	}
+	n, err := m.consolidate(ctx, store, keepID)
+	if err != nil {
+		// The merge itself succeeded; the sweep is a bonus.
+		m.logger.Warn("face consolidation after merge", "error", err)
+	}
+	return n, nil
+}
+
+// consolidate folds into keepID every untouched automatic group ("Person N")
+// that looks like it: its faces match the merged person's faces at least as
+// well as a new face would have to. People with a name, or any face a human
+// assigned, are never merged automatically.
+func (m *FaceManager) consolidate(ctx context.Context, store *FaceStore, keepID string) (int, error) {
+	ex, err := store.PersonExemplars(ctx, maxExemplars)
+	if err != nil {
+		return 0, err
+	}
+	auto, err := store.AutoNamedPeople(ctx)
+	if err != nil {
+		return 0, err
+	}
+	threshold := m.Threshold()
+	merged := 0
+	for pid, set := range ex {
+		if pid == keepID || !auto[pid] {
+			continue
+		}
+		keep := ex[keepID]
+		if len(keep) == 0 {
+			break
+		}
+		if groupSimilarity(set, keep) >= threshold {
+			if err := store.MergeAs(ctx, keepID, pid, "auto"); err != nil {
+				return merged, err
+			}
+			ex[keepID] = append(ex[keepID], set...)
+			if len(ex[keepID]) > maxExemplars {
+				ex[keepID] = ex[keepID][:maxExemplars]
+			}
+			merged++
+		}
+	}
+	return merged, nil
 }
 
 // AssignFace manually attaches a face to a person.
@@ -483,4 +596,86 @@ func (m *FaceManager) Purge(ctx context.Context, root string) (int, error) {
 	}
 	m.logger.Info("face data purged", "count", n)
 	return n, nil
+}
+
+// UsesEmbeddings reports whether people are matched with the learned
+// recognition model (true) or the basic appearance fallback (false).
+func (m *FaceManager) UsesEmbeddings() bool {
+	_, ok := m.prov().(*EmbeddingFaceProvider)
+	return ok
+}
+
+func (m *FaceManager) prov() FaceProvider {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.provider
+}
+
+// SetProvider swaps the recognition algorithm at runtime (the model finished
+// downloading). Faces made by the old one are discarded by the next pass. The
+// clustering threshold follows the new provider unless an administrator set one.
+func (m *FaceManager) SetProvider(p FaceProvider) {
+	m.mu.Lock()
+	m.provider = p
+	m.mu.Unlock()
+	m.defaultThreshold = DefaultFaceThreshold
+	if d, ok := p.(interface{ DefaultThreshold() float64 }); ok {
+		m.defaultThreshold = d.DefaultThreshold()
+	}
+	if !m.customThreshold.Load() {
+		m.threshold.Store(math.Float64bits(m.defaultThreshold))
+	}
+}
+
+// maxExemplars bounds how many faces of one person are compared against.
+const maxExemplars = 40
+
+// matchScore rates how well a face fits a person: the better of its similarity
+// to the person's average and the mean of its two best matches among their
+// individual faces. Two supporting faces are required (when the person has two)
+// so a single odd photo cannot pull strangers in.
+func matchScore(desc, centroid []float32, ex []Exemplar) float64 {
+	best := DescriptorCosine(desc, centroid)
+	var top1, top2 float64 = -2, -2
+	for _, e := range ex {
+		sim := DescriptorCosine(desc, e.Descriptor)
+		if sim > top1 {
+			top1, top2 = sim, top1
+		} else if sim > top2 {
+			top2 = sim
+		}
+	}
+	var viaFaces float64
+	switch {
+	case top1 <= -2:
+		return best
+	case top2 <= -2:
+		viaFaces = top1
+	default:
+		viaFaces = (top1 + top2) / 2
+	}
+	return math.Max(best, viaFaces)
+}
+
+// groupSimilarity rates two groups of faces against each other: the mean of the
+// two strongest cross-group pairs.
+func groupSimilarity(a, b []Exemplar) float64 {
+	var top1, top2 float64 = -2, -2
+	for _, x := range a {
+		for _, y := range b {
+			sim := DescriptorCosine(x.Descriptor, y.Descriptor)
+			if sim > top1 {
+				top1, top2 = sim, top1
+			} else if sim > top2 {
+				top2 = sim
+			}
+		}
+	}
+	switch {
+	case top1 <= -2:
+		return -1
+	case top2 <= -2:
+		return top1
+	}
+	return (top1 + top2) / 2
 }

@@ -117,6 +117,14 @@ type Config struct {
 	// MLFaceThreshold is the minimum cosine similarity (0..1) for an
 	// unassigned face to join an existing person during clustering.
 	MLFaceThreshold float64
+
+	// MLFaceModel is the path of the ONNX face-recognition model. When the
+	// file exists, faces are matched with its embeddings; otherwise the
+	// built-in appearance descriptor is used.
+	MLFaceModel string
+
+	// MLFaceModelURL is where the model is downloaded from on request.
+	MLFaceModelURL string
 }
 
 // Load builds a Config from the process environment and platform defaults.
@@ -146,7 +154,9 @@ func Load() Config {
 		MLFaceWorkers:         envOrDefaultInt("ML_FACE_WORKERS", 2),
 		MLFaceMinConfidence:   envOrDefaultFloat("ML_FACE_MIN_CONFIDENCE", 0.05),
 		MLFaceMinSize:         envOrDefaultInt("ML_FACE_MIN_SIZE", 60),
-		MLFaceThreshold:       envOrDefaultFloat("ML_FACE_THRESHOLD", 0.82),
+		MLFaceThreshold:       envOrDefaultFloat("ML_FACE_THRESHOLD", 0),
+		MLFaceModel:           envOrDefault("ML_FACE_MODEL", ""),
+		MLFaceModelURL:        envOrDefault("ML_FACE_MODEL_URL", ""),
 	}
 }
 

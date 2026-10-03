@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -134,16 +135,36 @@ func run() error {
 		Workers:           cfg.MLWorkers,
 		DistanceThreshold: cfg.MLDistanceThreshold,
 	}, ml.AverageHashProvider{})
+	modelPath := cfg.MLFaceModel
+	if modelPath == "" {
+		modelPath = filepath.Join(cfg.DataDir, "models", "face-recognition.onnx")
+	}
+	var faceProvider ml.FaceProvider
+	if _, err := os.Stat(modelPath); err == nil {
+		ep, err := ml.NewEmbeddingFaceProvider(modelPath, cfg.MLFaceMinSize, cfg.MLFaceMinConfidence)
+		if err != nil {
+			logger.Error("face recognition model unusable; using the basic appearance matcher", "error", err)
+		} else {
+			faceProvider = ep
+			logger.Info("face recognition model loaded", "path", modelPath)
+		}
+	} else {
+		logger.Warn("no face recognition model; the app offers to download it", "expected", modelPath)
+	}
 	faces := ml.NewFaceManager(logger, ml.FaceConfig{
 		Enabled:       cfg.MLEnabled,
 		Workers:       cfg.MLFaceWorkers,
 		MinConfidence: cfg.MLFaceMinConfidence,
 		MinSize:       cfg.MLFaceMinSize,
 		Threshold:     cfg.MLFaceThreshold,
-	}, nil)
+	}, faceProvider)
 	// The master switch is an administrator setting stored in the server
 	// database (Machine learning page); CAIRN_ML_ENABLED is only its default.
-	mlRuntime := ml.NewRuntime(pool, logger, mlManager, faces, cfg.MLSimilarity,
+	var mlRuntime *ml.Runtime
+	faceModel := ml.NewModelDownloader(logger, modelPath, cfg.MLFaceModelURL,
+		cfg.MLFaceMinSize, cfg.MLFaceMinConfidence,
+		func(p *ml.EmbeddingFaceProvider) { mlRuntime.ModelReady(p) })
+	mlRuntime = ml.NewRuntime(pool, logger, mlManager, faces, cfg.MLSimilarity,
 		func(ctx context.Context) ([]ml.Target, error) {
 			libs, err := libraries.List(ctx)
 			if err != nil {
@@ -192,6 +213,7 @@ func run() error {
 		ML:             mlManager,
 		Faces:          faces,
 		MLRuntime:      mlRuntime,
+		FaceModel:      faceModel,
 		Backups:        backupMgr,
 		Keys:           keys,
 		SecureCookies:  cfg.CookieSecure,
