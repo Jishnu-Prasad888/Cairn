@@ -15,6 +15,7 @@ import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'rea
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useLibraries } from '../../api/libraries';
+import { mlWorthAsking } from '../../api/mlSwitch';
 import { listAlbums, listPeople, listTags } from '../../api/queries';
 import { forgetSearch, readRecentSearches, rememberSearch } from '../../lib/recentSearches';
 import { Icon, type IconName } from '../ui/Icon';
@@ -82,9 +83,13 @@ export function SearchBox({
     if (!open || !libraryId || entities?.libraryId === libraryId) return;
     let cancelled = false;
     void Promise.all([
-      listPeople(libraryId)
-        .then((r) => r.people ?? [])
-        .catch(() => []),
+      mlWorthAsking().then((ask) =>
+        ask
+          ? listPeople(libraryId)
+              .then((r) => r.people ?? [])
+              .catch(() => [])
+          : [],
+      ),
       listAlbums(libraryId)
         .then((r) => r.albums ?? [])
         .catch(() => []),

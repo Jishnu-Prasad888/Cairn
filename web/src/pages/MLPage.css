@@ -77,3 +77,24 @@
 .ml-job {
   margin: 0;
 }
+
+.ml-threshold {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+  max-width: 28rem;
+}
+
+.ml-threshold-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 12px;
+}
+
+.settings-warning {
+  margin: 0 0 var(--space-3);
+  font-size: 12px;
+  color: var(--danger);
+}
