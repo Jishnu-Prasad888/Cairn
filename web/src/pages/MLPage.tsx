@@ -13,7 +13,7 @@
  * is rendered as an explanation rather than an error.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
 import { waitForFacePasses } from '../api/facePasses';
@@ -102,6 +102,14 @@ export default function MLPage() {
   );
   const [savingThreshold, setSavingThreshold] = useState(false);
   const [purging, setPurging] = useState<'similarity' | 'faces' | null>(null);
+  // Face-pass polling outlives the request that started it; stop it when the
+  // page goes away so it does not keep hitting the API.
+  const unmounted = useRef(new AbortController());
+  useEffect(() => {
+    const controller = new AbortController();
+    unmounted.current = controller;
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     getMLSettings().then(
@@ -126,7 +134,8 @@ export default function MLPage() {
         });
         setJob({ message: 'Matching threshold saved. Regrouping people…', error: null });
         if (gate.kind !== 'ready') return;
-        return waitForFacePasses(gate.libraryId).then(() => {
+        return waitForFacePasses(gate.libraryId, unmounted.current.signal).then(() => {
+          if (unmounted.current.signal.aborted) return;
           faces.reload();
           setJob({ message: 'Matching threshold saved and people regrouped.', error: null });
         });
@@ -165,7 +174,8 @@ export default function MLPage() {
         status.reload();
         // Face passes run in the background: refresh the counters once
         // they are done rather than showing a half-finished number.
-        await waitForFacePasses(gate.libraryId);
+        await waitForFacePasses(gate.libraryId, unmounted.current.signal);
+        if (unmounted.current.signal.aborted) return;
         faces.reload();
       })
       .catch((e: unknown) =>
