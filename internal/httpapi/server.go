@@ -30,6 +30,7 @@ type Server struct {
 	ml             *ml.Manager
 	faces          *ml.FaceManager
 	mlRuntime      *ml.Runtime
+	faceModel      *ml.ModelDownloader
 	backups        *backups.Manager
 	keys           *crypto.Keys
 	secureCookies  bool
@@ -69,6 +70,8 @@ type Dependencies struct {
 	Faces *ml.FaceManager
 	// MLRuntime is the administrator's ML on/off switch. May be nil.
 	MLRuntime *ml.Runtime
+	// FaceModel downloads the face-recognition model on request. May be nil.
+	FaceModel *ml.ModelDownloader
 	// Backups runs server and library backups. It may be nil, in which case
 	// the backup-management endpoints return SERVICE_UNAVAILABLE.
 	Backups *backups.Manager
@@ -105,6 +108,7 @@ func New(deps Dependencies) *Server {
 		ml:             deps.ML,
 		faces:          deps.Faces,
 		mlRuntime:      deps.MLRuntime,
+		faceModel:      deps.FaceModel,
 		backups:        deps.Backups,
 		keys:           deps.Keys,
 		secureCookies:  deps.SecureCookies,
@@ -146,6 +150,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.requireSession(s.handleLogout))
 	mux.Handle("GET /api/v1/auth/me", s.withAuth(allowAny, s.handleMe))
 
+	mux.Handle("GET /api/v1/system/capabilities", s.withAuth(allowAny, s.handleCapabilities))
+
 	// Per-user preferences.
 	mux.Handle("GET /api/v1/settings/memories", s.withAuth(allowAny, s.handleGetMemorySettings))
 	mux.Handle("PATCH /api/v1/settings/memories", s.withAuth(allowAny, s.handleUpdateMemorySettings))
@@ -179,6 +185,10 @@ func (s *Server) Handler() http.Handler {
 		if s.mlRuntime != nil {
 			mux.Handle("GET /api/v1/ml/settings", s.withAuth(allowAny, s.handleGetMLSettings))
 			mux.Handle("PUT /api/v1/ml/settings", s.withAuth(allowAdmin, s.handlePutMLSettings))
+			if s.faceModel != nil {
+				mux.Handle("GET /api/v1/ml/model", s.withAuth(allowAdmin, s.handleGetFaceModel))
+				mux.Handle("POST /api/v1/ml/model/download", s.withAuth(allowAdmin, s.handleDownloadFaceModel))
+			}
 		}
 		if s.ml != nil {
 			mux.Handle("GET /api/v1/libraries/{id}/ml", s.withAuth(allowAdmin, s.handleMLStatus))

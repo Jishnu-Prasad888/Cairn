@@ -17,6 +17,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/authContext';
 import { ApiError } from '../api/client';
 import { useLibraryGate } from '../api/libraries';
+import { mlWorthAsking } from '../api/mlSwitch';
 import { useLibraryResource } from '../api/resources';
 import {
   assignFace,
@@ -64,6 +65,23 @@ interface PeopleData {
 
 async function loadPeople(libraryId: string): Promise<PeopleData> {
   let status: FaceStatus;
+  // ML off: the routes would answer 503 (logged by the browser as an error),
+  // and the answer is already known.
+  if (!(await mlWorthAsking())) {
+    return {
+      status: {
+        enabled: false,
+        provider: '',
+        provider_version: 0,
+        faces: 0,
+        people: 0,
+        unassigned: 0,
+      },
+      people: [],
+      unassigned: [],
+      unsupported: false,
+    };
+  }
   try {
     status = await getFaceStatus(libraryId);
   } catch (e: unknown) {
@@ -106,6 +124,11 @@ async function loadPeople(libraryId: string): Promise<PeopleData> {
   };
 }
 
+/** Drag payload type: one person's card, dropped on another to merge them. */
+const PERSON_DRAG = 'application/x-cairn-person';
+/** Which person is being dragged (dataTransfer contents are unreadable mid-drag). */
+const dragging: { current: string | null } = { current: null };
+
 interface PersonCardProps {
   libraryId: string;
   person: Person;
@@ -113,6 +136,8 @@ interface PersonCardProps {
   onToggle: () => void;
   onRename: () => void;
   onMerge: () => void;
+  /** Another person's card was dropped on this one. */
+  onDropPerson: (sourceId: string) => void;
   onDelete: () => void;
   onUnassign: (faceId: string) => void;
   onSetCover: (faceId: string) => void;
@@ -125,10 +150,12 @@ function PersonCard({
   onToggle,
   onRename,
   onMerge,
+  onDropPerson,
   onDelete,
   onUnassign,
   onSetCover,
 }: PersonCardProps) {
+  const [dropActive, setDropActive] = useState(false);
   // A person's faces are only fetched when their card is open, so a library with
   // thousands of people does not fetch thousands of image lists. The result is
   // tagged with the person it belongs to, which keeps a re-opened card from
@@ -164,14 +191,47 @@ function PersonCard({
   const label = person.name || 'Unnamed person';
 
   return (
-    <article className="person-card" data-testid={`person-${person.id}`}>
+    <article
+      className={dropActive ? 'person-card is-drop-target' : 'person-card'}
+      data-testid={`person-${person.id}`}
+      draggable
+      onDragStart={(e) => {
+        dragging.current = person.id;
+        e.dataTransfer.setData(PERSON_DRAG, person.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onDragOver={(e) => {
+        // Only another person's card can be dropped here, never onto itself.
+        if (!e.dataTransfer.types.includes(PERSON_DRAG) || dragging.current === person.id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDropActive(true);
+      }}
+      onDragEnd={() => {
+        dragging.current = null;
+      }}
+      onDragLeave={() => setDropActive(false)}
+      onDrop={(e) => {
+        setDropActive(false);
+        const source = e.dataTransfer.getData(PERSON_DRAG);
+        if (!source || source === person.id) return;
+        e.preventDefault();
+        onDropPerson(source);
+      }}
+    >
       <Link
         to={`/search?person=${person.id}`}
+        draggable={false}
         className="person-face"
         aria-label={`${label}, ${person.face_count} ${person.face_count === 1 ? 'photo' : 'photos'}`}
       >
         {person.cover_face_id ? (
-          <img src={faceImageUrl(libraryId, person.cover_face_id)} alt="" loading="lazy" />
+          <img
+            src={faceImageUrl(libraryId, person.cover_face_id)}
+            alt=""
+            loading="lazy"
+            draggable={false}
+          />
         ) : (
           <span className="person-face-fallback" aria-hidden="true">
             {person.name ? person.name.slice(0, 1).toUpperCase() : <Icon name="person" size={32} />}
@@ -284,6 +344,9 @@ export default function PeoplePage() {
   const [mergingBusy, setMergingBusy] = useState(false);
   const [mergingError, setMergingError] = useState<string | null>(null);
 
+  // A card dropped on another: ask once, then merge into the one it landed on.
+  const [dropMerge, setDropMerge] = useState<{ source: Person; target: Person } | null>(null);
+
   const [deleting, setDeleting] = useState<Person | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [deletingError, setDeletingError] = useState<string | null>(null);
@@ -357,6 +420,30 @@ export default function PeoplePage() {
         toast({ message: `Merged ${merging.name} into the person you chose.`, tone: 'success' });
         setMerging(null);
         setMergeTarget('');
+        data.reload();
+      })
+      .catch((e: unknown) => setMergingError(message(e)))
+      .finally(() => setMergingBusy(false));
+  };
+
+  const confirmDropMerge = () => {
+    if (!dropMerge || !libraryId) return;
+    const { source, target } = dropMerge;
+    setMergingBusy(true);
+    setMergingError(null);
+    mergePeople(libraryId, target.id, source.id)
+      .then((r) => {
+        const joined = r.consolidated ?? 0;
+        toast({
+          message:
+            `Merged ${source.name || 'the group'} into ${target.name || 'the group'}.` +
+            (joined > 0
+              ? ` ${joined} similar ${joined === 1 ? 'group was' : 'groups were'} joined too.`
+              : '') +
+            ' Cairn will use both when recognising them.',
+          tone: 'success',
+        });
+        setDropMerge(null);
         data.reload();
       })
       .catch((e: unknown) => setMergingError(message(e)))
@@ -585,6 +672,12 @@ export default function PeoplePage() {
                       setMergeTarget('');
                       setMerging(person);
                     }}
+                    onDropPerson={(sourceId) => {
+                      const source = people.find((p) => p.id === sourceId);
+                      if (!source || source.id === person.id) return;
+                      setMergingError(null);
+                      setDropMerge({ source, target: person });
+                    }}
                     onDelete={() => {
                       setDeletingError(null);
                       setDeleting(person);
@@ -646,6 +739,25 @@ export default function PeoplePage() {
         onCancel={() => setRenaming(null)}
         onConfirm={submitRename}
         testId="rename-person-dialog"
+      />
+
+      <ConfirmDialog
+        open={dropMerge !== null}
+        title="Are these the same person?"
+        confirmLabel="Yes, merge"
+        busy={mergingBusy}
+        error={mergingError}
+        message={
+          <p>
+            Merge <strong>{dropMerge?.source.name || 'this group'}</strong> into{' '}
+            <strong>{dropMerge?.target.name || 'this group'}</strong>? Cairn will treat them as one
+            person from now on, use both sets of photos to recognise them, and join any other
+            unnamed group that looks like them. This cannot be undone.
+          </p>
+        }
+        onCancel={() => setDropMerge(null)}
+        onConfirm={confirmDropMerge}
+        testId="drop-merge-dialog"
       />
 
       <Dialog

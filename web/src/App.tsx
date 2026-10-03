@@ -1,10 +1,11 @@
-import { Suspense, lazy } from 'react';
+import { Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import RequireAuth from './auth/RequireAuth';
 import { LibrariesProvider } from './api/libraries';
 import AppShell from './components/app-shell/AppShell';
 import { ToastProvider } from './components/ui/Toast';
+import { lazyPage } from './lib/lazyPage';
 import { UploadProvider } from './components/upload/UploadProvider';
 import AlbumsPage from './pages/AlbumsPage';
 import FavoritesPage from './pages/FavoritesPage';
@@ -19,17 +20,17 @@ import TrashPage from './pages/TrashPage';
 import VideosPage from './pages/VideosPage';
 
 /* Pages most visits never touch load on demand, keeping the first load small. */
-const BackupsPage = lazy(() => import('./pages/BackupsPage'));
-const DuplicatesPage = lazy(() => import('./pages/DuplicatesPage'));
-const LibrariesPage = lazy(() => import('./pages/LibrariesPage'));
-const MLPage = lazy(() => import('./pages/MLPage'));
-const PermissionsPage = lazy(() => import('./pages/PermissionsPage'));
-const SharingPage = lazy(() => import('./pages/SharingPage'));
-const TagsPage = lazy(() => import('./pages/TagsPage'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage'));
-const MemoriesPage = lazy(() => import('./pages/MemoriesPage'));
-const PeoplePage = lazy(() => import('./pages/PeoplePage'));
-const PublicSharePage = lazy(() => import('./pages/PublicSharePage'));
+const BackupsPage = lazyPage(() => import('./pages/BackupsPage'));
+const DuplicatesPage = lazyPage(() => import('./pages/DuplicatesPage'));
+const LibrariesPage = lazyPage(() => import('./pages/LibrariesPage'));
+const MLPage = lazyPage(() => import('./pages/MLPage'));
+const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'));
+const SharingPage = lazyPage(() => import('./pages/SharingPage'));
+const TagsPage = lazyPage(() => import('./pages/TagsPage'));
+const SettingsPage = lazyPage(() => import('./pages/SettingsPage'));
+const MemoriesPage = lazyPage(() => import('./pages/MemoriesPage'));
+const PeoplePage = lazyPage(() => import('./pages/PeoplePage'));
+const PublicSharePage = lazyPage(() => import('./pages/PublicSharePage'));
 
 /**
  * `/media?type=…` was the unified browser before Photos, Videos, and Files

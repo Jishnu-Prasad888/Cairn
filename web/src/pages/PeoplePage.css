@@ -139,3 +139,13 @@
   margin: 0;
   color: var(--color-text-secondary);
 }
+
+.person-card[draggable='true'] {
+  cursor: grab;
+}
+
+.person-card.is-drop-target .person-face {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+  transform: scale(1.06);
+}

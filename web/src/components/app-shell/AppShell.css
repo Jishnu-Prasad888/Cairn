@@ -515,3 +515,40 @@
     transform: translateX(1px) scale(1.06);
   }
 }
+
+.model-progress {
+  height: 8px;
+  margin: var(--space-3) 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+
+.model-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 300ms ease;
+}
+
+.model-progress-bar.indeterminate {
+  width: 40%;
+  animation: model-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes model-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-progress-bar.indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
