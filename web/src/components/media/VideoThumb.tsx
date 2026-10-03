@@ -167,7 +167,18 @@ function VideoThumbInner({ libraryId, fileId, className, onReady }: Props) {
   }, [phase, libraryId, fileId]);
 
   if (phase === 'capturing' || phase === 'none') {
-    return <span className={`video-thumb-empty ${className ?? ''}`} aria-hidden="true" />;
+    // Capturing is "processing": the preview is being drawn. 'none' means the
+    // browser cannot decode this video (e.g. HEVC) and the server has no ffmpeg.
+    const processing = phase === 'capturing';
+    return (
+      <span
+        className={`video-thumb-empty ${className ?? ''}`}
+        role="status"
+        title={processing ? 'Processing preview…' : 'No preview available'}
+      >
+        <span className="video-thumb-hint">{processing ? 'Processing…' : 'No preview'}</span>
+      </span>
+    );
   }
   return (
     <img

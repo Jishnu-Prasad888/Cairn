@@ -17,12 +17,14 @@
  * S slideshow, I (or T) details, H hide controls, Esc close.
  */
 
+import { Maximize, Minimize, X } from 'lucide-react';
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 
 import { addFavorite, getFileMetadata, listFavorites, removeFavorite } from '../api/queries';
 import type { FileMetadata, FileSummary } from '../api/types';
 import { formatDateTime } from '../lib/dates';
 import { useFocusTrap } from '../lib/focusTrap';
+import { VideoScrubPreview } from './viewer/VideoScrubPreview';
 import { FileNote } from './FileNote';
 import { downloadUrl, thumbnailUrl, mediaTypeIcon } from './media';
 import { Icon, type IconName } from './ui/Icon';
@@ -67,8 +69,57 @@ const PANEL_TABS: Array<{ id: PanelTab; label: string }> = [
 ];
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 8;
+const PAN_KEY_PX = 80;
+
+/** Zoom level and where the photo is shifted to (in stage pixels). */
+interface View {
+  z: number;
+  x: number;
+  y: number;
+}
+const FIT: View = { z: 1, x: 0, y: 0 };
+
+/** Keep the zoomed photo covering the stage: no panning into empty space. */
+function clampView(v: View, stage: HTMLElement | null, img: HTMLImageElement | null): View {
+  if (v.z <= MIN_ZOOM || !stage) return FIT;
+  const sw = stage.clientWidth;
+  const sh = stage.clientHeight;
+  const nw = img?.naturalWidth || sw;
+  const nh = img?.naturalHeight || sh;
+  const fit = Math.min(sw / nw, sh / nh);
+  if (!(fit > 0)) return { z: v.z, x: 0, y: 0 }; // not laid out yet
+  const mx = Math.max(0, (nw * fit * v.z - sw) / 2);
+  const my = Math.max(0, (nh * fit * v.z - sh) / 2);
+  return { z: v.z, x: Math.min(mx, Math.max(-mx, v.x)), y: Math.min(my, Math.max(-my, v.y)) };
+}
+
+/** Change zoom, keeping the point under `anchor` (client coords) fixed. */
+function zoomView(
+  v: View,
+  z: number,
+  anchor: { x: number; y: number } | null,
+  stage: HTMLElement | null,
+  img: HTMLImageElement | null,
+): View {
+  const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+  if (nz === v.z) return v;
+  let ax = 0;
+  let ay = 0;
+  if (anchor && stage) {
+    const r = stage.getBoundingClientRect();
+    ax = anchor.x - (r.left + r.width / 2);
+    ay = anchor.y - (r.top + r.height / 2);
+  }
+  const k = nz / v.z;
+  return clampView({ z: nz, x: ax - (ax - v.x) * k, y: ay - (ay - v.y) * k }, stage, img);
+}
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 const SLIDESHOW_MS = 4000;
 const CHROME_IDLE_MS = 3500;
+/** In fullscreen, the pointer must reach this close to the top to show controls. */
+const TOP_REVEAL_PX = 90;
 const SWIPE_PX = 50;
 const NEAR_END = 3;
 
@@ -101,7 +152,12 @@ export function ViewerModal({
   onClose,
   onNearEnd,
 }: ViewerModalProps) {
-  const [zoom, setZoom] = useState(1);
+  const [view, setView] = useState<View>(FIT);
+  const zoom = view.z;
+  const [dragging, setDragging] = useState(false);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const dragRef = useRef<{ px: number; py: number; vx: number; vy: number } | null>(null);
   const [slideshowWanted, setSlideshowWanted] = useState(false);
   const [panelOpen, setPanelOpen] = useState(readPanelPreference);
   const [chromeHidden, setChromeHidden] = useState(false);
@@ -122,6 +178,14 @@ export function ViewerModal({
   // The same element, as state, for mounting the "More" menu inside the dialog.
   const [dialogEl, setDialogEl] = useState<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Chosen speed carries over to the next video while the viewer stays open.
+  const [speed, setSpeed] = useState(1);
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Height of the caption/filmstrip strip, so a video's own controls are never
+  // drawn underneath it.
+  const [bottomH, setBottomH] = useState(0);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
   const swipeRef = useRef<{ x: number; y: number } | null>(null);
 
   const index = siblings.findIndex((f) => f.id === file.id);
@@ -155,7 +219,7 @@ export function ViewerModal({
   const [prevFileId, setPrevFileId] = useState(file.id);
   if (prevFileId !== file.id) {
     setPrevFileId(file.id);
-    setZoom(1);
+    setView(FIT);
     setError(null);
   }
 
@@ -183,6 +247,21 @@ export function ViewerModal({
       void el.requestFullscreen?.().catch(() => undefined);
     }
   }, [dialogEl]);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  useEffect(() => {
+    const el = bottomRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setBottomH(el.offsetHeight));
+    ro.observe(el);
+    setBottomH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
 
   const togglePanel = useCallback(() => {
     setPanelOpen((open) => {
@@ -214,13 +293,25 @@ export function ViewerModal({
     };
   }, [armIdle, file.id]);
 
+  // One step along ZOOM_STEPS from wherever the continuous zoom currently is.
   const stepZoom = useCallback((direction: 1 | -1) => {
-    setZoom((current) => {
-      const pos = ZOOM_STEPS.indexOf(current);
-      if (pos === -1) return direction === 1 ? ZOOM_STEPS[1]! : ZOOM_STEPS[0]!;
-      const next = Math.min(ZOOM_STEPS.length - 1, Math.max(0, pos + direction));
-      return ZOOM_STEPS[next]!;
+    setView((v) => {
+      const target =
+        direction === 1
+          ? (ZOOM_STEPS.find((z) => z > v.z + 0.01) ?? MAX_ZOOM)
+          : ([...ZOOM_STEPS].reverse().find((z) => z < v.z - 0.01) ?? MIN_ZOOM);
+      return zoomView(v, target, null, stageRef.current, imgRef.current);
     });
+  }, []);
+
+  const resetView = useCallback(() => setView(FIT), []);
+
+  const panBy = useCallback((dx: number, dy: number) => {
+    setView((v) =>
+      v.z > MIN_ZOOM
+        ? clampView({ z: v.z, x: v.x + dx, y: v.y + dy }, stageRef.current, imgRef.current)
+        : v,
+    );
   }, []);
 
   const togglePlayback = useCallback(() => {
@@ -243,11 +334,39 @@ export function ViewerModal({
         !dialogRef.current?.contains(target)
       )
         return;
+      // Ctrl/Cmd +, - and 0 zoom a photo instead of the whole page.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && file.media_type === 'photo') {
+        if (e.key === '+' || e.key === '=') {
+          e.preventDefault();
+          stepZoom(1);
+          return;
+        }
+        if (e.key === '-' || e.key === '_') {
+          e.preventDefault();
+          stepZoom(-1);
+          return;
+        }
+        if (e.key === '0') {
+          e.preventDefault();
+          resetView();
+          return;
+        }
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // A zoomed photo is panned with the arrow keys; at fit they page.
+      if (zoom > MIN_ZOOM && file.media_type === 'photo' && e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        if (e.key === 'ArrowLeft') panBy(PAN_KEY_PX, 0);
+        else if (e.key === 'ArrowRight') panBy(-PAN_KEY_PX, 0);
+        else if (e.key === 'ArrowUp') panBy(0, PAN_KEY_PX);
+        else panBy(0, -PAN_KEY_PX);
+        return;
+      }
       switch (e.key) {
         case 'Escape':
           e.preventDefault();
-          close();
+          if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+          else close();
           break;
         case 'ArrowLeft':
           e.preventDefault();
@@ -268,7 +387,7 @@ export function ViewerModal({
           break;
         case '0':
           e.preventDefault();
-          setZoom(1);
+          resetView();
           break;
         case ' ':
           // Space on a focused button presses it; elsewhere it plays a video.
@@ -305,7 +424,19 @@ export function ViewerModal({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [close, goNext, goPrev, stepZoom, toggleFullscreen, togglePanel, togglePlayback]);
+  }, [
+    close,
+    file.media_type,
+    goNext,
+    goPrev,
+    panBy,
+    resetView,
+    stepZoom,
+    toggleFullscreen,
+    togglePanel,
+    togglePlayback,
+    zoom,
+  ]);
 
   // Slideshow: advance through the siblings and stop at the end rather than
   // looping behind the user's back. Whether it is running is derived, so
@@ -318,11 +449,63 @@ export function ViewerModal({
     return () => clearTimeout(timer);
   }, [slideshow, goNext]);
 
-  // Ctrl/Cmd + wheel zooms, matching the browser's own page-zoom gesture.
-  const onWheel = (e: React.WheelEvent) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    stepZoom(e.deltaY < 0 ? 1 : -1);
+  // Ctrl/Cmd + wheel (and a trackpad pinch, which arrives the same way) zooms
+  // toward the pointer; a plain wheel pans a zoomed photo. This needs a
+  // non-passive native listener, or the browser zooms the page instead.
+  useEffect(() => {
+    if (!dialogEl) return;
+    const onWheel = (e: WheelEvent) => {
+      const photo = file.media_type === 'photo';
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (!photo) return;
+        const unit = e.deltaMode === 1 ? 0.05 : 0.0025;
+        setView((v) =>
+          zoomView(
+            v,
+            v.z * Math.exp(-e.deltaY * unit),
+            { x: e.clientX, y: e.clientY },
+            stageRef.current,
+            imgRef.current,
+          ),
+        );
+      } else if (photo && stageRef.current?.contains(e.target as Node)) {
+        setView((v) => {
+          if (v.z <= MIN_ZOOM) return v;
+          e.preventDefault();
+          return clampView(
+            { z: v.z, x: v.x - e.deltaX, y: v.y - e.deltaY },
+            stageRef.current,
+            imgRef.current,
+          );
+        });
+      }
+    };
+    dialogEl.addEventListener('wheel', onWheel, { passive: false });
+    return () => dialogEl.removeEventListener('wheel', onWheel);
+  }, [dialogEl, file.media_type]);
+
+  // Drag to pan a zoomed photo (mouse, pen or finger).
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (zoom <= MIN_ZOOM || file.media_type !== 'photo' || e.button !== 0) return;
+    dragRef.current = { px: e.clientX, py: e.clientY, vx: view.x, vy: view.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    setView((v) =>
+      clampView(
+        { z: v.z, x: d.vx + e.clientX - d.px, y: d.vy + e.clientY - d.py },
+        stageRef.current,
+        imgRef.current,
+      ),
+    );
+  };
+  const endDrag = () => {
+    dragRef.current = null;
+    setDragging(false);
   };
 
   // On touch screens a horizontal swipe pages and a downward pull closes,
@@ -415,12 +598,15 @@ export function ViewerModal({
   const originalState = original?.id === file.id ? original.state : null;
   const originalShown = originalState === 'loaded' || originalState === 'failed';
 
-  // A CSS transform does not grow the layout box, so the edges of a scaled
-  // photo could never be scrolled to. Size the element itself once zoomed,
-  // and let the stage do the scrolling.
+  // Zoom and pan are one transform about the stage centre, so the photo can
+  // grow past 150% (a CSS width is shrunk back by the flex stage) and is
+  // clamped so it never leaves empty space.
   const mediaStyle: CSSProperties =
-    zoom > 1
-      ? { width: `${zoom * 100}%`, maxWidth: 'none', height: 'auto', maxHeight: 'none' }
+    zoom > 1 || dragging
+      ? {
+          transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${zoom})`,
+          transition: dragging ? 'none' : undefined,
+        }
       : {};
 
   const when = formatDateTime(metadata?.taken_at ?? file.mod_time);
@@ -516,7 +702,12 @@ export function ViewerModal({
           setDialogEl(el);
         }}
         onClick={(e) => e.stopPropagation()}
-        onMouseMove={revealChrome}
+        onMouseMove={(e) => {
+          // Fullscreen stays clean: only moving to the top edge brings the
+          // toolbar (and its close button) back.
+          if (isFullscreen && chromeHidden && e.clientY > TOP_REVEAL_PX) return;
+          revealChrome();
+        }}
         onTouchStart={revealChrome}
         onKeyDown={revealChrome}
       >
@@ -528,7 +719,7 @@ export function ViewerModal({
             aria-label="Close viewer"
             title="Close (Esc)"
           >
-            <Icon name="arrow-left" />
+            <X size={20} aria-hidden="true" />
           </button>
           <div className="viewer-title">
             <span className="viewer-title-name" title={file.rel_path}>
@@ -540,20 +731,54 @@ export function ViewerModal({
           </div>
 
           <div className="viewer-toolbar-actions">
+            <button
+              type="button"
+              className="viewer-tool"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+              title={isFullscreen ? 'Exit full screen (Esc)' : 'Full screen (F)'}
+            >
+              {isFullscreen ? (
+                <Minimize size={20} aria-hidden="true" />
+              ) : (
+                <Maximize size={20} aria-hidden="true" />
+              )}
+            </button>
+            {isVideo && (
+              <label className="viewer-tool-group viewer-speed">
+                <span className="visually-hidden">Playback speed</span>
+                <select
+                  value={speed}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setSpeed(next);
+                    if (videoRef.current) videoRef.current.playbackRate = next;
+                  }}
+                  aria-label="Playback speed"
+                  title="Playback speed"
+                >
+                  {SPEEDS.map((v) => (
+                    <option key={v} value={v}>
+                      {v}x
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {isPhoto && (
               <div className="viewer-tool-group viewer-zoom" role="group" aria-label="Zoom">
-                {tool('minus', 'Zoom out', () => stepZoom(-1), { disabled: zoom === 1 })}
+                {tool('minus', 'Zoom out', () => stepZoom(-1), { disabled: zoom <= MIN_ZOOM })}
                 <button
                   type="button"
                   className="viewer-tool viewer-tool-wide"
-                  onClick={() => setZoom(1)}
+                  onClick={resetView}
                   aria-label="Reset zoom"
                   title="Fit to window (0)"
                 >
                   {Math.round(zoom * 100)}%
                 </button>
                 {tool('plus', 'Zoom in', () => stepZoom(1), {
-                  disabled: zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1],
+                  disabled: zoom >= MAX_ZOOM,
                 })}
               </div>
             )}
@@ -611,14 +836,32 @@ export function ViewerModal({
         <div className="viewer-stage-wrap">
           <div
             className="viewer-stage"
-            onWheel={onWheel}
+            ref={stageRef}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            onDoubleClick={() => {
-              if (isPhoto) setZoom((z) => (z === 1 ? 2 : 1));
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onDoubleClick={(e) => {
+              if (!isPhoto) return;
+              setView((v) =>
+                v.z > MIN_ZOOM
+                  ? FIT
+                  : zoomView(
+                      v,
+                      2,
+                      { x: e.clientX, y: e.clientY },
+                      stageRef.current,
+                      imgRef.current,
+                    ),
+              );
             }}
             data-testid="viewer-stage"
             data-zoomed={zoom > 1}
+            data-dragging={dragging || undefined}
+            data-video={isVideo && !isFullscreen ? 'true' : undefined}
+            style={{ '--viewer-bottom-h': `${bottomH}px` } as CSSProperties}
           >
             {isPhoto ? (
               <>
@@ -634,6 +877,7 @@ export function ViewerModal({
                 )}
                 <img
                   key={file.id}
+                  ref={imgRef}
                   className={originalShown ? 'viewer-media' : 'viewer-media is-loading'}
                   // The thumbnail is far too small to fill a window; show the
                   // original, falling back to the preview for a format the
@@ -657,17 +901,26 @@ export function ViewerModal({
                 />
               </>
             ) : isVideo ? (
-              <video
-                key={file.id}
-                ref={videoRef}
-                className="viewer-media"
-                src={downloadUrl(libraryId, file)}
-                controls
-                autoPlay
-                playsInline
-                preload="metadata"
-                style={mediaStyle}
-              />
+              <>
+                <video
+                  key={file.id}
+                  ref={(el) => {
+                    videoRef.current = el;
+                    setVideoEl(el);
+                  }}
+                  className="viewer-media"
+                  src={downloadUrl(libraryId, file)}
+                  controls
+                  autoPlay
+                  onLoadedMetadata={(e) => {
+                    e.currentTarget.playbackRate = speed;
+                  }}
+                  playsInline
+                  preload="metadata"
+                  style={mediaStyle}
+                />
+                <VideoScrubPreview video={videoEl} src={downloadUrl(libraryId, file)} />
+              </>
             ) : (
               <div className="viewer-generic">
                 <span className="viewer-generic-icon" aria-hidden="true">
@@ -715,7 +968,7 @@ export function ViewerModal({
           </button>
         )}
 
-        <div className="viewer-bottom viewer-chrome">
+        <div className="viewer-bottom viewer-chrome" ref={bottomRef}>
           {/* Keyed by file so navigating remounts it with a clean note. */}
           <FileNote key={file.id} libraryId={libraryId} fileId={file.id} />
           {siblings.length > 1 && (

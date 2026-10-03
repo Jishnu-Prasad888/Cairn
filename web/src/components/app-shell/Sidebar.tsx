@@ -45,12 +45,20 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   const primary = PRIMARY_NAV.filter((item) => item.to !== '/people' || mlOn !== false);
   const inManage = MANAGE_NAV.some((item) => location.pathname.startsWith(item.to));
   const [manageWanted, setManageWanted] = useState(readManageOpen);
-  // A page in the group keeps the group open, so the active entry is visible.
-  const manageOpen = manageWanted || inManage;
+  // Navigating into a page of the group opens it so the active entry is
+  // visible; after that the user can still collapse it.
+  const [forcedOpen, setForcedOpen] = useState(inManage);
+  const [prevPath, setPrevPath] = useState(location.pathname);
+  if (prevPath !== location.pathname) {
+    setPrevPath(location.pathname);
+    if (inManage) setForcedOpen(true);
+  }
+  const manageOpen = manageWanted || forcedOpen;
 
   const toggleManage = () => {
     const next = !manageOpen;
     setManageWanted(next);
+    setForcedOpen(next);
     try {
       localStorage.setItem(MANAGE_KEY, next ? 'open' : 'closed');
     } catch {

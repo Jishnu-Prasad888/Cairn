@@ -375,5 +375,5 @@ export default function MemoriesPage() {
 }
 
 function topStyle(strip: boolean, columns: number) {
-  return strip ? undefined : { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` };
+  return strip ? undefined : { gridTemplateColumns: `repeat(${columns}, ${CARD_MIN}px)` };
 }

@@ -529,7 +529,7 @@ describe('MediaPage', () => {
     expect(stage).toHaveAttribute('data-zoomed', 'false');
   });
 
-  it('grows the media itself when zoomed, so the stage can scroll to its edges', async () => {
+  it('zooms with a transform all the way up to 800%, and pans by dragging', async () => {
     setup();
 
     await screen.findByTestId('file-grid');
@@ -538,22 +538,35 @@ describe('MediaPage', () => {
     const dialog = within(viewer).getByRole('dialog');
     const image = within(dialog).getByAltText('IMG_0001.png') as HTMLElement;
 
-    // Unzoomed the image fits the stage, so it takes no explicit width.
-    expect(image.style.width).toBe('');
+    // Fit to the window: no transform at all.
+    expect(image.style.transform).toBe('');
 
-    // Zooming must change the layout box, not just paint a `transform` over it:
-    // a transform does not enlarge the scrollable area, so the corners of a
-    // scaled image would be drawn but unreachable.
+    // Zoom is a transform (a CSS width gets shrunk back by the flex stage,
+    // which is what used to stall zooming at 150%).
     fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom in' }));
     await waitFor(() => {
       expect(within(viewer).getByTestId('viewer-stage')).toHaveAttribute('data-zoomed', 'true');
     });
-    expect(image.style.width).toBe('150%');
-    expect(image.style.transform).toBe('');
+    expect(image.style.transform).toContain('scale(1.5)');
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom in' }));
+    // Keep zooming: it must continue past 150% up to the limit.
+    for (let i = 0; i < 8; i++) {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom in' }));
+    }
     await waitFor(() => {
-      expect(image.style.width).toBe('200%');
+      expect(image.style.transform).toContain('scale(8)');
+    });
+    expect(within(dialog).getByRole('button', { name: 'Zoom in' })).toBeDisabled();
+
+    // Ctrl + minus zooms back out instead of zooming the page.
+    fireEvent.keyDown(window, { key: '-', ctrlKey: true });
+    await waitFor(() => {
+      expect(image.style.transform).toContain('scale(6)');
+    });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset zoom' }));
+    await waitFor(() => {
+      expect(image.style.transform).toBe('');
     });
   });
 
