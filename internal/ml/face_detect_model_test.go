@@ -21,7 +21,7 @@ func TestSCRFDDetectRealModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	img, err := jpeg.Decode(f)
 	if err != nil {
 		t.Fatal(err)

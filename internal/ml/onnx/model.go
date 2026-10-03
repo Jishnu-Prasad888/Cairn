@@ -567,7 +567,7 @@ func softmax(x *Tensor, n *nodeProto) *Tensor {
 	for o := 0; o < outerSize; o++ {
 		for i := 0; i < innerSize; i++ {
 			base := o*axisSize*innerSize + i
-			var maxV float32 = float32(math.Inf(-1))
+			maxV := float32(math.Inf(-1))
 			for k := 0; k < axisSize; k++ {
 				if v := x.Data[base+k*innerSize]; v > maxV {
 					maxV = v
@@ -604,10 +604,7 @@ func leakyRelu(x *Tensor, n *nodeProto) *Tensor {
 }
 
 func sub(a, b *Tensor) *Tensor {
-	if len(a.Data) < len(b.Data) {
-		// swap and negate: not safe in general, but in practice a is always larger
-		// We don't swap; if b is bigger this panics, which is correct.
-	}
+	// a is always the larger operand here; if b is bigger this panics, which is correct.
 	out := newTensor(a.Shape...)
 	switch {
 	case len(a.Data) == len(b.Data):

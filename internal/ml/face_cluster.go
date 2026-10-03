@@ -223,8 +223,7 @@ func clusterNodes(nodes []clusterNode, threshold float64) [][]int {
 		members[i] = []int{i}
 		label[i] = nodes[i].label
 	}
-	var find func(int) int
-	find = func(x int) int {
+	find := func(x int) int {
 		for parent[x] != x {
 			parent[x] = parent[parent[x]]
 			x = parent[x]

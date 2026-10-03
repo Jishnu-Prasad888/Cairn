@@ -87,46 +87,6 @@ func NewModelDownloader(
 	}
 }
 
-// newRecognizerDownloader is a convenience constructor used by the wiring code
-// that keeps the old minSize/minConf signature but adapts it to the new
-// verifier/callback model.
-func newRecognizerDownloader(
-	logger *slog.Logger, path, url string,
-	minSize int, minConf float64,
-	onReady func(*SCRFDEmbeddingFaceProvider),
-	detectorPath func() string,
-) *ModelDownloader {
-	verify := func(part string) error {
-		_, err := NewSCRFDEmbeddingFaceProvider(detectorPath(), part)
-		return err
-	}
-	ready := func(p string) {
-		if onReady == nil {
-			return
-		}
-		detPath := detectorPath()
-		prov, err := NewSCRFDEmbeddingFaceProvider(detPath, p)
-		if err != nil {
-			logger.Error("face provider unusable after recognizer install", "error", err)
-			return
-		}
-		onReady(prov)
-	}
-	return NewModelDownloader(logger, path, url, verify, ready)
-}
-
-// newDetectorDownloader is the convenience constructor for the SCRFD detector.
-func newDetectorDownloader(
-	logger *slog.Logger, path, url string,
-	onReady func(string),
-) *ModelDownloader {
-	verify := func(part string) error {
-		_, err := NewSCRFDDetector(part)
-		return err
-	}
-	return NewModelDownloader(logger, path, url, verify, onReady)
-}
-
 // Path is where the model file lives (or will).
 func (d *ModelDownloader) Path() string { return d.path }
 

@@ -341,8 +341,3 @@ func DescriptorCosine(a, b []float32) float64 {
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
-
-func (p *PigoFaceProvider) setDetection(minSize int, minConfidence float64) {
-	p.MinSize = minSize
-	p.MinConfidence = minConfidence
-}
