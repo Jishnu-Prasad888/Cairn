@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import type { FileSummary } from '../../api/types';
 import { thumbnailUrl, mediaTypeIcon } from '../media';
+import { VideoThumb } from '../media/VideoThumb';
 import { Icon } from '../ui/Icon';
 
 /** How many neighbours the filmstrip shows on each side of the open file. */
@@ -46,7 +47,9 @@ export function Filmstrip({
               aria-label={`Open ${item.name}`}
               title={item.name}
             >
-              {item.media_type === 'photo' || item.media_type === 'video' ? (
+              {item.media_type === 'video' ? (
+                <VideoThumb libraryId={libraryId} fileId={item.id} />
+              ) : item.media_type === 'photo' ? (
                 <img src={thumbnailUrl(libraryId, item)} alt="" loading="lazy" />
               ) : (
                 <span aria-hidden="true">

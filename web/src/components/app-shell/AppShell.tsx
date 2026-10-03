@@ -10,11 +10,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
+import { useLibraries } from '../../api/libraries';
+import { notifyLibraryChanged } from '../../api/libraryEvents';
 import { UploadTray } from '../upload/UploadTray';
 import { MobileNav } from './MobileNav';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { useIndexStatus } from './useIndexStatus';
 import './AppShell.css';
 
 function isTyping(target: EventTarget | null): boolean {
@@ -29,6 +32,26 @@ export default function AppShell() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const { libraryId } = useLibraries();
+
+  // The server rescans the library on its own; this notices when that found
+  // something (administrators get the index counts)...
+  useIndexStatus(libraryId);
+  // ...and everyone else gets a refresh when they come back to the tab after
+  // a while away, which is when files added elsewhere are most likely.
+  useEffect(() => {
+    if (!libraryId) return;
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > 20000) {
+        notifyLibraryChanged(libraryId);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [libraryId]);
 
   // Navigating closes the drawer. Adjusted during render rather than in an
   // effect, so the drawer is never drawn open over the new page.

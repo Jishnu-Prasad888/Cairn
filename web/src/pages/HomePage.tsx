@@ -11,7 +11,7 @@
  * Pi with a hundred thousand files.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
@@ -22,6 +22,7 @@ import { AlbumCard } from '../components/albums/AlbumCard';
 import { useFileOperations } from '../components/FileOperations';
 import { LibraryGatePage } from '../components/LibraryGatePage';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
+import { gridMetrics } from '../components/media/layout';
 import { EmptyState, ErrorState, LibraryOfflineNotice } from '../components/States';
 import { Icon } from '../components/ui/Icon';
 import { ViewerModal } from '../components/ViewerModal';
@@ -30,7 +31,46 @@ import { extractExcerpt } from '../lib/markdown';
 import { thumbnailUrl } from '../components/media';
 import './HomePage.css';
 
-const RECENT_LIMIT = 15;
+/** Fetched per kind; only the rows that fit are shown (see `cleanRows`). */
+const RECENT_LIMIT = 40;
+const MEMORY_LIMIT = 40;
+/** Home shows a taste, not the library: two rows of each. */
+const HOME_ROWS = 2;
+const MEMORY_MIN_WIDTH = 240;
+const MEMORY_GAP = 12;
+const PHOTO_GAP = 4;
+
+/** Width assumed before the first measurement (and in jsdom). */
+const FALLBACK_WIDTH = 1024;
+
+/**
+ * Track an element's width so a section can know how many columns it has. A
+ * callback ref, because the sections mount only once their data has loaded.
+ */
+function useWidth(): [(el: HTMLElement | null) => void, number] {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    if (!el) return;
+    const measure = () => setWidth(Math.round(el.getBoundingClientRect().width));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el]);
+  return [setEl, width || FALLBACK_WIDTH];
+}
+
+/**
+ * How many of `total` items to show in `rows` rows of `columns`: whole rows
+ * only, so the last row is never ragged. With fewer than one row's worth, all
+ * of them.
+ */
+function cleanRows(total: number, columns: number, rows = HOME_ROWS): number {
+  if (total < columns) return total;
+  return Math.min(rows * columns, Math.floor(total / columns) * columns);
+}
 
 interface HomeData {
   recent: FileSummary[];
@@ -56,19 +96,31 @@ function Home({ library }: { library: Library }) {
   const home = useLibraryResource<HomeData>(
     useCallback(async (id: string) => {
       const [recent, albums, memories, people] = await Promise.all([
-        listFiles(id, {
-          type: 'photo',
-          recursive: true,
-          sort: 'mod_time',
-          order: 'desc',
-          limit: RECENT_LIMIT,
-        })
-          .then((r) => r.files ?? [])
-          .catch(() => [] as FileSummary[]),
+        // The API filters by one type, so photos and videos are fetched
+        // separately and merged newest first.
+        Promise.all(
+          (['photo', 'video'] as const).map((type) =>
+            listFiles(id, {
+              type,
+              recursive: true,
+              sort: 'mod_time',
+              order: 'desc',
+              limit: RECENT_LIMIT,
+            })
+              .then((r) => r.files ?? [])
+              .catch(() => [] as FileSummary[]),
+          ),
+        ).then((lists) =>
+          lists
+            .flat()
+            .filter((f, i, all) => all.findIndex((x) => x.id === f.id) === i)
+            .sort((a, b) => b.mod_time.localeCompare(a.mod_time))
+            .slice(0, RECENT_LIMIT),
+        ),
         listAlbums(id)
           .then((r) => r.albums ?? [])
           .catch(() => [] as Album[]),
-        listMemories(id, { limit: 12 })
+        listMemories(id, { limit: MEMORY_LIMIT })
           .then((r) => r.memories ?? [])
           .catch(() => [] as Memory[]),
         // A server without face support has no people route; that is "not
@@ -80,9 +132,7 @@ function Home({ library }: { library: Library }) {
       return {
         recent,
         albums: [...albums].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 6),
-        memories: [...memories]
-          .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-          .slice(0, 4),
+        memories: [...memories].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
         people: people
           ? [...people]
               .filter((p) => p.name)
@@ -95,6 +145,18 @@ function Home({ library }: { library: Library }) {
 
   const ops = useFileOperations(libraryId, home.reload);
   const data = home.data;
+
+  const [recentRef, recentWidth] = useWidth();
+  const [memoriesRef, memoriesWidth] = useWidth();
+  const photoColumns = gridMetrics(recentWidth, PHOTO_GAP).columns;
+  const memoryColumns = Math.max(
+    1,
+    Math.floor((memoriesWidth + MEMORY_GAP) / (MEMORY_MIN_WIDTH + MEMORY_GAP)),
+  );
+  const recent = data ? data.recent.slice(0, cleanRows(data.recent.length, photoColumns)) : [];
+  const memoryList = data
+    ? data.memories.slice(0, cleanRows(data.memories.length, memoryColumns))
+    : [];
   const name = user?.username;
 
   const nothingYet =
@@ -153,10 +215,10 @@ function Home({ library }: { library: Library }) {
               <Icon name="chevron-right" size={16} />
             </Link>
           </div>
-          <div data-testid="home-recent">
+          <div data-testid="home-recent" ref={recentRef}>
             <MediaGrid
               libraryId={libraryId}
-              files={data.recent}
+              files={recent}
               onOpen={ops.openViewer}
               label="Recently added photos"
               testId="home-recent-grid"
@@ -250,8 +312,13 @@ function Home({ library }: { library: Library }) {
               </Link>
             </div>
           ) : (
-            <ul className="home-memories" data-testid="home-memories">
-              {data.memories.map((memory) => (
+            <ul
+              className="home-memories"
+              data-testid="home-memories"
+              ref={memoriesRef}
+              style={{ gridTemplateColumns: `repeat(${memoryColumns}, minmax(0, 1fr))` }}
+            >
+              {memoryList.map((memory) => (
                 <li key={memory.id}>
                   <Link to={`/memories/${memory.id}`} className="home-memory">
                     <span className="home-memory-date">
@@ -271,7 +338,7 @@ function Home({ library }: { library: Library }) {
         <ViewerModal
           libraryId={libraryId}
           file={ops.viewer}
-          siblings={data.recent}
+          siblings={recent}
           onNavigate={ops.openViewer}
           onChanged={home.reload}
           onRequestAction={ops.requestAction}

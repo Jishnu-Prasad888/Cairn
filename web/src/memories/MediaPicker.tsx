@@ -10,6 +10,7 @@
  * In single mode (replace image, choose cover) one click chooses.
  */
 
+import { Check, Play } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -24,6 +25,7 @@ import type { Album, FileSummary, Person, Tag } from '../api/types';
 import { Dialog } from '../components/Dialog';
 import { FolderPicker } from '../components/FolderPicker';
 import { thumbnailUrl } from '../components/media';
+import { VideoThumb } from '../components/media/VideoThumb';
 import { toPicked } from './format';
 import type { PickedMedia } from './model';
 
@@ -60,8 +62,8 @@ export function MediaPicker(props: Props) {
 function MediaPickerDialog({
   open,
   libraryId,
-  title = 'Select photos',
-  confirmLabel = 'Add to memory',
+  title = 'Select photos and videos',
+  confirmLabel = 'Add media',
   mode = 'multi',
   photosOnly = false,
   alreadyIn,
@@ -452,18 +454,31 @@ function MediaPickerDialog({
                       title={file.rel_path}
                       onClick={(e) => toggle(file, index, e.shiftKey)}
                     >
-                      <img
-                        src={thumbnailUrl(libraryId, file)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        draggable={false}
-                      />
-                      {file.media_type === 'video' && <span className="picker-badge">▶</span>}
+                      {file.media_type === 'video' ? (
+                        <VideoThumb
+                          libraryId={libraryId}
+                          fileId={file.id}
+                          className="picker-thumb"
+                        />
+                      ) : (
+                        <img
+                          className="picker-thumb"
+                          src={thumbnailUrl(libraryId, file)}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          draggable={false}
+                        />
+                      )}
+                      {file.media_type === 'video' && (
+                        <span className="picker-badge" aria-hidden="true">
+                          <Play size={12} fill="currentColor" />
+                        </span>
+                      )}
                       {already && <span className="picker-already">In section</span>}
                       {mode === 'multi' && (
                         <span className="picker-check" aria-hidden="true">
-                          {on ? '✓' : ''}
+                          {on && <Check size={14} strokeWidth={3} />}
                         </span>
                       )}
                     </button>
@@ -477,8 +492,8 @@ function MediaPickerDialog({
               {(source === 'album' && !album) ||
               (source === 'tag' && !tag) ||
               (source === 'person' && !person)
-                ? 'Choose one above to see its photos.'
-                : 'No photos match.'}
+                ? 'Choose one above to see its media.'
+                : 'No photos or videos match.'}
             </p>
           )}
           {loading && <p className="muted picker-loading">Loading…</p>}

@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { apiError, fileFixture, json, mockApi, originalFetch, renderPage } from '../test/harness';
@@ -59,9 +59,13 @@ describe('HomePage', () => {
   it('greets the signed-in account, in the time of day', async () => {
     setup();
 
-    expect(
-      await screen.findByRole('heading', { name: /^Good (morning|afternoon|evening), jishnu$/ }),
-    ).toBeInTheDocument();
+    // The gate page and then Home each render the greeting, so the first
+    // match can be replaced mid-assertion: retry the whole check.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { name: /^Good (morning|afternoon|evening), jishnu$/ }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('leads with the newest photos, and nothing like a counter dashboard', async () => {

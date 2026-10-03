@@ -2,7 +2,7 @@
  * MemoryEditor — the notebook.
  *
  * A memory is a vertical sequence of blocks on one continuous page. Between
- * any two blocks (and at the end) a quiet "+ Text  + Image" inserter appears
+ * any two blocks (and at the end) a quiet "+ Text  + Media" inserter appears
  * on hover or focus — always visible on touch screens. The focused block shows
  * a faint boundary, a drag handle and a ⋮ menu; unfocused blocks melt back
  * into the document, so it reads like a page rather than a stack of cards.
@@ -23,6 +23,25 @@
  * Preview hides all of this and shows the memory as an article.
  */
 
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  Code2,
+  Ellipsis,
+  Eye,
+  GripVertical,
+  History,
+  ImagePlus,
+  Info,
+  Link2,
+  PenLine,
+  Redo2,
+  Save,
+  Trash2,
+  Type,
+  Undo2,
+} from 'lucide-react';
 import {
   type DragEvent,
   Fragment,
@@ -225,7 +244,7 @@ export function MemoryEditor({
     setToast({
       text:
         block?.type === 'image'
-          ? 'Image section removed. The photos stay in your library.'
+          ? 'Media section removed. The originals stay in your library.'
           : 'Text block removed.',
       undo: true,
     });
@@ -286,13 +305,13 @@ export function MemoryEditor({
     return [
       {
         id: 'edit',
-        label: 'Edit image section',
+        label: 'Edit media section',
         hint: 'Enter',
         onSelect: () => setSectionEditor({ blockId: block.id }),
       },
       {
         id: 'add',
-        label: 'Add photos',
+        label: 'Add media',
         onSelect: () => setPicker({ kind: 'add', blockId: block.id }),
       },
       'separator',
@@ -325,7 +344,7 @@ export function MemoryEditor({
       },
       {
         id: 'replace',
-        label: 'Replace image',
+        label: 'Replace media',
         onSelect: () => setPicker({ kind: 'replace', imageId: image.id }),
       },
       {
@@ -337,7 +356,7 @@ export function MemoryEditor({
       'separator',
       {
         id: 'add',
-        label: 'Add photos',
+        label: 'Add media',
         onSelect: () => setPicker({ kind: 'add', blockId: block.id }),
       },
       {
@@ -374,7 +393,7 @@ export function MemoryEditor({
       },
       {
         id: 'section',
-        label: 'Edit image section',
+        label: 'Edit media section',
         onSelect: () => setSectionEditor({ blockId: block.id }),
       },
       'separator',
@@ -468,7 +487,8 @@ export function MemoryEditor({
             onClick={onBack}
             aria-label="Back to memories"
           >
-            ←
+            <ArrowLeft size={18} aria-hidden="true" />
+            Memories
           </button>
         )}
         <div className="segmented mode-toggle" role="group" aria-label="Mode">
@@ -478,6 +498,7 @@ export function MemoryEditor({
             aria-pressed={mode === 'edit'}
             onClick={() => setMode('edit')}
           >
+            <PenLine size={15} aria-hidden="true" />
             Edit
           </button>
           <button
@@ -486,6 +507,7 @@ export function MemoryEditor({
             aria-pressed={mode === 'preview'}
             onClick={() => setMode('preview')}
           >
+            <Eye size={15} aria-hidden="true" />
             Preview
           </button>
         </div>
@@ -498,6 +520,7 @@ export function MemoryEditor({
               title="Show Markdown syntax in every block, not only the one you are writing in"
               onClick={() => setShowSource((v) => !v)}
             >
+              <Code2 size={15} aria-hidden="true" />
               Markdown
             </button>
             <button
@@ -506,14 +529,17 @@ export function MemoryEditor({
               aria-pressed={linking}
               onClick={() => setLinking((v) => !v)}
             >
+              <Link2 size={15} aria-hidden="true" />
               Link…
             </button>
           </>
         )}
         <button type="button" className="button" onClick={() => setDetails(true)}>
+          <Info size={15} aria-hidden="true" />
           Details
         </button>
         <button type="button" className="button" onClick={() => setHistory(true)}>
+          <History size={15} aria-hidden="true" />
           History
         </button>
         <button
@@ -524,7 +550,7 @@ export function MemoryEditor({
           disabled={!doc.canUndo}
           onClick={doc.undo}
         >
-          ↶
+          <Undo2 size={16} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -534,7 +560,7 @@ export function MemoryEditor({
           disabled={!doc.canRedo}
           onClick={doc.redo}
         >
-          ↷
+          <Redo2 size={16} aria-hidden="true" />
         </button>
         <span className="toolbar-spacer" />
         <span
@@ -552,6 +578,7 @@ export function MemoryEditor({
             onClick={doc.flush}
             disabled={doc.save === 'saved' || doc.save === 'saving'}
           >
+            <Save size={15} aria-hidden="true" />
             {doc.save === 'error' ? 'Retry' : 'Save'}
           </button>
         )}
@@ -561,6 +588,7 @@ export function MemoryEditor({
           onClick={() => setConfirmDelete(true)}
           data-testid="delete-memory"
         >
+          <Trash2 size={15} aria-hidden="true" />
           Delete
         </button>
       </div>
@@ -696,7 +724,7 @@ export function MemoryEditor({
                   setMenu({
                     position,
                     entries: blockMenu(block),
-                    label: block.type === 'text' ? 'Text block actions' : 'Image section actions',
+                    label: block.type === 'text' ? 'Text block actions' : 'Media section actions',
                   })
                 }
                 onImageLongPress={(imageId, position) => {
@@ -715,6 +743,7 @@ export function MemoryEditor({
                   setDrag(null);
                 }}
                 onDragEnd={() => setDrag(null)}
+                onMove={(delta) => move(block.id, delta)}
                 onKeyAction={(action) => {
                   if (action === 'edit') setSectionEditor({ blockId: block.id });
                   else if (action === 'delete') remove(block.id);
@@ -742,13 +771,13 @@ export function MemoryEditor({
                   />
                 ) : block.images.length === 0 ? (
                   <div className="image-block-empty">
-                    <p className="muted">This image section is empty.</p>
+                    <p className="muted">This section has no media yet.</p>
                     <button
                       type="button"
                       className="button"
                       onClick={() => setPicker({ kind: 'add', blockId: block.id })}
                     >
-                      + Add photos
+                      <ImagePlus size={15} aria-hidden="true" /> Add media
                     </button>
                   </div>
                 ) : (
@@ -765,14 +794,14 @@ export function MemoryEditor({
                         className="button small"
                         onClick={() => setSectionEditor({ blockId: block.id })}
                       >
-                        Edit section
+                        <PenLine size={14} aria-hidden="true" /> Edit section
                       </button>
                       <button
                         type="button"
                         className="button small"
                         onClick={() => setPicker({ kind: 'add', blockId: block.id })}
                       >
-                        + Add photos
+                        <ImagePlus size={14} aria-hidden="true" /> Add media
                       </button>
                     </div>
                   </>
@@ -824,10 +853,10 @@ export function MemoryEditor({
         mode={picker?.kind === 'replace' ? 'single' : 'multi'}
         title={
           picker?.kind === 'replace'
-            ? 'Replace photo'
+            ? 'Replace media'
             : picker?.kind === 'add'
-              ? 'Add photos to this section'
-              : 'Select photos'
+              ? 'Add media to this section'
+              : 'Select photos and videos'
         }
         {...(picker?.kind === 'add' && {
           alreadyIn: new Set(
@@ -968,14 +997,14 @@ function BlockInserter({
   return (
     <div className={`nb-inserter${last ? ' is-last' : ''}${empty ? ' is-empty' : ''}`}>
       {empty && (
-        <p className="nb-start muted">Start your memory with some words or a few photos.</p>
+        <p className="nb-start muted">Start your memory with some words, photos or videos.</p>
       )}
       <div className="nb-inserter-actions" role="group" aria-label="Insert a block here">
-        <button type="button" className="nb-insert" onClick={onText}>
-          + Text
+        <button type="button" className="nb-insert" aria-label="Add text" onClick={onText}>
+          <Type size={14} aria-hidden="true" /> Text
         </button>
-        <button type="button" className="nb-insert" onClick={onImage}>
-          + Image
+        <button type="button" className="nb-insert" aria-label="Add media" onClick={onImage}>
+          <ImagePlus size={14} aria-hidden="true" /> Media
         </button>
       </div>
     </div>
@@ -998,6 +1027,7 @@ interface ShellProps {
   onDrop: () => void;
   onDragEnd: () => void;
   onKeyAction: (action: 'edit' | 'delete' | 'up' | 'down') => void;
+  onMove: (delta: number) => void;
 }
 
 /**
@@ -1021,6 +1051,7 @@ function BlockShell({
   onDrop,
   onDragEnd,
   onKeyAction,
+  onMove,
 }: ShellProps) {
   const longPress = useLongPress((pos, target) => {
     const imageId = target?.closest('[data-image-id]')?.getAttribute('data-image-id');
@@ -1051,9 +1082,7 @@ function BlockShell({
       tabIndex={isImage ? 0 : undefined}
       role={isImage ? 'group' : undefined}
       aria-label={
-        isImage
-          ? `Image section ${index + 1} of ${count}, ${block.images.length} photos`
-          : undefined
+        isImage ? `Media section ${index + 1} of ${count}, ${block.images.length} items` : undefined
       }
       onFocus={onActivate}
       onContextMenu={(e) => {
@@ -1087,12 +1116,22 @@ function BlockShell({
       {...longPress}
     >
       <div className="nb-gutter">
+        <button
+          type="button"
+          className="nb-tool"
+          aria-label={`Move ${isImage ? 'media section' : 'text block'} up`}
+          title="Move up (Alt+↑)"
+          disabled={index === 0}
+          onClick={() => onMove(-1)}
+        >
+          <ChevronUp size={16} aria-hidden="true" />
+        </button>
         <span
           className="nb-handle"
           draggable
           role="button"
           tabIndex={-1}
-          aria-label="Drag to reorder (or use Alt+↑ / Alt+↓)"
+          aria-label="Drag to reorder (or use the arrows, or Alt+↑ / Alt+↓)"
           title="Drag to reorder"
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = 'move';
@@ -1101,16 +1140,26 @@ function BlockShell({
           }}
           onDragEnd={onDragEnd}
         >
-          ⋮⋮
+          <GripVertical size={16} aria-hidden="true" />
         </span>
         <button
           type="button"
-          className="nb-menu-button"
+          className="nb-tool"
+          aria-label={`Move ${isImage ? 'media section' : 'text block'} down`}
+          title="Move down (Alt+↓)"
+          disabled={index === count - 1}
+          onClick={() => onMove(1)}
+        >
+          <ChevronDown size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="nb-tool"
           aria-haspopup="menu"
-          aria-label={isImage ? 'Image section actions' : 'Text block actions'}
+          aria-label={isImage ? 'Media section actions' : 'Text block actions'}
           onClick={(e) => onMenu(pointAt(e.currentTarget))}
         >
-          ⋯
+          <Ellipsis size={16} aria-hidden="true" />
         </button>
       </div>
       <div className="nb-content">{children}</div>

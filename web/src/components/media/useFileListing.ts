@@ -14,6 +14,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useLibraryChangeTick } from '../../api/libraryEvents';
+
 import { listFiles, listFolders, searchFiles } from '../../api/queries';
 import type { FileSort, MediaFilter, SortOrder } from '../../api/queries';
 import type { FileListResponse, FileSummary, Folder } from '../../api/types';
@@ -123,6 +125,8 @@ export function useFileListing(
   { enabled = true, refreshKey = 0 }: { enabled?: boolean; refreshKey?: number } = {},
 ): FileListing {
   const [run, setRun] = useState(0);
+  // Files changed on disk: re-read behind the list already on screen.
+  const changeTick = useLibraryChangeTick(libraryId);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -171,7 +175,7 @@ export function useFileListing(
     return () => {
       cancelled = true;
     };
-  }, [key, libraryId]);
+  }, [key, libraryId, changeTick]);
 
   const current = loaded && loaded.key === key ? loaded : null;
 

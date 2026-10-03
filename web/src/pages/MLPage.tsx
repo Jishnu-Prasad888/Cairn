@@ -16,6 +16,7 @@
 import { useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
+import { updateMLSwitch, useMLSwitch } from '../api/mlSwitch';
 import { ApiError } from '../api/client';
 import { useLibraryGate } from '../api/libraries';
 import { useLibraryResource } from '../api/resources';
@@ -31,6 +32,7 @@ import {
 import type { FaceStatus, MLStatus } from '../api/types';
 import { ConfirmDialog } from '../components/Dialog';
 import LibraryPicker from '../components/LibraryPicker';
+import { Toggle } from '../components/ui/Toggle';
 import {
   ErrorState,
   LibraryOfflineNotice,
@@ -88,6 +90,8 @@ export default function MLPage() {
 
   const [busy, setBusy] = useState<string | null>(null);
   const [job, setJob] = useState<JobState>(null);
+  const mlOn = useMLSwitch();
+  const [switching, setSwitching] = useState(false);
   const [purging, setPurging] = useState<'similarity' | 'faces' | null>(null);
 
   // The loaders are inline: `useLibraryResource` reads them through a ref, so a
@@ -156,6 +160,26 @@ export default function MLPage() {
 
   const offline = gate.library.status === 'offline';
 
+  const toggleML = (enabled: boolean) => {
+    setSwitching(true);
+    setJob({ message: enabled ? 'Starting…' : 'Stopping…', error: null });
+    updateMLSwitch(enabled)
+      .then(() => {
+        setJob({
+          message: enabled
+            ? 'Machine learning is on. Your library is being scanned for people now; new photos are handled as they arrive.'
+            : 'Machine learning is off. Existing people and names are kept.',
+          error: null,
+        });
+        status.reload();
+        faces.reload();
+      })
+      .catch((e: unknown) =>
+        setJob({ message: '', error: e instanceof Error ? e.message : String(e) }),
+      )
+      .finally(() => setSwitching(false));
+  };
+
   return (
     <main className="page ml-page">
       {header}
@@ -166,6 +190,27 @@ export default function MLPage() {
           {job.error ?? job.message}
         </p>
       )}
+
+      <section className="ml-section" aria-labelledby="ml-switch-title">
+        <div className="ml-section-head">
+          <h2 id="ml-switch-title">Recognise people automatically</h2>
+        </div>
+        <Toggle
+          checked={mlOn === true}
+          onChange={toggleML}
+          label="Find people and similar photos as images are added"
+          disabled={mlOn === null || user?.role !== 'admin'}
+          busy={switching}
+          testId="ml-switch"
+        />
+        <p className="muted">
+          When on, Cairn starts working through your library straight away and handles every new
+          photo as it is added. People are first called “Person 1”, “Person 2” and so on — rename
+          one and Cairn will recognise them by that name in future photos. When off, the People page
+          is hidden and nothing is analysed; what was found is kept.
+          {user?.role !== 'admin' && ' Only an administrator can change this.'}
+        </p>
+      </section>
 
       {/* ---------------------------- similarity --------------------------- */}
       <section className="ml-section" aria-labelledby="ml-similarity-title">

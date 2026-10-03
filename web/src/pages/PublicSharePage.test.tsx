@@ -94,7 +94,9 @@ describe('PublicSharePage', () => {
     });
     fireEvent.click(screen.getByTestId('share-unlock'));
 
-    expect(await screen.findByRole('heading', { name: /library:lib1/ })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /library:lib1/ })).toBeInTheDocument(),
+    );
     expect(called(fetchMock, 'GET', '/api/v1/shares/tok1/files?')).toBe(true);
     // The credential is a header, so a link stays safe to paste into a chat.
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes('hunter2'))).toBe(true);

@@ -580,3 +580,13 @@ function shareRequest<T>(path: string, password?: string): Promise<T> {
   if (password) headers['X-Cairn-Share-Password'] = password;
   return apiRequest<T>(path, { headers });
 }
+
+/* ------------------------------ ml switch ------------------------------ */
+
+export interface MLSettings {
+  enabled: boolean;
+}
+
+export const getMLSettings = () => apiGet<MLSettings>('/ml/settings');
+
+export const setMLSettings = (enabled: boolean) => apiPut<MLSettings>('/ml/settings', { enabled });

@@ -149,9 +149,9 @@ describe('MemoriesPage (notebook)', () => {
     expect(text.textContent).toBe('We left **early**.\n');
     expect(text.querySelector('strong')).not.toBeNull();
     expect(
-      screen.getByRole('group', { name: /Image section 2 of 2, 2 photos/ }),
+      screen.getByRole('group', { name: /Media section 2 of 2, 2 items/ }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: '+ Text' }).length).toBe(3);
+    expect(screen.getAllByRole('button', { name: 'Add text' }).length).toBe(3);
   });
 
   it('shows an empty state and creates a memory', async () => {
@@ -164,6 +164,30 @@ describe('MemoriesPage (notebook)', () => {
       blocks: Array<{ type: string }>;
     };
     expect(body.blocks[0]?.type).toBe('text');
+  });
+
+  it('shows the landing page with a New memory tile, and remembers the list view', async () => {
+    setup();
+    renderMemories('/memories');
+    expect(await screen.findByText('My Trip to Kerala')).toBeInTheDocument();
+    expect(screen.getByTestId('new-memory')).toBeInTheDocument();
+    // No editor and no library dropdown on the landing page.
+    expect(screen.queryByTestId('memory-editor')).toBeNull();
+    expect(screen.queryByLabelText('Library')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }));
+    expect(localStorage.getItem('cairn.memories.view')).toBe('list');
+    expect(screen.getByText('My Trip to Kerala').closest('.mem-row')).not.toBeNull();
+  });
+
+  it('opens a memory on its own screen and returns with ← Memories', async () => {
+    setup();
+    renderMemories('/memories');
+    fireEvent.click(await screen.findByText('My Trip to Kerala'));
+    expect(await screen.findByTestId('memory-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('new-memory')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to memories' }));
+    expect(await screen.findByTestId('new-memory')).toBeInTheDocument();
   });
 
   it('autosaves edits once, debounced, with the base revision', async () => {
@@ -272,10 +296,10 @@ describe('MemoriesPage (notebook)', () => {
     const fn = setup();
     renderMemories();
     await screen.findByTestId('memory-editor');
-    fireEvent.click(screen.getAllByRole('button', { name: '+ Text' })[1]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add text' })[1]!);
     expect(screen.getAllByTestId('text-block-editor')).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Image section actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Media section actions' }));
     const menu = await screen.findByTestId('context-menu');
     fireEvent.click(within(menu).getByText('Move up'));
     await waitFor(() => expect(documentPuts(fn).length).toBeGreaterThan(0), { timeout: 4000 });
@@ -294,7 +318,7 @@ describe('MemoriesPage (notebook)', () => {
     fireEvent.contextMenu(figure);
     const menu = await screen.findByTestId('context-menu');
     expect(within(menu).getByText('Edit image')).toBeInTheDocument();
-    expect(within(menu).getByText('Add photos')).toBeInTheDocument();
+    expect(within(menu).getByText('Add media')).toBeInTheDocument();
     fireEvent.click(within(menu).getByText('Remove from memory'));
     expect(await screen.findByText(/original stays in your library/)).toBeInTheDocument();
     await waitFor(() => expect(documentPuts(fn).length).toBe(1), { timeout: 4000 });
@@ -310,7 +334,7 @@ describe('MemoriesPage (notebook)', () => {
     ).toBe(false);
   });
 
-  it('shows unavailable media in place, keeping its caption', async () => {
+  it('replaces a section holding an unavailable image with a red notice', async () => {
     const doc = memoryDoc();
     const block = doc.blocks[1] as unknown as { images: Array<ReturnType<typeof photo>> };
     block.images[0] = {
@@ -319,9 +343,9 @@ describe('MemoriesPage (notebook)', () => {
     };
     setup({ memory: doc });
     renderMemories();
-    expect(await screen.findByText('Image unavailable')).toBeInTheDocument();
-    expect(screen.getByText('The original is missing from the library.')).toBeInTheDocument();
-    expect(screen.getByText('The road to Munnar')).toBeInTheDocument();
+    const notice = await screen.findByText('Image unavailable');
+    expect(notice).toHaveClass('image-unavailable');
+    expect(screen.queryByText('The road to Munnar')).toBeNull();
   });
 
   it('switches to Preview, which hides every editing control', async () => {
@@ -334,7 +358,7 @@ describe('MemoriesPage (notebook)', () => {
       'My Trip to Kerala',
     );
     expect(reader.innerHTML).toContain('<strong>early</strong>');
-    expect(screen.queryByRole('button', { name: '+ Text' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add text' })).toBeNull();
     expect(screen.queryByTestId('text-block-editor')).toBeNull();
     expect(screen.getByText('Kochi')).toBeInTheDocument();
   });

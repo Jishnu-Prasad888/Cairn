@@ -4,15 +4,14 @@
  *
  * Browsing comes first and is always expanded. Organizing and upkeep live in a
  * collapsible "Manage" group so they are one click away without competing with
- * the library for attention. The library switcher and Settings sit at the
- * foot, where status belongs.
+ * the library for attention. Settings sits at the foot.
  */
 
 import { useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 
+import { useMLSwitch } from '../../api/mlSwitch';
 import { Icon } from '../ui/Icon';
-import { LibrarySwitcher } from './LibrarySwitcher';
 import { MANAGE_NAV, type NavItem, PRIMARY_NAV, SETTINGS_NAV } from './navigation';
 
 const MANAGE_KEY = 'cairn.nav.manage';
@@ -41,6 +40,9 @@ function NavEntry({ item, onNavigate }: { item: NavItem; onNavigate?: (() => voi
 
 export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const location = useLocation();
+  // People only exist while machine learning is on.
+  const mlOn = useMLSwitch();
+  const primary = PRIMARY_NAV.filter((item) => item.to !== '/people' || mlOn !== false);
   const inManage = MANAGE_NAV.some((item) => location.pathname.startsWith(item.to));
   const [manageWanted, setManageWanted] = useState(readManageOpen);
   // A page in the group keeps the group open, so the active entry is visible.
@@ -73,7 +75,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
       </Link>
 
       <nav className="sidebar-nav" aria-label="Sections">
-        {PRIMARY_NAV.map((item) => (
+        {primary.map((item) => (
           <NavEntry key={item.to} item={item} onNavigate={onNavigate} />
         ))}
       </nav>
@@ -97,7 +99,6 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
       </div>
 
       <div className="sidebar-foot">
-        <LibrarySwitcher onNavigate={onNavigate} />
         <nav className="sidebar-nav" aria-label="Settings">
           <NavEntry item={SETTINGS_NAV} onNavigate={onNavigate} />
         </nav>

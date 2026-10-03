@@ -8,8 +8,9 @@
  * for a window nobody is looking at.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { notifyLibraryChanged } from '../../api/libraryEvents';
 import { getIndexStatus } from '../../api/queries';
 import type { IndexStatus } from '../../api/types';
 
@@ -23,6 +24,8 @@ export function isIndexing(status: IndexStatus | null): boolean {
 
 export function useIndexStatus(libraryId: string | null, enabled = true): IndexStatus | null {
   const [state, setState] = useState<{ libraryId: string; status: IndexStatus } | null>(null);
+  // What the index looked like last time, to notice when a rescan changed it.
+  const lastSignature = useRef<{ libraryId: string; value: string } | null>(null);
 
   useEffect(() => {
     if (!libraryId || !enabled) return;
@@ -43,6 +46,18 @@ export function useIndexStatus(libraryId: string | null, enabled = true): IndexS
         .then((resp) => {
           if (cancelled) return;
           setState({ libraryId, status: resp.status });
+          const s = resp.status;
+          const value = `${s.present}|${s.missing}|${s.deleted}`;
+          const before = lastSignature.current;
+          lastSignature.current = { libraryId, value };
+          if (
+            before &&
+            before.libraryId === libraryId &&
+            before.value !== value &&
+            !isIndexing(s)
+          ) {
+            notifyLibraryChanged(libraryId);
+          }
           schedule(isIndexing(resp.status) ? ACTIVE_MS : IDLE_MS);
         })
         .catch(() => {

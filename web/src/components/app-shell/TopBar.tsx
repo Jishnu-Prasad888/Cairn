@@ -1,5 +1,5 @@
 /**
- * The top bar: search in the middle, because finding things is the point;
+ * The top bar: settings search in the middle;
  * upload, help, and the account on the right. On phones the bar shrinks to the
  * wordmark and the account, and search moves to its own tab.
  */
@@ -11,7 +11,7 @@ import { useLibraries } from '../../api/libraries';
 import { Icon } from '../ui/Icon';
 import { useUploads } from '../upload/UploadProvider';
 import { AccountMenu } from './AccountMenu';
-import { SearchBox } from './SearchBox';
+import { SettingsSearch } from './SettingsSearch';
 
 export function TopBar({
   searchRef,
@@ -37,7 +37,7 @@ export function TopBar({
       </Link>
 
       <div className="topbar-search">
-        <SearchBox inputRef={searchRef} />
+        <SettingsSearch inputRef={searchRef} />
       </div>
 
       <div className="topbar-actions">
