@@ -50,7 +50,19 @@ make build          # builds web/, embeds it, compiles bin/cairn
 The server database and state live in `$XDG_DATA_HOME/cairn`
 (`~/.local/share/cairn`). Override with `CAIRN_DATA_DIR`.
 
+### Requirements
+
+- Go and Node (to build from source).
+- **ffmpeg** (recommended): Cairn uses it to make video thumbnails. Without it,
+  the browser has to decode each video itself, which fails for formats it
+  cannot play (for example HEVC/x265 `.mkv`), and those videos show no
+  preview. Install it with `sudo apt install ffmpeg` (Debian/Ubuntu),
+  `brew install ffmpeg` (macOS) or your platform's package manager, and make
+  sure it is on `PATH` for the server. Cairn warns in the app when it is missing.
+
 ### Docker
+
+The image already includes ffmpeg.
 
 ```sh
 docker build -t cairn .
@@ -70,6 +82,32 @@ make web-dev        # in another terminal: Vite dev server with /api proxy
 ```
 
 See [docs/development.md](docs/development.md) for details.
+
+### Video timeline preview
+
+Rest the pointer on a video's timeline for a second and a small frame preview
+appears above it. It runs entirely in the browser (a second, muted copy of the
+video seeks to the hovered time); the server is not involved. Things you may
+notice:
+
+- **No preview for some videos.** It needs a format the browser can decode. If
+  the browser cannot show the video's picture (HEVC/x265 on most Linux
+  browsers, some exotic `.mkv` codecs), the preview never appears. The video
+  may still play with sound only.
+- **The time is approximate.** The seek bar is the browser's own control, so
+  Cairn estimates where it is from the pointer position. Chrome, Firefox and
+  Safari lay it out slightly differently, so the previewed frame can be off by
+  a few seconds and the popup may show when you are not exactly on the bar.
+- **Fullscreen.** It works in Cairn's fullscreen (the viewer's full-screen
+  button or `F`). The browser's own native video fullscreen button covers the
+  page, so no preview is shown there.
+- **No preview on touch screens.** Phones and tablets have no hover.
+- **A short delay.** The preview waits one second, then needs time to seek:
+  typically 0.1–0.5 s, but a second or more for videos with long gaps between
+  keyframes or whose index sits at the end of the file (some phone and
+  screen-recording clips), because the browser must fetch more data first.
+- **Extra data.** A second connection to the video is opened the first time you
+  hover the timeline, so it reads more of the file while previewing.
 
 ## Configuration
 

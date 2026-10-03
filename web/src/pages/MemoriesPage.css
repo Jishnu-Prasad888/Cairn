@@ -54,10 +54,12 @@
 .mem-grid {
   display: grid;
   gap: var(--space-4);
+  justify-content: start;
 }
 
 .mem-grid {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, 220px);
+  justify-content: start;
 }
 
 .mem-divider {

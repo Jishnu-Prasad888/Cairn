@@ -165,14 +165,32 @@ purge action without touching names or photos.
    factor `0.15`, scale factor `1.1`, `ClusterDetections` IoU `0.2`), and
    stores one `faces` row per detection: source file, box, confidence, and the
    appearance descriptor.
-2. **Appearance descriptor** — 10%-inflated crop resized to 48×48
+2. **Face embedding** — when a recognition model is installed (see
+   [Recognition model](#recognition-model)) each face is aligned on its eyes
+   (pigo pupil localisation, similarity-warped to the 112×112 ArcFace layout)
+   and run through a MobileFaceNet ONNX network by Cairn's built-in pure-Go
+   inference engine (`internal/ml/onnx`), giving an L2-normalised 512-value
+   vector (provider `mobilefacenet`, version 2). Same-person faces stay close
+   across pose, lighting, expression and age. Without a model, the fallback
+   below is used.
+
+   **Fallback appearance descriptor** — 10%-inflated crop resized to 48×48
    (`draw.CatmullRom`), luminance, non-overlapping 3×3 average pooling to
    16×16, z-normalized; 256 `float32` values in the row.
+   Changing provider or version discards faces from the old algorithm (their
+   descriptors are not comparable) and re-scans; user-chosen names survive.
 3. **Clustering pass** (`POST .../ml/faces/cluster`) — incremental online
    clustering of unassigned faces: cosine similarity against per-person mean
    descriptors (`CAIRN_ML_FACE_THRESHOLD`, default `0.82`); a match assigns to
    that person, otherwise a new `Person N` is created. Assigned faces are
    stable across passes; manual assignments are never overwritten.
+   **Learning from merges.** Dragging one person onto another (or *Merge into…*)
+   tells Cairn they are the same. The merged faces are recorded as hand-assigned
+   evidence, and new faces are matched against up to 40 individual faces of each
+   person (the mean of the two best matches), not just the person's average, so
+   a person with two distinct looks is recognised as either. The merge also folds
+   in any other untouched "Person N" group that matches the merged person; named
+   people and hand-assigned faces are never merged automatically.
 4. **People** — faces merge into named `people`; each person has a cover face,
    rename/merge/delete operations, and unassign can return a face to the
    clustering pool.
@@ -185,7 +203,15 @@ purge action without touching names or photos.
 | `CAIRN_ML_FACE_WORKERS` | `2` | Max concurrent files per detection pass. |
 | `CAIRN_ML_FACE_MIN_CONFIDENCE` | `0.05` | Detector score floor (pigo `Q/100`). |
 | `CAIRN_ML_FACE_MIN_SIZE` | `60` | Detector minimum window (px). |
-| `CAIRN_ML_FACE_THRESHOLD` | `0.82` | Clustering cosine similarity. |
+| `CAIRN_ML_FACE_THRESHOLD` | provider default (`0.5` embeddings, `0.82` fallback) | Clustering cosine similarity. |
+| `CAIRN_ML_FACE_MODEL` | `<data dir>/models/face-recognition.onnx` | ONNX recognition model; used when the file exists. |
+
+### Recognition model
+
+`scripts/fetch-face-model.sh` downloads InsightFace's MobileFaceNet (13 MB).
+Those weights are licensed for **non-commercial research use**; any ArcFace-style
+ONNX model (112×112 input, 512 outputs, operators Conv/PReLU/Add/BatchNorm/
+Flatten/Gemm) can be used instead. Cairn never downloads it by itself.
 
 ### API
 

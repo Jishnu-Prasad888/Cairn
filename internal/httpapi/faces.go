@@ -299,11 +299,14 @@ func (s *Server) handleMergePeople(w http.ResponseWriter, r *http.Request, u *au
 			CodeBadRequest, "Cannot merge a person into itself.")
 		return
 	}
-	if err := s.faces.MergePerson(r.Context(), lib.Root, r.PathValue("personID"), body.SourcePersonID); err != nil {
+	joined, err := s.faces.MergePerson(r.Context(), lib.Root, r.PathValue("personID"), body.SourcePersonID)
+	if err != nil {
 		s.writeFaceError(w, r, err)
 		return
 	}
-	writeJSON(w, s.logger, http.StatusOK, map[string]any{"merged": true})
+	// "consolidated" counts other unnamed groups that were so similar they were
+	// folded in too.
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{"merged": true, "consolidated": joined})
 }
 
 // handleListFaces — GET /api/v1/libraries/{id}/faces

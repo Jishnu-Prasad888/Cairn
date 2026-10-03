@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { mlWorthAsking } from '../../api/mlSwitch';
 import {
   faceImageUrl,
   getSimilarFiles,
@@ -35,7 +36,7 @@ export function PeoplePanel({ libraryId, file }: { libraryId: string; file: File
     let cancelled = false;
     void (async () => {
       try {
-        const resp = await listPeople(libraryId);
+        const resp = (await mlWorthAsking()) ? await listPeople(libraryId) : { people: [] };
         const all = resp.people ?? [];
         const results = await Promise.all(
           all.map((person) =>

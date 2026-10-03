@@ -18,6 +18,7 @@ import { createUser, listUsers, revokeUserSessions } from '../api/queries';
 import type { HealthResponse, User, UserRole, VersionResponse } from '../api/types';
 import Brand from '../components/Brand';
 import { ConfirmDialog } from '../components/Dialog';
+import { useFfmpegAvailable } from '../api/ffmpeg';
 import { PageHeader } from '../components/States';
 import { Icon, type IconName } from '../components/ui/Icon';
 import { formatDate } from '../lib/dates';
@@ -102,6 +103,7 @@ function LinkRow({
 }
 
 export default function SettingsPage() {
+  const ffmpeg = useFfmpegAvailable();
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
   const { hash } = useLocation();
@@ -198,6 +200,12 @@ export default function SettingsPage() {
   return (
     <main className="page page-narrow settings-page">
       <PageHeader title="Settings" />
+      {ffmpeg === false && (
+        <p className="settings-warning" role="alert" data-testid="ffmpeg-warning">
+          ffmpeg is not installed on the server, so some video thumbnails will not appear. Install
+          ffmpeg and restart Cairn.
+        </p>
+      )}
 
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="Settings sections">

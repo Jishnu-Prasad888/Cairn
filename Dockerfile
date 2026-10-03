@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # --- Stage 3: minimal runtime ---
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata ffmpeg
 RUN addgroup -S cairn && adduser -S cairn -G cairn \
   && mkdir -p /data && chown cairn:cairn /data
 COPY --from=build /out/cairn /usr/local/bin/cairn

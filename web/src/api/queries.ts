@@ -427,9 +427,12 @@ export const setPersonCover = (libraryId: string, personId: string, faceId: stri
  * faces move to the target. The direction matters — the URL is the survivor.
  */
 export const mergePeople = (libraryId: string, personId: string, sourceId: string) =>
-  apiPost<{ merged: boolean }>(`/libraries/${libraryId}/people/${personId}/merge`, {
-    source_person_id: sourceId,
-  });
+  apiPost<{ merged: boolean; consolidated?: number }>(
+    `/libraries/${libraryId}/people/${personId}/merge`,
+    {
+      source_person_id: sourceId,
+    },
+  );
 
 export const assignFace = (libraryId: string, personId: string, faceId: string) =>
   apiPost<{ assigned: boolean }>(`/libraries/${libraryId}/people/${personId}/faces/${faceId}`, {});
@@ -585,8 +588,42 @@ function shareRequest<T>(path: string, password?: string): Promise<T> {
 
 export interface MLSettings {
   enabled: boolean;
+  /** How alike two faces must be to be grouped as one person (0..1). */
+  face_threshold: number;
+  face_threshold_default: number;
 }
 
 export const getMLSettings = () => apiGet<MLSettings>('/ml/settings');
 
 export const setMLSettings = (enabled: boolean) => apiPut<MLSettings>('/ml/settings', { enabled });
+
+/** Set the face-matching threshold; 0 restores the model's default. */
+export const setFaceThreshold = (face_threshold: number) =>
+  apiPut<MLSettings>('/ml/settings', { face_threshold });
+
+/* --------------------------- system capabilities --------------------------- */
+
+export interface SystemCapabilities {
+  /** Whether the server found ffmpeg (video thumbnails). */
+  ffmpeg: boolean;
+  /** Whether the learned face-recognition model is loaded. */
+  face_model: boolean;
+}
+
+export const getSystemCapabilities = () => apiGet<SystemCapabilities>('/system/capabilities');
+
+/* ----------------------- face-recognition model download ---------------------- */
+
+export interface FaceModelStatus {
+  installed: boolean;
+  state: 'idle' | 'downloading' | 'done' | 'error';
+  downloaded: number;
+  /** 0 when the server did not report a size. */
+  total: number;
+  error?: string;
+  url: string;
+}
+
+export const getFaceModelStatus = () => apiGet<FaceModelStatus>('/ml/model');
+
+export const startFaceModelDownload = () => apiPost<FaceModelStatus>('/ml/model/download', {});
