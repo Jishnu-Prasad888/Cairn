@@ -15,6 +15,7 @@ import { useCallback, useLayoutEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
+import { mlWorthAsking } from '../api/mlSwitch';
 import { useLibraryResource } from '../api/resources';
 import { faceImageUrl, listAlbums, listFiles, listMemories, listPeople } from '../api/queries';
 import type { Album, FileSummary, Library, Memory, Person } from '../api/types';
@@ -125,9 +126,14 @@ function Home({ library }: { library: Library }) {
           .catch(() => [] as Memory[]),
         // A server without face support has no people route; that is "not
         // available", not "nobody".
-        listPeople(id)
-          .then((r) => r.people ?? [])
-          .catch(() => null),
+        // While ML is off there are no people to ask about (the route is 503).
+        mlWorthAsking().then((ask) =>
+          ask
+            ? listPeople(id)
+                .then((r) => r.people ?? [])
+                .catch(() => null)
+            : null,
+        ),
       ]);
       return {
         recent,

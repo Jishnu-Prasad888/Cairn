@@ -202,6 +202,34 @@ describe('PeoplePage', () => {
     });
   });
 
+  it('merges when one person card is dropped on another, after asking', async () => {
+    const fetchMock = setup();
+    await screen.findByTestId('people-grid');
+
+    const store: Record<string, string> = {};
+    const dataTransfer = {
+      types: ['application/x-cairn-person'],
+      setData: (k: string, v: string) => {
+        store[k] = v;
+      },
+      getData: (k: string) => store[k] ?? '',
+      effectAllowed: '',
+      dropEffect: '',
+    };
+    fireEvent.dragStart(screen.getByTestId('person-p1'), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId('person-p2'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('person-p2'), { dataTransfer });
+
+    // Nothing is merged until the person confirms.
+    const dialog = await screen.findByTestId('drop-merge-dialog');
+    expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p2/merge')).toBe(false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, merge' }));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/people/p2/merge')).toBe(true);
+    });
+  });
+
   it('says so when there is nobody to merge into', async () => {
     mockApi([
       (url) => (/\/libraries\/lib1\/ml\/faces$/.test(url) ? json(status) : undefined),

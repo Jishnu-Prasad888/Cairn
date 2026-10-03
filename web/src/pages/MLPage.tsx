@@ -13,9 +13,10 @@
  * is rendered as an explanation rather than an error.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
+import { openFaceModelDialog, useFaceModel } from '../api/faceModel';
 import { updateMLSwitch, useMLSwitch } from '../api/mlSwitch';
 import { ApiError } from '../api/client';
 import { useLibraryGate } from '../api/libraries';
@@ -23,11 +24,13 @@ import { useLibraryResource } from '../api/resources';
 import {
   clusterFaces,
   getFaceStatus,
+  getMLSettings,
   getMLStatus,
   purgeFaces,
   purgeSimilarity,
   runFacePass,
   runSimilarityPass,
+  setFaceThreshold,
 } from '../api/queries';
 import type { FaceStatus, MLStatus } from '../api/types';
 import { ConfirmDialog } from '../components/Dialog';
@@ -91,13 +94,57 @@ export default function MLPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [job, setJob] = useState<JobState>(null);
   const mlOn = useMLSwitch();
+  const { status: modelStatus } = useFaceModel();
   const [switching, setSwitching] = useState(false);
+  const [threshold, setThreshold] = useState<{ value: number; saved: number; def: number } | null>(
+    null,
+  );
+  const [savingThreshold, setSavingThreshold] = useState(false);
   const [purging, setPurging] = useState<'similarity' | 'faces' | null>(null);
+
+  useEffect(() => {
+    getMLSettings().then(
+      (m) =>
+        setThreshold({
+          value: m.face_threshold,
+          saved: m.face_threshold,
+          def: m.face_threshold_default,
+        }),
+      () => setThreshold(null),
+    );
+  }, []);
+
+  const saveThreshold = (value: number) => {
+    setSavingThreshold(true);
+    setFaceThreshold(value)
+      .then((m) => {
+        setThreshold({
+          value: m.face_threshold,
+          saved: m.face_threshold,
+          def: m.face_threshold_default,
+        });
+        setJob({
+          message:
+            'Matching threshold saved. It applies to faces grouped from now on; people already formed are unchanged.',
+          error: null,
+        });
+      })
+      .catch((e: unknown) =>
+        setJob({ message: '', error: e instanceof Error ? e.message : String(e) }),
+      )
+      .finally(() => setSavingThreshold(false));
+  };
 
   // The loaders are inline: `useLibraryResource` reads them through a ref, so a
   // fresh arrow on every render is free and this stays lint-clean.
   const status = useLibraryResource<Section<MLStatus>>((id) => asSection(getMLStatus)(id));
-  const faces = useLibraryResource<Section<FaceStatus>>((id) => asSection(getFaceStatus)(id));
+  // While ML is off the face routes answer 503, which the browser logs as an
+  // error; there is nothing to read, so do not ask.
+  const faces = useLibraryResource<Section<FaceStatus>>(
+    (id) => asSection(getFaceStatus)(id),
+    [mlOn],
+    mlOn !== false,
+  );
 
   // `null` means "still loading", which is available enough not to flash the
   // "not available" explanation before the answer arrives.
@@ -301,13 +348,26 @@ export default function MLPage() {
           )}
         </div>
 
-        {!facesAvailable ? (
+        {mlOn === false ? (
+          <p className="muted" data-testid="faces-off">
+            Machine learning is off. Turn it on above to detect faces and group them into people.
+          </p>
+        ) : !facesAvailable ? (
           <p className="muted" data-testid="faces-unavailable">
             This Cairn server was built without face recognition. People, albums, and tags all still
             work — this only affects automatic face detection and clustering.
           </p>
         ) : (
           <>
+            {modelStatus && !modelStatus.installed && (
+              <p className="settings-warning" role="alert" data-testid="face-model-warning">
+                The face-recognition model is not installed, so people are matched with a basic
+                method that groups poorly.{' '}
+                <button type="button" className="link-button" onClick={openFaceModelDialog}>
+                  {modelStatus.state === 'downloading' ? 'Show download progress' : 'Download it'}
+                </button>
+              </p>
+            )}
             {faces.loading && <LoadingState label="Reading face status…" />}
             {faces.error && <ErrorState message={faces.error} onRetry={faces.reload} />}
             {face && (
@@ -319,6 +379,58 @@ export default function MLPage() {
                   value={String(face.unassigned)}
                   hint={face.unassigned ? 'Name these on the People page' : 'Every face has a name'}
                 />
+              </div>
+            )}
+
+            {threshold && (
+              <div className="ml-threshold" data-testid="face-threshold">
+                <label htmlFor="face-threshold-input">
+                  Matching strictness: <strong>{threshold.value.toFixed(2)}</strong>
+                </label>
+                <input
+                  id="face-threshold-input"
+                  type="range"
+                  min={0.2}
+                  max={0.95}
+                  step={0.01}
+                  value={threshold.value}
+                  disabled={user?.role !== 'admin' || savingThreshold}
+                  onChange={(e) => setThreshold({ ...threshold, value: Number(e.target.value) })}
+                />
+                <div className="ml-threshold-scale muted">
+                  <span>Looser — groups more faces together</span>
+                  <span>Stricter — splits similar faces apart</span>
+                </div>
+                <div className="ml-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => saveThreshold(threshold.value)}
+                    disabled={
+                      user?.role !== 'admin' ||
+                      savingThreshold ||
+                      threshold.value === threshold.saved
+                    }
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => saveThreshold(0)}
+                    disabled={
+                      user?.role !== 'admin' || savingThreshold || threshold.saved === threshold.def
+                    }
+                  >
+                    Reset to {threshold.def.toFixed(2)}
+                  </button>
+                </div>
+                <p className="ml-note">
+                  If different people end up in one group, make it stricter; if one person is split
+                  into several, make it looser. Applies to faces grouped from now on — to regroup,
+                  discard face data and detect again.
+                  {user?.role !== 'admin' && ' Only an administrator can change this.'}
+                </p>
               </div>
             )}
 

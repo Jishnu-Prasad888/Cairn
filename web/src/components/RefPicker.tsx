@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { mlWorthAsking } from '../api/mlSwitch';
 import { listAlbums, listMemories, listPeople, listTags, searchFiles } from '../api/queries';
 import type { RefType } from '../api/types';
 import './RefPicker.css';
@@ -54,6 +55,7 @@ async function search(libraryId: string, type: RefType, term: string): Promise<C
         .map((a) => ({ id: a.id, label: a.name, detail: a.description }));
     }
     case 'person': {
+      if (!(await mlWorthAsking())) return [];
       const resp = await listPeople(libraryId);
       const needle = term.toLowerCase();
       return (resp.people ?? [])

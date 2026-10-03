@@ -11,7 +11,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { useLibraries } from '../../api/libraries';
+import { useFfmpegAvailable } from '../../api/ffmpeg';
 import { notifyLibraryChanged } from '../../api/libraryEvents';
+import { useToast } from '../ui/Toast';
+import { FaceModelHost } from './FaceModelHost';
 import { UploadTray } from '../upload/UploadTray';
 import { MobileNav } from './MobileNav';
 import { ShortcutsDialog } from './ShortcutsDialog';
@@ -33,6 +36,26 @@ export default function AppShell() {
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { libraryId } = useLibraries();
+
+  // Once per sign-in (per tab session): without ffmpeg many videos get no
+  // thumbnail. The toast closes itself after 7 seconds or when dismissed.
+  const toast = useToast();
+  const ffmpeg = useFfmpegAvailable();
+  useEffect(() => {
+    if (ffmpeg !== false) return;
+    try {
+      if (sessionStorage.getItem('cairn.ffmpegWarned')) return;
+      sessionStorage.setItem('cairn.ffmpegWarned', '1');
+    } catch {
+      // Storage unavailable: warn on every load rather than never.
+    }
+    toast({
+      message:
+        'ffmpeg is not installed on the server, so some video thumbnails will not appear. Install ffmpeg and restart Cairn.',
+      tone: 'error',
+      duration: 7000,
+    });
+  }, [ffmpeg, toast]);
 
   // The server rescans the library on its own; this notices when that found
   // something (administrators get the index counts)...
@@ -129,6 +152,7 @@ export default function AppShell() {
       />
 
       <UploadTray />
+      <FaceModelHost />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );

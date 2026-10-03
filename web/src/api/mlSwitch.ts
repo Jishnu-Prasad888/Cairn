@@ -14,6 +14,7 @@ import { getMLSettings, setMLSettings } from './queries';
 
 let value: boolean | null = null;
 let started = false;
+let inflight: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 function publish(next: boolean | null) {
@@ -28,15 +29,30 @@ function subscribe(listener: () => void) {
 
 /** Read the switch from the server (once per page load, or when forced). */
 export function refreshMLSwitch(force = false): Promise<void> {
-  if (started && !force) return Promise.resolve();
+  if (started && !force) return inflight ?? Promise.resolve();
   started = true;
-  return getMLSettings().then(
-    (s) => publish(s.enabled),
-    () => {
-      // Signed out, or a server without ML routes: leave the answer unknown.
-      started = false;
-    },
-  );
+  inflight = getMLSettings()
+    .then(
+      (s) => publish(s.enabled),
+      () => {
+        // Signed out, or a server without ML routes: leave the answer unknown.
+        started = false;
+      },
+    )
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
+/**
+ * Whether ML-dependent requests (people, faces) are worth making. They answer
+ * 503 while ML is off, which the browser logs as an error even when handled,
+ * so callers ask first. Unknown counts as "yes": nothing is hidden on a guess.
+ */
+export async function mlWorthAsking(): Promise<boolean> {
+  await refreshMLSwitch();
+  return value !== false;
 }
 
 /** Turn ML on or off for the whole server (administrators only). */
