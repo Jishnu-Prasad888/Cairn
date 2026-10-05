@@ -510,9 +510,7 @@ export default function MLPage() {
                     />
                     <StatTile
                       label="Last pass"
-                      value={
-                        ml.last_pass_at ? new Date(ml.last_pass_at).toLocaleString() : 'Never'
-                      }
+                      value={ml.last_pass_at ? new Date(ml.last_pass_at).toLocaleString() : 'Never'}
                       hint={ml.provider ? `Provider ${ml.provider}` : undefined}
                     />
                   </div>
@@ -632,11 +630,14 @@ export default function MLPage() {
                   {face.running ? (
                     <p className="ml-note" role="status" data-testid="faces-working">
                       Working — detecting and grouping faces now.
-                      {face.pending ? ` ${fmt(face.pending)} photo${face.pending === 1 ? '' : 's'} left.` : ''}
+                      {face.pending
+                        ? ` ${fmt(face.pending)} photo${face.pending === 1 ? '' : 's'} left.`
+                        : ''}
                     </p>
                   ) : face.pending ? (
                     <p className="ml-note" data-testid="faces-waiting">
-                      {fmt(face.pending)} photo{face.pending === 1 ? '' : 's'} waiting for detection.
+                      {fmt(face.pending)} photo{face.pending === 1 ? '' : 's'} waiting for
+                      detection.
                     </p>
                   ) : null}
                 </>
@@ -662,7 +663,13 @@ export default function MLPage() {
                     run('faces', 'cluster', clusterFaces, 'Face clustering pass started.')
                   }
                   disabled={locked || face?.enabled === false || !face?.faces || face?.running}
-                  title={face?.running ? 'A pass is already running.' : face?.faces ? lockReason : 'Detect faces first.'}
+                  title={
+                    face?.running
+                      ? 'A pass is already running.'
+                      : face?.faces
+                        ? lockReason
+                        : 'Detect faces first.'
+                  }
                   data-testid="run-face-cluster"
                 >
                   {busy === 'cluster' ? 'Starting…' : face?.running ? 'Running…' : 'Group faces'}
