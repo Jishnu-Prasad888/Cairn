@@ -18,8 +18,7 @@ const mlStatus = {
   enabled: true,
   provider: 'clip',
   provider_version: 1,
-  indexed: 8421,
-  signed: 96340,
+  signatured: 8421,
   pending: 12,
   last_pass_at: '2026-09-01T00:00:00Z',
 };
@@ -56,8 +55,8 @@ describe('MLPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Machine learning' })).toBeInTheDocument();
     const stats = await screen.findByTestId('ml-stats');
-    expect(within(stats).getByText('Signatures').previousSibling).toHaveTextContent('8421');
-    expect(within(stats).getByText('Neighbours kept').previousSibling).toHaveTextContent('96340');
+    // Numbers are formatted with the locale's thousands separator (e.g. "8,421").
+    expect(within(stats).getByText('Signatures').previousSibling).toHaveTextContent('8,421');
     // Pending work gets a hint saying what to do about it.
     expect(within(stats).getByText('A pass will pick these up')).toBeInTheDocument();
 
@@ -68,6 +67,39 @@ describe('MLPage', () => {
 
     expect(screen.getByTestId('ml-enabled')).toBeInTheDocument();
     expect(screen.getByTestId('faces-enabled')).toBeInTheDocument();
+  });
+
+  it('shows a similarity pass running even when this page did not start it', async () => {
+    setup([
+      (url) =>
+        url.endsWith('/api/v1/libraries/lib1/ml')
+          ? json({ ...mlStatus, running: true })
+          : undefined,
+    ]);
+
+    expect(await screen.findByTestId('ml-running')).toHaveTextContent('Scanning…');
+    expect(screen.queryByTestId('ml-enabled')).not.toBeInTheDocument();
+    expect(screen.getByTestId('ml-progress')).toHaveTextContent('photos analysed so far');
+    const button = screen.getByTestId('run-similarity-pass');
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent('Running…');
+  });
+
+  it('shows a face pass running even when this page did not start it', async () => {
+    setup([
+      (url) =>
+        url.endsWith('/api/v1/libraries/lib1/ml/faces')
+          ? json({ ...faceStatus, running: true, pending: 4 })
+          : undefined,
+    ]);
+
+    expect(await screen.findByTestId('faces-running')).toHaveTextContent('Working…');
+    expect(screen.queryByTestId('faces-enabled')).not.toBeInTheDocument();
+    expect(screen.getByTestId('faces-working')).toHaveTextContent('4 photos left');
+    const detect = screen.getByTestId('run-face-pass');
+    expect(detect).toBeDisabled();
+    expect(detect).toHaveTextContent('Running…');
+    expect(screen.getByTestId('run-face-cluster')).toBeDisabled();
   });
 
   it('starts a similarity pass and says it is background work', async () => {
@@ -202,7 +234,7 @@ describe('MLPage', () => {
           : undefined,
       (url) =>
         url.endsWith('/api/v1/libraries/lib1/ml')
-          ? json({ ...mlStatus, enabled: false, indexed: 0, signed: 0, pending: 0 })
+          ? json({ ...mlStatus, enabled: false, signatured: 0, pending: 0 })
           : undefined,
     ]);
 
@@ -286,7 +318,7 @@ describe('MLPage — unavailable payloads', () => {
     setup([
       (url) =>
         url.endsWith('/api/v1/libraries/lib1/ml')
-          ? json({ enabled: false, indexed: 0, signed: 0, pending: 0 })
+          ? json({ enabled: false, signatured: 0, pending: 0 })
           : undefined,
     ]);
 

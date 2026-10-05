@@ -161,9 +161,12 @@ export interface MLStatus {
   enabled: boolean;
   provider?: string;
   provider_version?: number;
-  indexed?: number;
-  signed?: number;
+  /** Photos with a stored signature. */
+  signatured?: number;
+  /** Present photos with no signature yet. */
   pending?: number;
+  /** A similarity pass is running or queued on the server. */
+  running?: boolean;
   last_pass_at?: string;
   error?: string;
 }

@@ -34,6 +34,11 @@ type Manager struct {
 	cfg      Config
 	provider Provider
 	enabled  atomic.Bool
+	running  atomic.Int32 // passes currently running
+
+	mu         sync.Mutex // guards lastPassAt and lastErr
+	lastPassAt time.Time
+	lastErr    string
 }
 
 // NewManager returns an ML manager for the given provider. The provider must
@@ -101,6 +106,9 @@ func (m *Manager) Pass(ctx context.Context, libraryID, root string) (int, error)
 		return 0, nil
 	}
 
+	m.running.Add(1)
+	defer m.running.Add(-1)
+
 	m.logger.Info("ml pass started", "library_id", libraryID, "files", len(files))
 
 	workers := m.cfg.Workers
@@ -163,10 +171,26 @@ feed:
 	elapsed := time.Since(start)
 	m.logger.Info("ml pass finished", "library_id", libraryID,
 		"processed", processed, "elapsed", elapsed.String())
+
+	m.recordPassResult(firstErr)
 	if firstErr != nil {
 		return processed, firstErr
 	}
 	return processed, nil
+}
+
+// recordPassResult stores when a pass last finished and, if it failed, why —
+// so the status endpoint can tell the UI the pass is done without the caller
+// having to stay on the page that started it.
+func (m *Manager) recordPassResult(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastPassAt = time.Now()
+	if err != nil {
+		m.lastErr = err.Error()
+	} else {
+		m.lastErr = ""
+	}
 }
 
 // skipError marks a per-file failure (unreadable or undecodable image) that
@@ -201,23 +225,42 @@ func (m *Manager) signature(ctx context.Context, store *Store, root string, uf U
 
 // Status describes the current similarity state for a library.
 type Status struct {
-	LibraryID       string    `json:"library_id"`
-	Enabled         bool      `json:"enabled"`
-	Provider        string    `json:"provider"`
-	ProviderVersion int       `json:"provider_version"`
-	SigCount        int       `json:"signatured"`
-	DistanceLimit   int       `json:"distance_limit"`
-	LastPassAt      time.Time `json:"last_pass_at,omitempty"`
+	LibraryID       string `json:"library_id"`
+	Enabled         bool   `json:"enabled"`
+	Provider        string `json:"provider"`
+	ProviderVersion int    `json:"provider_version"`
+	SigCount        int    `json:"signatured"`
+	DistanceLimit   int    `json:"distance_limit"`
+	// Running is true while a similarity pass is running or queued, so the UI
+	// can wait for it instead of guessing.
+	Running bool `json:"running"`
+	// Pending is how many present photos have no signature yet.
+	Pending int `json:"pending"`
+	// LastPassAt is when a pass last finished, nil if none has yet. A pointer
+	// so the zero time is omitted instead of serialized as a real-looking date.
+	LastPassAt *time.Time `json:"last_pass_at,omitempty"`
+	// Error is the error the last pass finished with, if any.
+	Error string `json:"error,omitempty"`
 }
 
 // Status reports the ML similarity state for the library at root.
 func (m *Manager) Status(ctx context.Context, libraryID, root string) (*Status, error) {
+	m.mu.Lock()
+	lastPassAt := m.lastPassAt
+	lastErr := m.lastErr
+	m.mu.Unlock()
+
 	st := &Status{
 		LibraryID:       libraryID,
 		Enabled:         m.Enabled(),
 		Provider:        m.ProviderName(),
 		ProviderVersion: m.ProviderVersion(),
 		DistanceLimit:   m.cfg.DistanceThreshold,
+		Running:         m.running.Load() > 0,
+		Error:           lastErr,
+	}
+	if !lastPassAt.IsZero() {
+		st.LastPassAt = &lastPassAt
 	}
 	if !st.Enabled {
 		return st, nil
@@ -227,7 +270,13 @@ func (m *Manager) Status(ctx context.Context, libraryID, root string) (*Status, 
 		return nil, err
 	}
 	defer func() { _ = db.Close() }()
-	n, err := NewStore(db.DB()).Count(ctx)
+	store := NewStore(db.DB())
+	unsigned, err := store.IDsWithoutSignature(ctx, m.provider.Name(), m.provider.Version())
+	if err != nil {
+		return nil, err
+	}
+	st.Pending = len(unsigned)
+	n, err := store.Count(ctx)
 	if err != nil {
 		return nil, err
 	}
