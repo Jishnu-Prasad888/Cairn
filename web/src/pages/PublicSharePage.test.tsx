@@ -97,7 +97,9 @@ describe('PublicSharePage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /library:lib1/ })).toBeInTheDocument(),
     );
-    expect(called(fetchMock, 'GET', '/api/v1/shares/tok1/files?')).toBe(true);
+    // The heading comes from the share info; the file list is requested right
+    // after it, so wait for that request rather than assuming it already went.
+    await waitFor(() => expect(called(fetchMock, 'GET', '/api/v1/shares/tok1/files?')).toBe(true));
     // The credential is a header, so a link stays safe to paste into a chat.
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes('hunter2'))).toBe(true);
   });
