@@ -152,6 +152,10 @@ type FaceStatus struct {
 	// Running is true while a detection or grouping pass is running or
 	// queued, so the UI can wait for it instead of guessing.
 	Running bool `json:"running"`
+	// Pending is how many photos are waiting for face detection; BatchSize is
+	// how many must be waiting before the next run starts by itself.
+	Pending   int `json:"pending"`
+	BatchSize int `json:"batch_size"`
 }
 
 // Status reports the face state for the library at root.
@@ -189,7 +193,29 @@ func (m *FaceManager) Status(ctx context.Context, root string) (*FaceStatus, err
 		return nil, err
 	}
 	st.Unassigned = len(unassigned)
+	if p := m.prov(); p != nil {
+		files, err := store.FilesToScan(ctx, p.Name(), p.Version())
+		if err != nil {
+			return nil, err
+		}
+		st.Pending = len(files)
+	}
 	return st, nil
+}
+
+// Pending counts the present photos that face detection has not seen yet.
+func (m *FaceManager) Pending(ctx context.Context, root string) (int, error) {
+	prov := m.prov()
+	if prov == nil {
+		return 0, nil
+	}
+	db, err := openLibraryDB(root)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = db.Close() }()
+	files, err := NewFaceStore(db.DB()).FilesToScan(ctx, prov.Name(), prov.Version())
+	return len(files), err
 }
 
 // Pass runs face detection over every present photo missing a signature for

@@ -68,6 +68,18 @@ results with zero dependencies — the right first ML capability. Model versioni
 is avoided by storing the provider name + version alongside each signature, so
 a future provider can coexist or be garbage-collected.
 
+### Current algorithm (provider `perceptual_hash`, version 2)
+
+The built-in provider is a DCT perceptual hash: the image is shrunk to a
+32×32 grayscale copy, a 2-D DCT keeps its 8×8 lowest frequencies (the coarse
+structure), and each coefficient above the median of the AC terms sets a bit.
+It survives resizing, re-encoding and mild exposure/colour edits, unlike the
+average hash it replaced (version 1 signatures are recomputed automatically).
+Looking up similar files also (a) signs the file being viewed on the spot if it
+has no signature yet, and (b) always lists byte-identical files (same content
+hash) first at 100%. Only photos are signed; a file that cannot be decoded is
+logged and skipped without stopping the pass.
+
 ## Storage and lifecycle
 
 - Signatures live in the per-library database: a new `ml_signatures` table
@@ -123,6 +135,20 @@ the indexer completion path (a scan finishing is the natural moment to refresh
 signatures) and by an explicit admin API call. Passes are non-blocking: the
 HTTP call returns after the pass is enqueued. This keeps ML strictly secondary
 to indexing and gives an obvious retry path (`POST .../ml/similarity/pass`).
+
+### Batching new images
+
+After every scan (the periodic auto-scan and the catch-up scan at startup
+included, so files uploaded or moved in by hand — even while Cairn was
+stopped — are noticed) Cairn counts the images the models have not processed.
+Nothing extra is stored for that: the library database already records which
+files have a signature / face scan, so the count is simply what is missing.
+When the count reaches the **batch size** (Machine learning page, admin only;
+`PUT /api/v1/ml/settings {"batch_size": N}`, default 1 = every new image) the
+models run over everything waiting; fewer stay pending and are counted again
+after the next scan. Lowering the batch size releases waiting images at once.
+Turning ML on, installing a model and the manual pass endpoints ignore the batch
+size and process everything. The face status reports `pending`.
 
 ## Configuration
 

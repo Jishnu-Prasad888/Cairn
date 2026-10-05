@@ -134,7 +134,7 @@ func run() error {
 		Enabled:           cfg.MLEnabled,
 		Workers:           cfg.MLWorkers,
 		DistanceThreshold: cfg.MLDistanceThreshold,
-	}, ml.AverageHashProvider{})
+	}, ml.PerceptualHashProvider{})
 
 	// Face recognition requires two models:
 	//   1. SCRFD detector  (face-detector.onnx  / CAIRN_ML_FACE_DETECTOR_MODEL)

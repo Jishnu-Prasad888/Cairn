@@ -177,6 +177,8 @@ export interface FaceStatus {
   unassigned: number;
   /** A detection or grouping pass is running or queued on the server. */
   running?: boolean;
+  /** Photos waiting for face detection. */
+  pending?: number;
 }
 
 export interface Person {

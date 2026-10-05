@@ -88,8 +88,19 @@
   background: var(--color-surface);
 }
 
+/* No thumbnail: a greyed-out icon on black, in light and dark themes alike. */
+.media-tile.is-placeholder {
+  background: #000;
+}
+
 .media-tile.is-placeholder .media-tile-glyph {
   padding-bottom: var(--space-5);
+  color: #6b6b6b;
+  background: #000;
+}
+
+.media-tile.is-placeholder .media-tile-caption {
+  color: #8a8a8a;
 }
 
 .media-tile-caption {

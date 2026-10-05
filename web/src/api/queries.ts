@@ -598,6 +598,8 @@ export interface MLSettings {
   /** How alike two faces must be to be grouped as one person (0..1). */
   face_threshold: number;
   face_threshold_default: number;
+  /** New, unprocessed images that must pile up before the models run. */
+  batch_size: number;
 }
 
 export const getMLSettings = () => apiGet<MLSettings>('/ml/settings');
@@ -607,6 +609,10 @@ export const setMLSettings = (enabled: boolean) => apiPut<MLSettings>('/ml/setti
 /** Set the face-matching threshold; 0 restores the model's default. */
 export const setFaceThreshold = (face_threshold: number) =>
   apiPut<MLSettings>('/ml/settings', { face_threshold });
+
+/** Run the models once this many new images are waiting (1 = every image). */
+export const setBatchSize = (batch_size: number) =>
+  apiPut<MLSettings>('/ml/settings', { batch_size });
 
 /* --------------------------- system capabilities --------------------------- */
 

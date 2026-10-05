@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { ApiError } from '../../api/client';
 import { mlWorthAsking } from '../../api/mlSwitch';
 import {
   faceImageUrl,
@@ -213,7 +214,13 @@ export function SimilarPanel({
         if (cancelled) return;
         // ML being disabled is the common case and is not a failure to report
         // as a broken page — say so plainly instead.
-        setError(e instanceof Error ? e.message : String(e));
+        setError(
+          e instanceof ApiError && e.status === 503
+            ? 'off'
+            : e instanceof Error
+              ? e.message
+              : String(e),
+        );
         setSimilar([]);
       });
     return () => {
@@ -228,11 +235,18 @@ export function SimilarPanel({
       </p>
     );
   }
-  if (error) {
+  if (error === 'off') {
     return (
       <p className="muted" data-testid="viewer-similar-unavailable">
-        Similarity search needs the optional local ML component, which is not available on this
-        server.
+        Similarity search is turned off. An administrator can switch on machine learning in Settings
+        → Machine learning.
+      </p>
+    );
+  }
+  if (error) {
+    return (
+      <p className="error-text" role="alert" data-testid="viewer-similar-error">
+        Couldn’t look for similar files: {error}
       </p>
     );
   }

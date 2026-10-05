@@ -72,6 +72,7 @@ func (s *Store) IDsWithoutSignature(ctx context.Context, provider string, versio
 		SELECT f.id, f.rel_path
 		FROM indexed_files f
 		WHERE f.status = 'present'
+		  AND f.media_type = 'photo'
 		  AND NOT EXISTS (
 		      SELECT 1 FROM ml_signatures m
 		      WHERE m.file_id = f.id AND m.provider = ? AND m.version = ?
@@ -136,6 +137,31 @@ func (s *Store) Similar(ctx context.Context, query uint64, limit int, excludeID 
 		return nil, err
 	}
 	return topN(hits, limit), nil
+}
+
+// SameContent returns the present files whose bytes are identical to fileID's
+// (equal content hash), excluding fileID itself. Files not yet hashed have no
+// hash and are never reported here; their signatures still match them.
+func (s *Store) SameContent(ctx context.Context, fileID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT f.id
+		FROM indexed_files f
+		JOIN indexed_files q ON q.content_hash = f.content_hash
+		WHERE q.id = ? AND f.id != q.id AND f.status = 'present'
+		  AND q.content_hash IS NOT NULL AND q.content_hash != ''`, fileID)
+	if err != nil {
+		return nil, fmt.Errorf("query identical files: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // Count returns the number of stored signatures.

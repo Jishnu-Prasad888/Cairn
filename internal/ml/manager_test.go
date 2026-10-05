@@ -7,9 +7,12 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"math"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
@@ -86,8 +89,8 @@ func TestStoreLifecycle(t *testing.T) {
 	}
 	for _, f := range files {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, status, first_seen_at, last_seen_at, indexed_at)
-			VALUES (?, ?, 1, ?, 'present', ?, ?, ?)`, f.id, f.rel, now, now, now, now); err != nil {
+			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, media_type, status, first_seen_at, last_seen_at, indexed_at)
+			VALUES (?, ?, 1, ?, 'photo', 'present', ?, ?, ?)`, f.id, f.rel, now, now, now, now); err != nil {
 			t.Fatalf("seed file: %v", err)
 		}
 	}
@@ -197,8 +200,8 @@ func TestManagerPassAndSimilarity(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		rel := "img" + string(rune('0'+i)) + ".png"
 		_, err := db.ExecContext(ctx, `
-			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, status, first_seen_at, last_seen_at, indexed_at)
-			VALUES (?, ?, 1, ?, 'present', ?, ?, ?)`,
+			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, media_type, status, first_seen_at, last_seen_at, indexed_at)
+			VALUES (?, ?, 1, ?, 'photo', 'present', ?, ?, ?)`,
 			"file"+string(rune('0'+i)), rel, now, now, now, now)
 		if err != nil {
 			t.Fatal(err)
@@ -253,4 +256,97 @@ func TestManagerPassAndSimilarity(t *testing.T) {
 
 func tLog() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// A file that cannot be decoded must not stop the pass or hang it: every
+// worker used to exit on the first bad file, leaving the feeder blocked.
+func TestPassSurvivesUndecodableFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, n := range []string{"a.png", "b.png", "c.png"} {
+		writePNG(t, filepath.Join(root, n), 64, 64, color.RGBA{R: 90, G: 20, B: 200, A: 255})
+	}
+	for _, n := range []string{"bad1.jpg", "bad2.jpg", "bad3.jpg"} {
+		if err := os.WriteFile(filepath.Join(root, n), []byte("not an image"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".cairn"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := librarydb.Open(filepath.Join(root, ".cairn"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := "2026-01-01T00:00:00.000Z"
+	for _, n := range []string{"bad1.jpg", "bad2.jpg", "bad3.jpg", "a.png", "b.png", "c.png"} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, media_type, status, first_seen_at, last_seen_at, indexed_at)
+			VALUES (?, ?, 1, ?, 'photo', 'present', ?, ?, ?)`, n, n, now, now, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+
+	m := ml.NewManager(tLog(), ml.Config{Enabled: true, Workers: 2}, nil)
+	done := make(chan struct{})
+	var n int
+	go func() {
+		defer close(done)
+		n, err = m.Pass(ctx, "lib", root)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Pass hung on undecodable files")
+	}
+	if err != nil || n != 3 {
+		t.Fatalf("Pass = %d, %v; want the 3 readable photos signed", n, err)
+	}
+	// Identical pixels are reported as a perfect match, even for a file whose
+	// signature had not been computed when it was asked about.
+	hits, err := m.Similar(ctx, "lib", root, "a.png", 10)
+	if err != nil || len(hits) != 2 || hits[0].Distance != 0 {
+		t.Fatalf("Similar = %+v, %v; want the two identical images at distance 0", hits, err)
+	}
+}
+
+// The perceptual hash must survive what real "same photo" pairs go through —
+// resizing and mild exposure changes — while telling different pictures apart.
+func TestPerceptualHashRobustness(t *testing.T) {
+	p := ml.PerceptualHashProvider{}
+	scene := func(w, h int, gain float64) image.Image {
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				fx, fy := float64(x)/float64(w), float64(y)/float64(h)
+				v := 120 + 90*math.Sin(6*fx) + 40*math.Cos(9*fy) + 30*math.Sin(14*fx*fy)
+				v *= gain
+				c := uint8(math.Max(0, math.Min(255, v)))
+				img.Set(x, y, color.RGBA{R: c, G: c, B: c, A: 255})
+			}
+		}
+		return img
+	}
+	other := image.NewRGBA(image.Rect(0, 0, 400, 300))
+	for y := 0; y < 300; y++ {
+		for x := 0; x < 400; x++ {
+			c := uint8(255 * ((x/50 + y/50) % 2))
+			other.Set(x, y, color.RGBA{R: c, G: c, B: c, A: 255})
+		}
+	}
+	base, _ := p.Signature(scene(400, 300, 1))
+	resized, _ := p.Signature(scene(800, 600, 1))
+	brighter, _ := p.Signature(scene(400, 300, 1.15))
+	different, _ := p.Signature(other)
+	dist := func(a, b uint64) int { return bits.OnesCount64(a ^ b) }
+	if d := dist(base, resized); d > 4 {
+		t.Errorf("resized distance = %d, want <= 4", d)
+	}
+	if d := dist(base, brighter); d > 8 {
+		t.Errorf("brighter distance = %d, want <= 8", d)
+	}
+	if d := dist(base, different); d <= 10 {
+		t.Errorf("different picture distance = %d, want > 10", d)
+	}
 }

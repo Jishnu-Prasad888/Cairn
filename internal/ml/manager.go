@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,7 +37,7 @@ type Manager struct {
 }
 
 // NewManager returns an ML manager for the given provider. The provider must
-// be non-nil (callers use the average-hash provider as the default).
+// be non-nil (the perceptual-hash provider is the default).
 func NewManager(logger *slog.Logger, cfg Config, provider Provider) *Manager {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 2
@@ -45,7 +46,7 @@ func NewManager(logger *slog.Logger, cfg Config, provider Provider) *Manager {
 		cfg.DistanceThreshold = DefaultThreshold
 	}
 	if provider == nil {
-		provider = AverageHashProvider{}
+		provider = PerceptualHashProvider{}
 	}
 	m := &Manager{logger: logger, cfg: cfg, provider: provider}
 	m.enabled.Store(cfg.Enabled)
@@ -64,6 +65,17 @@ func (m *Manager) ProviderName() string { return m.provider.Name() }
 
 // ProviderVersion returns the active provider's algorithm version.
 func (m *Manager) ProviderVersion() int { return m.provider.Version() }
+
+// Pending counts the present images that have no signature yet.
+func (m *Manager) Pending(ctx context.Context, root string) (int, error) {
+	db, err := openLibraryDB(root)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = db.Close() }()
+	files, err := NewStore(db.DB()).IDsWithoutSignature(ctx, m.provider.Name(), m.provider.Version())
+	return len(files), err
+}
 
 // Pass computes signatures for every present image missing one, with bounded
 // concurrency. Results are written per-file so a cancelled pass still makes
@@ -95,6 +107,8 @@ func (m *Manager) Pass(ctx context.Context, libraryID, root string) (int, error)
 	if workers > len(files) {
 		workers = len(files)
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	jobs := make(chan UnsignedFile)
 	var wg sync.WaitGroup
 	var (
@@ -112,12 +126,19 @@ func (m *Manager) Pass(ctx context.Context, libraryID, root string) (int, error)
 				if err := m.signature(ctx, store, root, uf); err != nil {
 					m.logger.Warn("ml signature failed",
 						"library_id", libraryID, "file_id", uf.FileID, "error", err)
+					var skip skipError
+					if errors.As(err, &skip) {
+						// A file that cannot be read or decoded must not stop
+						// the pass (or leave the feeder blocked with no worker).
+						continue
+					}
 					mu.Lock()
 					if firstErr == nil {
 						firstErr = err
 					}
 					mu.Unlock()
-					return
+					cancel()
+					continue
 				}
 				mu.Lock()
 				processed++
@@ -148,17 +169,23 @@ feed:
 	return processed, nil
 }
 
+// skipError marks a per-file failure (unreadable or undecodable image) that
+// only skips that file, as opposed to a storage failure that stops the pass.
+type skipError struct{ error }
+
+func (e skipError) Unwrap() error { return e.error }
+
 // signature derives and stores a signature for one file, best-effort tolerant
 // of undecodable or deleted files (they are simply skipped).
 func (m *Manager) signature(ctx context.Context, store *Store, root string, uf UnsignedFile) error {
 	abs := filepath.Join(root, filepath.FromSlash(uf.RelPath))
 	img, err := openImage(abs)
 	if err != nil {
-		return err
+		return skipError{err}
 	}
 	sig, err := m.provider.Signature(img)
 	if err != nil {
-		return err
+		return skipError{err}
 	}
 	rec := SignatureRecord{
 		FileID:    uf.FileID,
@@ -228,23 +255,60 @@ func (m *Manager) Similar(ctx context.Context, libraryID, root, fileID string, l
 	if err != nil {
 		return nil, err
 	}
-	if rec == nil {
-		return nil, nil
+	if rec == nil || rec.Provider != m.provider.Name() || rec.Version != m.provider.Version() {
+		// The file being looked at has not been (or is no longer correctly)
+		// signed — sign it now rather than answering "nothing similar".
+		rec, err = m.signNow(ctx, store, root, fileID)
+		if err != nil || rec == nil {
+			return nil, err
+		}
 	}
-	hits, err := store.Similar(ctx, rec.Signature, limit, fileID)
+	hits, err := store.Similar(ctx, rec.Signature, 0, fileID)
 	if err != nil {
 		return nil, err
 	}
-	// Apply the configurable threshold. Zero distance always passes; we use
-	// the manager-configured limit when the caller defaults to it.
 	thr := m.cfg.DistanceThreshold
 	out := hits[:0]
+	seen := make(map[string]bool, len(hits))
 	for _, h := range hits {
 		if h.Distance <= thr {
 			out = append(out, h)
+			seen[h.FileID] = true
 		}
 	}
+	// Byte-identical files are the surest match there is, and they are found
+	// even when their own signature has not been computed yet.
+	same, err := store.SameContent(ctx, fileID)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range same {
+		if !seen[id] {
+			out = append(out, SimilarHit{FileID: id, Distance: 0, Similarity: 1})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Distance < out[j].Distance })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
+}
+
+// signNow computes and stores the signature of one photo. It returns nil when
+// the file is not a readable photo.
+func (m *Manager) signNow(ctx context.Context, store *Store, root, fileID string) (*SignatureRecord, error) {
+	rel, err := store.RelPath(ctx, fileID)
+	if err != nil || rel == "" {
+		return nil, err
+	}
+	if err := m.signature(ctx, store, root, UnsignedFile{FileID: fileID, RelPath: rel}); err != nil {
+		var skip skipError
+		if errors.As(err, &skip) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return store.Get(ctx, fileID)
 }
 
 // Purge deletes all derived similarity signatures for the library. Originals

@@ -11,11 +11,12 @@
  * Pi with a hundred thousand files.
  */
 
-import { useCallback, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { mlWorthAsking } from '../api/mlSwitch';
+import { notifyLibraryChanged } from '../api/libraryEvents';
 import { useLibraryResource } from '../api/resources';
 import { faceImageUrl, listAlbums, listFiles, listMemories, listPeople } from '../api/queries';
 import type { Album, FileSummary, Library, Memory, Person } from '../api/types';
@@ -41,6 +42,9 @@ const HOME_ROWS = 2;
 const MEMORY_MIN_WIDTH = 240;
 const MEMORY_GAP = 12;
 const PHOTO_GAP = 4;
+/** How often Home re-reads itself: fast while empty (a scan may be filling it). */
+const HOME_EMPTY_REFRESH_MS = 3000;
+const HOME_REFRESH_MS = 15000;
 
 /** Width assumed before the first measurement (and in jsdom). */
 const FALLBACK_WIDTH = 1024;
@@ -175,6 +179,23 @@ function Home({ library }: { library: Library }) {
   const empty = data !== null && data.recent.length === 0 && data.albums.length === 0;
   const indexStatus = useIndexStatus(libraryId, empty, false);
   const scanning = empty && isIndexing(indexStatus);
+
+  // Keep the page current without a manual refresh. The shell only announces a
+  // change when the index counts move between two of its polls, which a small
+  // library that finishes scanning in between never does — so Home also asks to
+  // be re-read on a timer: quickly while it has nothing to show, slowly after.
+  // The re-read happens behind the data on screen, so nothing flashes.
+  const hasLoaded = data !== null;
+  useEffect(() => {
+    if (!hasLoaded) return;
+    const timer = setInterval(
+      () => {
+        if (!document.hidden) notifyLibraryChanged(libraryId);
+      },
+      empty ? HOME_EMPTY_REFRESH_MS : HOME_REFRESH_MS,
+    );
+    return () => clearInterval(timer);
+  }, [hasLoaded, empty, libraryId]);
 
   const [recentRef, recentWidth] = useWidth();
   const [memoriesRef, memoriesWidth] = useWidth();

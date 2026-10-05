@@ -31,6 +31,7 @@ import {
   purgeSimilarity,
   runFacePass,
   runSimilarityPass,
+  setBatchSize,
   setFaceThreshold,
 } from '../api/queries';
 import type { FaceStatus, MLStatus } from '../api/types';
@@ -101,6 +102,8 @@ export default function MLPage() {
     null,
   );
   const [savingThreshold, setSavingThreshold] = useState(false);
+  const [batch, setBatch] = useState<{ value: string; saved: number } | null>(null);
+  const [savingBatch, setSavingBatch] = useState(false);
   const [purging, setPurging] = useState<'similarity' | 'faces' | null>(null);
   // Face-pass polling outlives the request that started it; stop it when the
   // page goes away so it does not keep hitting the API.
@@ -113,15 +116,34 @@ export default function MLPage() {
 
   useEffect(() => {
     getMLSettings().then(
-      (m) =>
+      (m) => {
         setThreshold({
           value: m.face_threshold,
           saved: m.face_threshold,
           def: m.face_threshold_default,
-        }),
+        });
+        setBatch({ value: String(m.batch_size), saved: m.batch_size });
+      },
       () => setThreshold(null),
     );
   }, []);
+
+  const saveBatch = (n: number) => {
+    setSavingBatch(true);
+    setBatchSize(n)
+      .then((m) => {
+        setBatch({ value: String(m.batch_size), saved: m.batch_size });
+        setJob({
+          message: `Saved. The models will run whenever ${m.batch_size === 1 ? 'a new image is' : `${m.batch_size} new images are`} waiting.`,
+          error: null,
+        });
+        faces.reload();
+      })
+      .catch((e: unknown) =>
+        setJob({ message: '', error: e instanceof Error ? e.message : String(e) }),
+      )
+      .finally(() => setSavingBatch(false));
+  };
 
   const saveThreshold = (value: number) => {
     setSavingThreshold(true);
@@ -270,6 +292,43 @@ export default function MLPage() {
           is hidden and nothing is analysed; what was found is kept.
           {user?.role !== 'admin' && ' Only an administrator can change this.'}
         </p>
+        {batch && (
+          <div className="ml-batch" data-testid="ml-batch">
+            <label htmlFor="ml-batch-input">New photos to wait for before analysing</label>{' '}
+            <input
+              id="ml-batch-input"
+              type="number"
+              min={1}
+              max={10000}
+              step={1}
+              value={batch.value}
+              disabled={user?.role !== 'admin' || savingBatch}
+              onChange={(e) => setBatch({ ...batch, value: e.target.value })}
+            />{' '}
+            <button
+              type="button"
+              className="button"
+              disabled={
+                user?.role !== 'admin' ||
+                savingBatch ||
+                !Number.isInteger(Number(batch.value)) ||
+                Number(batch.value) < 1 ||
+                Number(batch.value) === batch.saved
+              }
+              onClick={() => saveBatch(Number(batch.value))}
+            >
+              Save
+            </button>
+            <p className="muted">
+              With 1, every new photo is analysed as soon as Cairn notices it. With 10, Cairn waits
+              until ten new photos have piled up, then analyses them together. This counts photos
+              however they arrive — uploaded, or moved into the folder with a file manager, even
+              while Cairn was stopped.
+              {face?.pending !== undefined &&
+                ` Waiting now: ${face.pending} photo${face.pending === 1 ? '' : 's'}.`}
+            </p>
+          </div>
+        )}
       </section>
 
       {/* ---------------------------- similarity --------------------------- */}

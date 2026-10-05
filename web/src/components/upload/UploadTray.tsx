@@ -40,6 +40,12 @@ export function UploadTray() {
         ? `${failed} ${failed === 1 ? 'upload' : 'uploads'} failed`
         : `${done} ${done === 1 ? 'upload' : 'uploads'} complete`;
 
+  // The reason for a failure must not hide behind the collapsed list.
+  const firstFailure = items.find((i) => i.status === 'error');
+  const failureReason = firstFailure
+    ? `${firstFailure.file.name}: ${firstFailure.error ?? 'The upload failed.'}`
+    : null;
+
   return (
     <section className="upload-tray" aria-label="Uploads" data-testid="upload-tray">
       <header className="upload-tray-head">
@@ -52,6 +58,11 @@ export function UploadTray() {
             {active > 0 && ` · ${active} remaining`}
             {failed > 0 && ` · ${failed} failed`}
           </span>
+          {failureReason && !expanded && (
+            <span className="upload-tray-sub upload-tray-reason" title={failureReason}>
+              {failureReason}
+            </span>
+          )}
         </div>
         <button
           type="button"

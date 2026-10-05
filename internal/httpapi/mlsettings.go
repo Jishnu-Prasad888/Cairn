@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
+	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
 )
 
 type mlSettings struct {
@@ -14,17 +16,22 @@ type mlSettings struct {
 	// grouped as one person; FaceThresholdDefault is the model's own value.
 	FaceThreshold        float64 `json:"face_threshold"`
 	FaceThresholdDefault float64 `json:"face_threshold_default"`
+	// BatchSize is how many new, unprocessed images must pile up (uploads or
+	// files moved in by hand) before the models run on them.
+	BatchSize int `json:"batch_size"`
 }
 
 type mlSettingsUpdate struct {
 	Enabled *bool `json:"enabled"`
 	// FaceThreshold 0 restores the default.
 	FaceThreshold *float64 `json:"face_threshold"`
+	BatchSize     *int     `json:"batch_size"`
 }
 
 func (s *Server) currentMLSettings() mlSettings {
 	cur, def := s.mlRuntime.FaceThreshold()
-	return mlSettings{Enabled: s.mlRuntime.Enabled(), FaceThreshold: cur, FaceThresholdDefault: def}
+	return mlSettings{Enabled: s.mlRuntime.Enabled(), FaceThreshold: cur, FaceThresholdDefault: def,
+		BatchSize: s.mlRuntime.BatchSize()}
 }
 
 // handleGetMLSettings — GET /api/v1/ml/settings
@@ -39,9 +46,9 @@ func (s *Server) handleGetMLSettings(w http.ResponseWriter, _ *http.Request, _ *
 func (s *Server) handlePutMLSettings(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	var in mlSettingsUpdate
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in); err != nil ||
-		(in.Enabled == nil && in.FaceThreshold == nil) {
+		(in.Enabled == nil && in.FaceThreshold == nil && in.BatchSize == nil) {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
-			CodeBadRequest, "Body must contain \"enabled\" and/or \"face_threshold\".")
+			CodeBadRequest, "Body must contain \"enabled\", \"face_threshold\" and/or \"batch_size\".")
 		return
 	}
 	if t := in.FaceThreshold; t != nil {
@@ -52,6 +59,19 @@ func (s *Server) handlePutMLSettings(w http.ResponseWriter, r *http.Request, _ *
 		}
 		if err := s.mlRuntime.SetFaceThreshold(r.Context(), *t); err != nil {
 			s.logger.Error("save face threshold", "error", err)
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+				CodeInternal, "Could not save the setting.")
+			return
+		}
+	}
+	if n := in.BatchSize; n != nil {
+		if *n < 1 || *n > ml.MaxBatchSize {
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+				CodeBadRequest, fmt.Sprintf("batch_size must be between 1 and %d.", ml.MaxBatchSize))
+			return
+		}
+		if err := s.mlRuntime.SetBatchSize(r.Context(), *n); err != nil {
+			s.logger.Error("save ml batch size", "error", err)
 			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 				CodeInternal, "Could not save the setting.")
 			return

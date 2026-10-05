@@ -2,6 +2,7 @@ package ml_test
 
 import (
 	"context"
+	"database/sql"
 	"image"
 	"image/color"
 	"image/png"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
+	_ "modernc.org/sqlite"
 )
 
 // fakeFaceProvider detects the single brightest point of an image, reporting
@@ -554,5 +556,77 @@ func TestHoldsAndDeletesStick(t *testing.T) {
 	}
 	if st, _ := m.Status(ctx, root); st.Faces != 0 || st.People != 0 {
 		t.Errorf("status = %+v; want no faces and no people", st)
+	}
+}
+
+// Images wait until a full batch has piled up, however they arrived (the
+// indexer cannot tell uploads from files moved in by hand), and the stored
+// batch size survives a restart.
+func TestRuntimeRunsModelsOnlyOnceABatchIsWaiting(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`CREATE TABLE server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	newRuntime := func() *ml.Runtime {
+		fm := ml.NewFaceManager(tLog(), ml.FaceConfig{Enabled: true, Workers: 1, MinSize: 20}, fakeFaceProvider{})
+		rt := ml.NewRuntime(db, tLog(), ml.NewManager(tLog(), ml.Config{}, nil), fm, false,
+			func(context.Context) ([]ml.Target, error) {
+				return []ml.Target{{ID: "lib", Root: root, Online: true}}, nil
+			})
+		if err := rt.Load(ctx, true); err != nil {
+			t.Fatal(err)
+		}
+		return rt
+	}
+	rt := newRuntime()
+	if err := rt.SetBatchSize(ctx, 3); err != nil {
+		t.Fatal(err)
+	}
+
+	blank := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	seedFiles(t, root, []imgSeed{{id: "a", rel: "a.png", img: blank}, {id: "b", rel: "b.png", img: blank}})
+	rt.AfterScan("lib", root)
+	time.Sleep(300 * time.Millisecond)
+	if n, _ := rt.Pending(ctx, root); n != 2 {
+		t.Fatalf("pending = %d after 2 images with batch 3; want them left waiting", n)
+	}
+
+	// Restart: the batch size and the waiting images are both still there.
+	rt = newRuntime()
+	if rt.BatchSize() != 3 {
+		t.Fatalf("batch size after restart = %d, want 3", rt.BatchSize())
+	}
+	seedFiles(t, root, []imgSeed{{id: "c", rel: "c.png", img: blank}})
+	rt.AfterScan("lib", root)
+	waitFor(t, func() bool { n, _ := rt.Pending(ctx, root); return n == 0 })
+
+	// Lowering the batch size releases images that were waiting.
+	seedFiles(t, root, []imgSeed{{id: "d", rel: "d.png", img: blank}})
+	rt.AfterScan("lib", root)
+	time.Sleep(300 * time.Millisecond)
+	if n, _ := rt.Pending(ctx, root); n != 1 {
+		t.Fatalf("pending = %d, want 1 waiting", n)
+	}
+	if err := rt.SetBatchSize(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { n, _ := rt.Pending(ctx, root); return n == 0 })
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not met in time")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
