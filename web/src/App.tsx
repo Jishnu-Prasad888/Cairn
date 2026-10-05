@@ -12,6 +12,7 @@ import FavoritesPage from './pages/FavoritesPage';
 import FilesPage from './pages/FilesPage';
 import ForbiddenPage from './pages/ForbiddenPage';
 import HomePage from './pages/HomePage';
+import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import PhotosPage from './pages/PhotosPage';
 import SearchPage from './pages/SearchPage';
@@ -68,6 +69,7 @@ export default function App() {
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               {/* Public routes */}
+              <Route path="/landing" element={<LandingPage />} />
               <Route path="/s/:token" element={<PublicSharePage />} />
               <Route path="/setup" element={<SetupPage />} />
               <Route path="/signup" element={<SetupPage />} />
