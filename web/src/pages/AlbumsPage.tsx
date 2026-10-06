@@ -44,6 +44,7 @@ import { Menu, type MenuAnchor, type MenuEntry, useMenuButton } from '../compone
 import { useToast } from '../components/ui/Toast';
 import { ViewerModal } from '../components/ViewerModal';
 import { formatDate } from '../lib/dates';
+import { readTimelineOpen, storeTimelineOpen } from '../lib/timelinePreference';
 import './AlbumsPage.css';
 
 /** The album id in `/albums/:id`, read from the path so the page works in or out of `<Routes>`. */
@@ -254,6 +255,11 @@ function AlbumDetail({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
+  const [timelineOpen, setTimelineOpenState] = useState(readTimelineOpen);
+  const setTimelineOpen = (open: boolean) => {
+    setTimelineOpenState(open);
+    storeTimelineOpen(open);
+  };
 
   const files = useLibraryResource(
     useCallback(
@@ -400,6 +406,17 @@ function AlbumDetail({
             >
               <Icon name="plus" />
               Add media
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={timelineOpen ? 'Hide timeline' : 'Show timeline'}
+              aria-pressed={timelineOpen}
+              title={timelineOpen ? 'Hide timeline' : 'Show timeline'}
+              onClick={() => setTimelineOpen(!timelineOpen)}
+              data-testid="toggle-timeline"
+            >
+              <Icon name="ruler" />
             </button>
             <button
               type="button"
@@ -602,7 +619,7 @@ function AlbumDetail({
         testId="delete-album-dialog"
       />
 
-      {!offline && <Timeline files={list} label={`Album: ${album.name}`} />}
+      {!offline && timelineOpen && <Timeline files={list} label={`Album: ${album.name}`} />}
     </main>
   );
 }

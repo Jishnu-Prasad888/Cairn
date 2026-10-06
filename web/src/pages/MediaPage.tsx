@@ -50,6 +50,7 @@ import { useToast } from '../components/ui/Toast';
 import { useFileDrop } from '../components/upload/useFileDrop';
 import { useUploads } from '../components/upload/UploadProvider';
 import { ViewerModal } from '../components/ViewerModal';
+import { readTimelineOpen, storeTimelineOpen } from '../lib/timelinePreference';
 import './MediaPage.css';
 
 export interface MediaPageConfig {
@@ -178,6 +179,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
   const [range, setRange] = useState<RangeFilters>(EMPTY_RANGE);
   const [showFilters, setShowFilters] = useState(false);
   const [view, setViewState] = useState<'grid' | 'list'>(() => (folderMode ? readView() : 'grid'));
+  const [timelineOpen, setTimelineOpenState] = useState(readTimelineOpen);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [folderBusy, setFolderBusy] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
@@ -193,6 +195,11 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
     } catch {
       // Not remembered.
     }
+  };
+
+  const setTimelineOpen = (open: boolean) => {
+    setTimelineOpenState(open);
+    storeTimelineOpen(open);
   };
 
   /** Change one URL parameter in place (typing a query should not fill history). */
@@ -264,7 +271,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
     withFolders: false,
   };
   const timelineListing = useFileListing(libraryId, timelineQuery, {
-    enabled: showTimeline && folderMode && !q,
+    enabled: showTimeline && timelineOpen && folderMode && !q,
   });
   const timelineFiles = folderMode ? timelineListing.files : files;
 
@@ -441,7 +448,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
     config.grouping && sort === 'mod_time' && !listing.searching ? config.grouping : 'none';
   const filtersActive = hasRangeFilters(range);
   const timelineVisible =
-    showTimeline && (folderMode ? !q : sort === 'mod_time' && !listing.searching);
+    showTimeline && timelineOpen && (folderMode ? !q : sort === 'mod_time' && !listing.searching);
 
   let subtitle = config.subtitle;
   if (!listing.loading && !listing.error && !config.searchPage && total > 0) {
@@ -597,6 +604,19 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
               <Icon name="filter" />
               Filters
             </button>
+            {showTimeline && (
+              <button
+                type="button"
+                className={timelineOpen ? 'button active' : 'button'}
+                onClick={() => setTimelineOpen(!timelineOpen)}
+                aria-pressed={timelineOpen}
+                title={timelineOpen ? 'Hide timeline' : 'Show timeline'}
+                data-testid="toggle-timeline"
+              >
+                <Icon name="ruler" />
+                Timeline
+              </button>
+            )}
             {!listing.searching && (
               <select
                 aria-label="Sort by"

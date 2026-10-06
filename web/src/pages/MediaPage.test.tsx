@@ -1077,6 +1077,8 @@ describe('MediaPage', () => {
       ]);
       renderPage(<MediaPage config={{ ...CONFIG, showTimeline: true }} />);
 
+      await screen.findByTestId('file-grid');
+      fireEvent.click(screen.getByTestId('toggle-timeline'));
       await screen.findByTestId('timeline');
       const calls = filesCalls(fetchMock);
       expect(calls.some(([input]) => String(input).includes('recursive=true'))).toBe(true);
@@ -1099,8 +1101,39 @@ describe('MediaPage', () => {
         />,
       );
 
+      await screen.findByTestId('file-grid');
+      fireEvent.click(screen.getByTestId('toggle-timeline'));
       await screen.findByTestId('timeline');
       expect(filesCalls(fetchMock)).toHaveLength(1);
+    });
+
+    it('stays off until explicitly turned on', async () => {
+      mockApi([
+        (url) => (url.includes('/api/v1/libraries/lib1/files?') ? json(twoMonths) : undefined),
+      ]);
+      renderPage(
+        <MediaPage
+          config={{
+            title: 'Photos',
+            type: 'photo',
+            showTimeline: true,
+            emptyTitle: 'No photos',
+            emptyBody: 'None yet',
+          }}
+        />,
+      );
+
+      await screen.findByTestId('file-grid');
+      expect(screen.queryByTestId('timeline')).not.toBeInTheDocument();
+      const toggle = screen.getByTestId('toggle-timeline');
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+      fireEvent.click(toggle);
+      await screen.findByTestId('timeline');
+      expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+      fireEvent.click(toggle);
+      await waitFor(() => expect(screen.queryByTestId('timeline')).not.toBeInTheDocument());
     });
   });
 });

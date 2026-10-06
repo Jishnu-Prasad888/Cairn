@@ -174,6 +174,10 @@ describe('AlbumsPage', () => {
     await screen.findByTestId('albums-grid');
     fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
 
+    await screen.findByTestId('album-detail');
+    expect(screen.queryByTestId('timeline')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('toggle-timeline'));
+
     expect(await screen.findByTestId('timeline')).toBeInTheDocument();
   });
 
