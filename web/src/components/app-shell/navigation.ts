@@ -36,6 +36,7 @@ export const PRIMARY_NAV: NavItem[] = [
 export const MANAGE_NAV: NavItem[] = [
   { to: '/tags', label: 'Tags', icon: 'tag' },
   { to: '/duplicates', label: 'Duplicates', icon: 'copy' },
+  { to: '/similar', label: 'Similar photos', icon: 'camera' },
   { to: '/libraries', label: 'Libraries', icon: 'drive' },
   { to: '/permissions', label: 'Permissions', icon: 'lock' },
   { to: '/ml', label: 'Machine learning', icon: 'spark' },

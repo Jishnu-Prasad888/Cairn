@@ -71,7 +71,15 @@ describe('AppShell', () => {
       within(manage)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['Tags', 'Duplicates', 'Libraries', 'Permissions', 'Machine learning', 'Backups']);
+    ).toEqual([
+      'Tags',
+      'Duplicates',
+      'Similar photos',
+      'Libraries',
+      'Permissions',
+      'Machine learning',
+      'Backups',
+    ]);
   });
 
   it('marks the current section', async () => {

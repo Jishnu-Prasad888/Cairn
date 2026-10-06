@@ -27,6 +27,7 @@ const LibrariesPage = lazyPage(() => import('./pages/LibrariesPage'));
 const MLPage = lazyPage(() => import('./pages/MLPage'));
 const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'));
 const SharingPage = lazyPage(() => import('./pages/SharingPage'));
+const SimilarPage = lazyPage(() => import('./pages/SimilarPage'));
 const TagsPage = lazyPage(() => import('./pages/TagsPage'));
 const SettingsPage = lazyPage(() => import('./pages/SettingsPage'));
 const MemoriesPage = lazyPage(() => import('./pages/MemoriesPage'));
@@ -99,6 +100,7 @@ export default function App() {
                   <Route path="/shared" element={<SharingPage />} />
 
                   <Route path="/duplicates" element={<DuplicatesPage />} />
+                  <Route path="/similar" element={<SimilarPage />} />
                   <Route path="/libraries" element={<LibrariesPage />} />
                   <Route path="/permissions" element={<PermissionsPage />} />
                   <Route path="/ml" element={<MLPage />} />
