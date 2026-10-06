@@ -26,6 +26,24 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.timeline-track-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.timeline-track-empty::before {
+  content: none;
+}
+
+.timeline-empty-label {
+  font-family: 'Iowan Old Style', 'Charter', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  padding: 0 var(--space-4);
+}
+
 .timeline-track::before {
   content: '';
   position: absolute;

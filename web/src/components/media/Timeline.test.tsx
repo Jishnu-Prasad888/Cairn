@@ -30,9 +30,10 @@ function filesAcross(months: string[]): ReturnType<typeof fileFixture>[] {
 }
 
 describe('Timeline', () => {
-  it('renders nothing when everything falls in one month', () => {
+  it('says so, rather than showing nothing, when everything falls in one month', () => {
     render(<Timeline files={filesAcross(['2026-09', '2026-09'])} label="Photos" />);
-    expect(screen.queryByTestId('timeline')).not.toBeInTheDocument();
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Sep 2026');
   });
 
   it('renders nothing with no files', () => {

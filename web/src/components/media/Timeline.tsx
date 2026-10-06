@@ -196,8 +196,25 @@ export function Timeline({ files, label }: TimelineProps) {
     }
   };
 
-  // A single day, or nothing loaded yet, has nothing worth marking.
-  if (buckets.length < 2) return null;
+  // Nothing loaded yet: no visible feedback until there is something to show.
+  if (total === 0) return null;
+
+  // A ruler needs at least two points in time to mark. Say so rather than
+  // silently showing nothing — turning the timeline on should always do
+  // something visible, even when there isn't enough of a date spread yet.
+  if (buckets.length < 2) {
+    return (
+      <div className="timeline" data-testid="timeline">
+        <div className="timeline-track timeline-track-empty" role="status">
+          <span className="timeline-empty-label">
+            {buckets.length === 1
+              ? `Everything loaded so far is from ${buckets[0]!.label}.`
+              : "The loaded files don't have usable dates."}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   const previewIndex = hoverFraction !== null ? Math.round(hoverFraction * lastIndex) : activeIndex;
   const current = bucketAt(buckets, previewIndex) ?? buckets[0]!;
