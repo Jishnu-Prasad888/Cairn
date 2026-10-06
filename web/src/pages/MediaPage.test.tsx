@@ -1051,4 +1051,56 @@ describe('MediaPage', () => {
     fireEvent.keyDown(box, { key: 'Escape' });
     await waitFor(() => expect(box.value).toBe(''));
   });
+
+  describe('the timeline', () => {
+    const sep = fileFixture({ mod_time: '2026-09-01T00:00:00Z' });
+    const aug = fileFixture({
+      id: 'f2',
+      rel_path: 'aug.png',
+      name: 'aug.png',
+      mod_time: '2026-08-01T00:00:00Z',
+    });
+    const twoMonths = { files: [sep, aug], next_cursor: '', total: 2 };
+
+    function filesCalls(fetchMock: ReturnType<typeof mockApi>) {
+      return fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes('/api/v1/libraries/lib1/files?'),
+      );
+    }
+
+    it('fetches a recursive listing of the folder to scope the timeline to it and its sub-folders', async () => {
+      const fetchMock = mockApi([
+        (url) => (url.includes('recursive=true') ? json(twoMonths) : undefined),
+        (url) =>
+          url.includes('/api/v1/libraries/lib1/folders') ? json({ folders: [] }) : undefined,
+        (url) => (url.includes('/api/v1/libraries/lib1/files?') ? json(twoMonths) : undefined),
+      ]);
+      renderPage(<MediaPage config={{ ...CONFIG, showTimeline: true }} />);
+
+      await screen.findByTestId('timeline');
+      const calls = filesCalls(fetchMock);
+      expect(calls.some(([input]) => String(input).includes('recursive=true'))).toBe(true);
+      expect(calls.some(([input]) => !String(input).includes('recursive=true'))).toBe(true);
+    });
+
+    it('reuses the page listing instead of a second request when there are no folders', async () => {
+      const fetchMock = mockApi([
+        (url) => (url.includes('/api/v1/libraries/lib1/files?') ? json(twoMonths) : undefined),
+      ]);
+      renderPage(
+        <MediaPage
+          config={{
+            title: 'Photos',
+            type: 'photo',
+            showTimeline: true,
+            emptyTitle: 'No photos',
+            emptyBody: 'None yet',
+          }}
+        />,
+      );
+
+      await screen.findByTestId('timeline');
+      expect(filesCalls(fetchMock)).toHaveLength(1);
+    });
+  });
 });

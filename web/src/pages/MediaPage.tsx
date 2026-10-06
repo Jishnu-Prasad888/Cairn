@@ -31,6 +31,7 @@ import { FolderGrid } from '../components/files/FolderGrid';
 import type { Grouping } from '../components/media/layout';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
+import { Timeline } from '../components/media/Timeline';
 import { useFavorites } from '../components/media/useFavorites';
 import { type ListingQuery, useFileListing } from '../components/media/useFileListing';
 import { useMediaActions } from '../components/media/useMediaActions';
@@ -63,6 +64,8 @@ export interface MediaPageConfig {
   searchPage?: boolean;
   /** Date headings over the grid. Only applied to date-sorted listings. */
   grouping?: Grouping;
+  /** A ruler at the foot of the screen for jumping around by date. */
+  showTimeline?: boolean;
   subtitle?: string;
   emptyTitle: string;
   emptyBody: string;
@@ -245,6 +248,26 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
   });
   const { files, folders, total } = listing;
 
+  // The timeline ruler on a folder is scoped to that folder and its
+  // sub-folders, which the file manager's own listing deliberately is not —
+  // so it gets its own always-recursive, always date-sorted query. Photos (and
+  // any other non-folder timeline) already has the right list in `files`.
+  const showTimeline = Boolean(config.showTimeline) && !offline;
+  const timelineQuery: ListingQuery = {
+    q: '',
+    type,
+    folder: folderMode ? folder : undefined,
+    recursive: true,
+    sort: 'mod_time',
+    order: 'desc',
+    ...EMPTY_RANGE,
+    withFolders: false,
+  };
+  const timelineListing = useFileListing(libraryId, timelineQuery, {
+    enabled: showTimeline && folderMode && !q,
+  });
+  const timelineFiles = folderMode ? timelineListing.files : files;
+
   const favorites = useFavorites(libraryId);
   const selection = useSelection(files, `${libraryId}|${JSON.stringify(query)}`);
   const ops = useFileOperations(libraryId, listing.reload);
@@ -417,6 +440,8 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
   const grouping: Grouping =
     config.grouping && sort === 'mod_time' && !listing.searching ? config.grouping : 'none';
   const filtersActive = hasRangeFilters(range);
+  const timelineVisible =
+    showTimeline && (folderMode ? !q : sort === 'mod_time' && !listing.searching);
 
   let subtitle = config.subtitle;
   if (!listing.loading && !listing.error && !config.searchPage && total > 0) {
@@ -776,6 +801,8 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
         }}
         testId="new-folder-dialog"
       />
+
+      {timelineVisible && <Timeline files={timelineFiles} label={config.title} />}
     </main>
   );
 }

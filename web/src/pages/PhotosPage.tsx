@@ -11,6 +11,7 @@ const CONFIG: MediaPageConfig = {
   type: 'photo',
   grouping: 'day',
   showTypeFilter: false,
+  showTimeline: true,
   emptyTitle: 'No photos yet',
   emptyBody: "Once Cairn finds photos in your library, they'll appear here.",
   emptyIcon: 'photo',
