@@ -615,6 +615,14 @@ type duplicateGroupResponse struct {
 	Files       []fileResponse `json:"files"`
 }
 
+// similarityGroupResponse is one visual-similarity group in the listing.
+// Unlike a duplicate group there is no single hash the group shares — members
+// are connected by a chain of near-enough distances — so only the files
+// themselves are reported.
+type similarityGroupResponse struct {
+	Files []fileResponse `json:"files"`
+}
+
 type folderResponse struct {
 	ID        string `json:"id"`
 	LibraryID string `json:"library_id"`

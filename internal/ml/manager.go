@@ -343,6 +343,28 @@ func (m *Manager) Similar(ctx context.Context, libraryID, root, fileID string, l
 	return out, nil
 }
 
+// Groups clusters every present photo's signature into similarity groups —
+// two or more files connected by the same distance rule Similar applies to
+// one file at a time — so the whole library's near-duplicates can be
+// reviewed at once.
+func (m *Manager) Groups(ctx context.Context, libraryID, root string) ([]SimilarityGroup, error) {
+	if !m.Enabled() {
+		return nil, ErrDisabled
+	}
+	db, err := openLibraryDB(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+	store := NewStore(db.DB())
+
+	sigs, err := store.AllSignatures(ctx, m.provider.Name(), m.provider.Version())
+	if err != nil {
+		return nil, err
+	}
+	return clusterSignatures(sigs, m.cfg.DistanceThreshold), nil
+}
+
 // signNow computes and stores the signature of one photo. It returns nil when
 // the file is not a readable photo.
 func (m *Manager) signNow(ctx context.Context, store *Store, root, fileID string) (*SignatureRecord, error) {

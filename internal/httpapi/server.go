@@ -199,6 +199,7 @@ func (s *Server) Handler() http.Handler {
 			mux.Handle("POST /api/v1/libraries/{id}/ml/similarity/pass", s.withAuth(allowAdmin, s.handleMLPass))
 			mux.Handle("POST /api/v1/libraries/{id}/ml/purge", s.withAuth(allowAdmin, s.handleMLPurge))
 			mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/similar", s.withAuth(allowAny, s.handleSimilarFiles))
+			mux.Handle("GET /api/v1/libraries/{id}/ml/similarity/groups", s.withAuth(allowAny, s.handleSimilarityGroups))
 		}
 		if s.faces != nil {
 			mux.Handle("GET /api/v1/libraries/{id}/ml/faces", s.withAuth(allowAdmin, s.handleFaceStatus))

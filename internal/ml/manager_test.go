@@ -244,6 +244,9 @@ func TestManagerPassAndSimilarity(t *testing.T) {
 	if _, err := m2.Pass(ctx, "lib-1", root); err == nil {
 		t.Error("Pass on disabled manager: want error")
 	}
+	if _, err := m2.Groups(ctx, "lib-1", root); err == nil {
+		t.Error("Groups on disabled manager: want error")
+	}
 
 	// Purge clears signatures.
 	if n, err := m.Purge(ctx, "lib-1", root); err != nil || n != 3 {
@@ -251,6 +254,60 @@ func TestManagerPassAndSimilarity(t *testing.T) {
 	}
 	if n, err := m.Pass(ctx, "lib-1", root); err != nil || n != 3 {
 		t.Errorf("Pass after purge = %d, %v; want 3 (regenerable)", n, err)
+	}
+}
+
+// TestManagerGroups seeds signatures directly rather than through real images,
+// so the distance between files is exact and under the test's control instead
+// of depending on what a solid test-fixture color happens to hash to.
+func TestManagerGroups(t *testing.T) {
+	root := t.TempDir()
+	cairnDir := filepath.Join(root, ".cairn")
+	if err := os.MkdirAll(cairnDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := librarydb.Open(cairnDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := "2026-01-01T00:00:00.000Z"
+	files := []struct {
+		id  string
+		sig uint64
+	}{
+		{"near1", 0b0000}, // near1/near2 are one bit apart: one group
+		{"near2", 0b0001},
+		{"alone", 0xFFFFFFFFFFFFFFFF}, // far from everything: no group
+	}
+	for _, f := range files {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, media_type, status, first_seen_at, last_seen_at, indexed_at)
+			VALUES (?, ?, 1, ?, 'photo', 'present', ?, ?, ?)`,
+			f.id, f.id+".png", now, now, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := ml.NewStore(db)
+	for _, f := range files {
+		if err := store.Upsert(ctx, ml.SignatureRecord{
+			FileID: f.id, Provider: "average_hash", Version: 1, Signature: f.sig,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+
+	m := ml.NewManager(tLog(), ml.Config{Enabled: true, DistanceThreshold: 1}, ml.AverageHashProvider{})
+	groups, err := m.Groups(ctx, "lib-1", root)
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("Groups = %+v, want one group", groups)
+	}
+	if ids := groups[0].FileIDs; len(ids) != 2 || ids[0] != "near1" || ids[1] != "near2" {
+		t.Errorf("group = %v, want [near1 near2]; alone must not appear anywhere", ids)
 	}
 }
 

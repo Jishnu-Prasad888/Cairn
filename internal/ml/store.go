@@ -65,6 +65,39 @@ type UnsignedFile struct {
 	RelPath string
 }
 
+// FileSignature is one present file's stored signature, for comparing every
+// file against every other rather than one against the rest.
+type FileSignature struct {
+	FileID    string
+	Signature uint64
+}
+
+// AllSignatures returns every present file's signature for the given
+// provider/version, for grouping the whole library into similarity clusters.
+func (s *Store) AllSignatures(ctx context.Context, provider string, version int) ([]FileSignature, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.file_id, m.signature
+		FROM ml_signatures m
+		JOIN indexed_files f ON f.id = m.file_id
+		WHERE f.status = 'present' AND m.provider = ? AND m.version = ?`,
+		provider, version)
+	if err != nil {
+		return nil, fmt.Errorf("query all signatures: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []FileSignature
+	for rows.Next() {
+		var id string
+		var sig int64
+		if err := rows.Scan(&id, &sig); err != nil {
+			return nil, err
+		}
+		out = append(out, FileSignature{FileID: id, Signature: uint64(sig)})
+	}
+	return out, rows.Err()
+}
+
 // IDsWithoutSignature returns present files that do not yet have a signature
 // from the given provider version, with their relative paths.
 func (s *Store) IDsWithoutSignature(ctx context.Context, provider string, version int) ([]UnsignedFile, error) {

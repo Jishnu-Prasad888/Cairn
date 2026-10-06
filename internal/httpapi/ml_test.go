@@ -49,12 +49,13 @@ func newMLTestServer(t *testing.T) (http.Handler, *testClient, *sql.DB, string) 
 	if err := os.MkdirAll(filepath.Join(libRoot, "holiday"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	writeTestPNG(t, filepath.Join(libRoot, "holiday", "beach.png"), 96, 96,
-		color.RGBA{R: 200, G: 80, B: 40, A: 255})
-	writeTestPNG(t, filepath.Join(libRoot, "holiday", "beach2.png"), 96, 96,
-		color.RGBA{R: 200, G: 80, B: 40, A: 255})
-	writeTestPNG(t, filepath.Join(libRoot, "forest.png"), 96, 96,
-		color.RGBA{R: 30, G: 120, B: 30, A: 255})
+	// beach.png and beach2.png share a gradient (a near-duplicate pair);
+	// forest.png is a checkerboard — a different spatial pattern, not just a
+	// different color, since average-hash is invariant to uniform brightness
+	// scaling and a solid fill of any color collapses to the same signature.
+	writeGradientPNG(t, filepath.Join(libRoot, "holiday", "beach.png"), 96, 96)
+	writeGradientPNG(t, filepath.Join(libRoot, "holiday", "beach2.png"), 96, 96)
+	writeCheckerPNG(t, filepath.Join(libRoot, "forest.png"), 96, 96)
 	lib, err := libraries.Create(context.Background(), libRoot, "media")
 	if err != nil {
 		t.Fatalf("create library: %v", err)
@@ -111,6 +112,44 @@ func writeTestPNG(t *testing.T, path string, w, h int, c color.RGBA) {
 			img.Set(x, y, c)
 		}
 	}
+	encodeTestPNG(t, path, img)
+}
+
+// writeGradientPNG writes a decodable PNG with a smooth diagonal gradient, so
+// its average hash carries real spatial structure rather than collapsing to
+// the all-pixels-equal-the-mean signature every solid fill hashes to.
+func writeGradientPNG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	img := image.NewGray(image.Rect(0, 0, w, h))
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			img.SetGray(x, y, color.Gray{Y: uint8(255 * (x + y) / (w + h))})
+		}
+	}
+	encodeTestPNG(t, path, img)
+}
+
+// writeCheckerPNG writes a decodable PNG with a coarse checkerboard — a
+// spatial pattern far from a smooth gradient's, standing in for "a genuinely
+// different picture" in similarity tests.
+func writeCheckerPNG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	img := image.NewGray(image.Rect(0, 0, w, h))
+	const cell = 12
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			v := uint8(0)
+			if (x/cell+y/cell)%2 == 0 {
+				v = 255
+			}
+			img.SetGray(x, y, color.Gray{Y: v})
+		}
+	}
+	encodeTestPNG(t, path, img)
+}
+
+func encodeTestPNG(t *testing.T, path string, img image.Image) {
+	t.Helper()
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +224,8 @@ func TestMLStatusAndPassFlow(t *testing.T) {
 		t.Errorf("second pass status = %d, want 202", rec.Code)
 	}
 
-	// Similar files: beach2 (a near-duplicate) ranks above forest.
+	// Similar files: beach2 (a near-duplicate) is within range; forest (a
+	// different picture) is not.
 	rec = client.roundTrip(t, http.MethodGet, "/api/v1/libraries/"+libID+"/files/filea/similar", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET similar status = %d body=%s", rec.Code, rec.Body.String())
@@ -201,8 +241,8 @@ func TestMLStatusAndPassFlow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal similar: %v", err)
 	}
-	if len(body.Similar) != 2 {
-		t.Fatalf("similar = %d results, want 2", len(body.Similar))
+	if len(body.Similar) != 1 {
+		t.Fatalf("similar = %d results, want 1", len(body.Similar))
 	}
 	if body.Similar[0].FileID != "fileb" {
 		t.Errorf("top similar = %+v, want fileb", body.Similar[0])
@@ -217,6 +257,68 @@ func TestMLStatusAndPassFlow(t *testing.T) {
 	st = decodeMLStatus(t, rec)
 	if st.SigCount != 0 {
 		t.Errorf("ml status after purge signatured = %d, want 0", st.SigCount)
+	}
+}
+
+func TestSimilarityGroups(t *testing.T) {
+	_, client, _, libID := newMLTestServer(t)
+
+	// The pass runs in the background; poll the groups endpoint until the
+	// near-duplicate pair (beach.png, beach2.png) lands in one group.
+	var body struct {
+		Groups []struct {
+			Files []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"files"`
+		} `json:"groups"`
+		Total int `json:"total"`
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rec := client.roundTrip(t, http.MethodGet,
+			"/api/v1/libraries/"+libID+"/ml/similarity/groups", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET groups status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal groups: %v", err)
+		}
+		if body.Total >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no similarity group appeared: body=%+v", body)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if body.Total != 1 || len(body.Groups) != 1 {
+		t.Fatalf("groups = %+v, want exactly one group", body)
+	}
+	group := body.Groups[0]
+	if len(group.Files) != 2 {
+		t.Fatalf("group files = %d, want 2 (forest.png must not join)", len(group.Files))
+	}
+	names := map[string]bool{}
+	for _, f := range group.Files {
+		names[f.Name] = true
+	}
+	if !names["beach.png"] || !names["beach2.png"] {
+		t.Errorf("group members = %+v, want beach.png and beach2.png", group.Files)
+	}
+	if names["forest.png"] {
+		t.Error("forest.png (a different picture) should not be in the group")
+	}
+}
+
+func TestSimilarityGroupsRequiresAuth(t *testing.T) {
+	handler, _, _, libID := newMLTestServer(t)
+	fresh := &testClient{handler: handler}
+	rec := fresh.roundTrip(t, http.MethodGet,
+		"/api/v1/libraries/"+libID+"/ml/similarity/groups", "")
+	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 401/403", rec.Code)
 	}
 }
 
@@ -294,5 +396,9 @@ func TestMLDisabledEndpointUnavailable(t *testing.T) {
 	rec = client.roundTrip(t, http.MethodGet, "/api/v1/libraries/"+libID+"/files/filea/similar", "")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("similar on disabled ML status = %d, want 503", rec.Code)
+	}
+	rec = client.roundTrip(t, http.MethodGet, "/api/v1/libraries/"+libID+"/ml/similarity/groups", "")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("groups on disabled ML status = %d, want 503", rec.Code)
 	}
 }
