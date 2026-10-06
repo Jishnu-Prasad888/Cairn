@@ -28,6 +28,7 @@ import { ConfirmDialog, PromptDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
+import { Timeline } from '../components/media/Timeline';
 import { useFavorites } from '../components/media/useFavorites';
 import { useMediaActions } from '../components/media/useMediaActions';
 import { useSelection } from '../components/media/useSelection';
@@ -600,6 +601,8 @@ function AlbumDetail({
         }
         testId="delete-album-dialog"
       />
+
+      {!offline && <Timeline files={list} label={`Album: ${album.name}`} />}
     </main>
   );
 }

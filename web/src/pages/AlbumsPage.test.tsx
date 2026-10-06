@@ -156,6 +156,27 @@ describe('AlbumsPage', () => {
     expect(screen.getByText('clip.mp4')).toBeInTheDocument();
   });
 
+  it('shows a timeline scoped to the album when its photos span more than one month', async () => {
+    setup([], {
+      albumFiles: {
+        files: [
+          fileFixture({ mod_time: '2026-09-01T00:00:00Z' }),
+          fileFixture({
+            id: 'f2',
+            rel_path: 'july.png',
+            name: 'july.png',
+            mod_time: '2026-07-01T00:00:00Z',
+          }),
+        ],
+      },
+    });
+
+    await screen.findByTestId('albums-grid');
+    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+
+    expect(await screen.findByTestId('timeline')).toBeInTheDocument();
+  });
+
   it('returns to the album list from the detail view', async () => {
     setup();
 
