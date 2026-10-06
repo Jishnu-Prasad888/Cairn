@@ -54,6 +54,7 @@ import type {
   ShareCreateResponse,
   ShareListResponse,
   SimilarFilesResponse,
+  SimilarityGroupsResponse,
   Tag,
   TagListResponse,
   User,
@@ -77,6 +78,7 @@ export type {
   Person,
   PersonDetail,
   SimilarFile,
+  SimilarityGroup,
   Tag,
 } from './types';
 export { formatBytes } from './types';
@@ -496,6 +498,9 @@ export const purgeSimilarity = (libraryId: string) =>
 
 export const getSimilarFiles = (libraryId: string, fileId: string) =>
   apiGet<SimilarFilesResponse>(`/libraries/${libraryId}/files/${fileId}/similar`);
+
+export const listSimilarityGroups = (libraryId: string) =>
+  apiGet<SimilarityGroupsResponse>(`/libraries/${libraryId}/ml/similarity/groups`);
 
 /* ------------------------------ backups ---------------------------- */
 

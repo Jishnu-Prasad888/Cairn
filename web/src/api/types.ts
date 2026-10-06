@@ -263,6 +263,19 @@ export interface DuplicatesResponse {
   total: number;
 }
 
+/** A cluster of present photos whose perceptual signatures are close enough
+ * to one another to be visual near-duplicates. Unlike a `DuplicateGroup`
+ * there is no single hash the group shares — members are connected by a
+ * chain of near-enough distances, not an exact match. */
+export interface SimilarityGroup {
+  files: FileSummary[];
+}
+
+export interface SimilarityGroupsResponse {
+  groups: SimilarityGroup[];
+  total: number;
+}
+
 export interface Folder {
   id: string;
   library_id?: string;
