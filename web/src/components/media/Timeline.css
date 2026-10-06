@@ -8,7 +8,7 @@
   position: fixed;
   left: var(--sidebar-width);
   right: 0;
-  bottom: 0;
+  bottom: var(--space-4);
   z-index: var(--z-sticky);
   display: flex;
   justify-content: center;
@@ -37,36 +37,39 @@
 }
 
 .timeline-track::after {
-  /* A little paper under the ruler so it reads above photos, not on them. */
+  /* The card the ruler sits on, always visible — a hairline on bare page
+     would be lost under a grid of photos. */
   content: '';
   position: absolute;
-  inset: 6px -10px;
+  inset: 4px -16px;
   z-index: -1;
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-surface-elevated) 88%, transparent);
+  background: color-mix(in srgb, var(--color-surface-elevated) 96%, transparent);
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-2);
   backdrop-filter: blur(6px);
-  opacity: 0;
-  transition: opacity var(--duration-base) var(--ease-standard);
+  transition: box-shadow var(--duration-base) var(--ease-standard);
 }
 
 .timeline-track:hover::after,
 .timeline-track:focus-visible::after,
 .timeline-track.is-scrubbing::after {
-  opacity: 1;
+  box-shadow: var(--shadow-3);
 }
 
 .timeline-tick {
   position: absolute;
   top: 50%;
   width: 1px;
-  height: 5px;
+  height: 6px;
   transform: translate(-50%, -50%);
-  background: var(--color-text-muted);
+  background: var(--color-text-secondary);
 }
 
 .timeline-tick.is-year {
-  height: 10px;
-  background: var(--color-text-secondary);
+  height: 12px;
+  width: 1.5px;
+  background: var(--color-text-primary);
 }
 
 .timeline-year {
@@ -120,7 +123,7 @@
 @media (max-width: 899px) {
   .timeline {
     left: 0;
-    bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+    bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + var(--space-3));
   }
 
   .timeline-track {
