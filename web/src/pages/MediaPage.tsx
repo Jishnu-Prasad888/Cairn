@@ -36,6 +36,7 @@ import { useFavorites } from '../components/media/useFavorites';
 import { type ListingQuery, useFileListing } from '../components/media/useFileListing';
 import { useMediaActions } from '../components/media/useMediaActions';
 import { useSelection } from '../components/media/useSelection';
+import { useTimelineAutoload } from '../components/media/useTimelineAutoload';
 import {
   EmptyState,
   ErrorState,
@@ -449,6 +450,10 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
   const filtersActive = hasRangeFilters(range);
   const timelineVisible =
     showTimeline && timelineOpen && (folderMode ? !q : sort === 'mod_time' && !listing.searching);
+  // The grid's own listing already has what the Photos timeline needs; the
+  // folder's recursive one is the only one that still has to catch up.
+  useTimelineAutoload(listing, timelineVisible && !folderMode);
+  useTimelineAutoload(timelineListing, timelineVisible && folderMode);
 
   let subtitle = config.subtitle;
   if (!listing.loading && !listing.error && !config.searchPage && total > 0) {

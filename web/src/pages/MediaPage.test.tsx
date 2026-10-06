@@ -1085,6 +1085,53 @@ describe('MediaPage', () => {
       expect(calls.some(([input]) => !String(input).includes('recursive=true'))).toBe(true);
     });
 
+    it("loads further pages of the folder's own recursive listing the same way", async () => {
+      const page1 = {
+        files: [fileFixture({ mod_time: '2026-09-01T00:00:00Z' })],
+        next_cursor: 'p2',
+        total: 2,
+      };
+      const page2 = {
+        files: [
+          fileFixture({
+            id: 'f2',
+            rel_path: 'july.png',
+            name: 'july.png',
+            mod_time: '2026-07-01T00:00:00Z',
+          }),
+        ],
+        next_cursor: '',
+        total: 2,
+      };
+      const fetchMock = mockApi([
+        (url) =>
+          url.includes('/api/v1/libraries/lib1/files?') &&
+          url.includes('recursive=true') &&
+          url.includes('cursor=p2')
+            ? json(page2)
+            : undefined,
+        (url) =>
+          url.includes('/api/v1/libraries/lib1/files?') && url.includes('recursive=true')
+            ? json(page1)
+            : undefined,
+        (url) =>
+          url.includes('/api/v1/libraries/lib1/folders') ? json({ folders: [] }) : undefined,
+        (url) => (url.includes('/api/v1/libraries/lib1/files?') ? json(page1) : undefined),
+      ]);
+      renderPage(<MediaPage config={{ ...CONFIG, showTimeline: true }} />);
+
+      await screen.findByTestId('file-grid');
+      fireEvent.click(screen.getByTestId('toggle-timeline'));
+
+      await screen.findByTestId('timeline');
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) =>
+            String(input).includes('cursor=p2') && String(input).includes('recursive=true'),
+        ),
+      ).toBe(true);
+    });
+
     it('reuses the page listing instead of a second request when there are no folders', async () => {
       const fetchMock = mockApi([
         (url) => (url.includes('/api/v1/libraries/lib1/files?') ? json(twoMonths) : undefined),
@@ -1105,6 +1152,50 @@ describe('MediaPage', () => {
       fireEvent.click(screen.getByTestId('toggle-timeline'));
       await screen.findByTestId('timeline');
       expect(filesCalls(fetchMock)).toHaveLength(1);
+    });
+
+    it('loads further pages on its own when the first one is not enough to show anything', async () => {
+      const page1 = {
+        files: [fileFixture({ mod_time: '2026-09-01T00:00:00Z' })],
+        next_cursor: 'p2',
+        total: 2,
+      };
+      const page2 = {
+        files: [
+          fileFixture({
+            id: 'f2',
+            rel_path: 'july.png',
+            name: 'july.png',
+            mod_time: '2026-07-01T00:00:00Z',
+          }),
+        ],
+        next_cursor: '',
+        total: 2,
+      };
+      const fetchMock = mockApi([
+        (url) =>
+          url.includes('/api/v1/libraries/lib1/files?') && url.includes('cursor=p2')
+            ? json(page2)
+            : undefined,
+        (url) => (url.includes('/api/v1/libraries/lib1/files?') ? json(page1) : undefined),
+      ]);
+      renderPage(
+        <MediaPage
+          config={{
+            title: 'Photos',
+            type: 'photo',
+            showTimeline: true,
+            emptyTitle: 'No photos',
+            emptyBody: 'None yet',
+          }}
+        />,
+      );
+
+      await screen.findByTestId('file-grid');
+      fireEvent.click(screen.getByTestId('toggle-timeline'));
+
+      await screen.findByTestId('timeline');
+      expect(called(fetchMock, 'GET', 'cursor=p2')).toBe(true);
     });
 
     it('stays off until explicitly turned on', async () => {
