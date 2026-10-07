@@ -87,6 +87,19 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('defaults the Photos layout to masonry and remembers a switch to grid', async () => {
+    setup();
+    await screen.findByRole('heading', { name: 'Settings' });
+
+    expect(screen.getByRole('radio', { name: 'Masonry' })).toBeChecked();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Grid' }));
+    await waitFor(() => {
+      expect(localStorage.getItem('cairn.photos.layout')).toBe('grid');
+    });
+    expect(screen.getByRole('radio', { name: 'Grid' })).toBeChecked();
+  });
+
   it('links the organizing surfaces from one place', async () => {
     setup();
     await screen.findByRole('heading', { name: 'Library' });

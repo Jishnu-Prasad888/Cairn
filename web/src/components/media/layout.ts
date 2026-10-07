@@ -143,9 +143,12 @@ export function layoutGrid(groups: readonly MediaGroup[], metrics: GridMetrics):
  * The rows that intersect `[viewTop, viewBottom]`, widened by `overscan` px on
  * both sides so a fast scroll does not flash empty space. Binary search, so the
  * cost does not grow with the library.
+ *
+ * Generic over anything laid out as a `top`/`height` sequence sorted ascending
+ * by `top` — the square grid's rows, or one column of the masonry grid.
  */
-export function visibleRows(
-  rows: readonly GridRow[],
+export function visibleRows<T extends { top: number; height: number }>(
+  rows: readonly T[],
   viewTop: number,
   viewBottom: number,
   overscan: number,

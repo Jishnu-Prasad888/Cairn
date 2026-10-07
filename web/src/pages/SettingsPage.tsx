@@ -24,12 +24,18 @@ import { Icon, type IconName } from '../components/ui/Icon';
 import { formatDate } from '../lib/dates';
 import { MemorySettingsSection } from '../memories/MemorySettingsSection';
 import { type ThemePreference, readStoredTheme, storeTheme } from '../lib/theme';
+import { type PhotoLayout, readPhotoLayout, storePhotoLayout } from '../lib/photoLayout';
 import './SettingsPage.css';
 
 const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; icon: IconName }> = [
   { value: 'system', label: 'Match system', icon: 'monitor' },
   { value: 'light', label: 'Light', icon: 'sun' },
   { value: 'dark', label: 'Dark', icon: 'moon' },
+];
+
+const PHOTO_LAYOUT_OPTIONS: Array<{ value: PhotoLayout; label: string; icon: IconName }> = [
+  { value: 'masonry', label: 'Masonry', icon: 'photo' },
+  { value: 'grid', label: 'Grid', icon: 'grid' },
 ];
 
 function message(error: unknown): string {
@@ -115,6 +121,7 @@ export default function SettingsPage() {
   }, [hash]);
 
   const [theme, setTheme] = useState<ThemePreference>(() => readStoredTheme());
+  const [photoLayout, setPhotoLayout] = useState<PhotoLayout>(() => readPhotoLayout());
 
   const users = useResource<User[]>(
     useCallback(async () => (await listUsers()).users ?? [], []),
@@ -146,6 +153,11 @@ export default function SettingsPage() {
   const onThemeChange = (next: ThemePreference) => {
     setTheme(next);
     storeTheme(next);
+  };
+
+  const onPhotoLayoutChange = (next: PhotoLayout) => {
+    setPhotoLayout(next);
+    storePhotoLayout(next);
   };
 
   const confirmRevoke = () => {
@@ -258,6 +270,32 @@ export default function SettingsPage() {
                       value={option.value}
                       checked={theme === option.value}
                       onChange={() => onThemeChange(option.value)}
+                    />
+                    <Icon name={option.icon} />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </Row>
+            <Row
+              title="Photos layout"
+              description="A waterfall of varied tile sizes, or the uniform square grid Videos and Files use."
+            >
+              <div className="segmented settings-themes" role="radiogroup" aria-label="Photos layout">
+                {PHOTO_LAYOUT_OPTIONS.map((option) => (
+                  <label
+                    key={option.value}
+                    className={
+                      photoLayout === option.value ? 'segmented-item active' : 'segmented-item'
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="photo-layout"
+                      className="visually-hidden"
+                      value={option.value}
+                      checked={photoLayout === option.value}
+                      onChange={() => onPhotoLayoutChange(option.value)}
                     />
                     <Icon name={option.icon} />
                     <span>{option.label}</span>

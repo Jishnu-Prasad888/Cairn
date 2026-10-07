@@ -119,6 +119,50 @@ describe('MediaGrid', () => {
   });
 });
 
+describe('MediaGrid masonry', () => {
+  it('renders every tile at a varied size under date headings', () => {
+    render(
+      <MediaGrid
+        libraryId="lib1"
+        files={files}
+        grouping="day"
+        masonry
+        onOpen={() => {}}
+        label="Photos"
+      />,
+    );
+    const tiles = screen.getAllByTestId('media-tile');
+    expect(tiles).toHaveLength(12);
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(2);
+    const heights = new Set(tiles.map((t) => t.style.height));
+    expect(heights.size).toBeGreaterThan(1);
+  });
+
+  it('mounts only the tiles near the viewport for a huge library', () => {
+    const many = Array.from({ length: 20_000 }, (_, i) =>
+      fileFixture({ id: `x${i}`, name: `${i}.jpg` }),
+    );
+    render(<MediaGrid libraryId="lib1" files={many} masonry onOpen={() => {}} label="Big" />);
+    expect(screen.getAllByTestId('media-tile').length).toBeLessThan(400);
+  });
+
+  it('opens a photo on click', () => {
+    const onOpen = vi.fn();
+    render(
+      <MediaGrid
+        libraryId="lib1"
+        files={files}
+        grouping="day"
+        masonry
+        onOpen={onOpen}
+        label="Photos"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'photo-3.jpg' }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'f3' }));
+  });
+});
+
 describe('useSelection', () => {
   it('drops the selection when the list identity changes', () => {
     const { result, rerender } = renderHook(({ k }) => useSelection(files, k), {

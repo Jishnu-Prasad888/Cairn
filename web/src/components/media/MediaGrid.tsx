@@ -25,14 +25,37 @@ import type { FileSummary } from '../../api/types';
 import { MediaTile } from './MediaTile';
 import {
   type Grouping,
+  type GridLayout,
   groupFiles,
   gridMetrics,
   layoutGrid,
   moveFocus,
+  targetTileSize,
   visibleRows,
 } from './layout';
+import { type MasonryLayout, layoutMasonry, masonryMetrics, moveMasonryFocus } from './masonry';
 import type { Selection } from './useSelection';
 import './MediaGrid.css';
+
+/** Either geometry the grid can lay files out with: the square grid shared by
+ * Files/Videos/Search, or the Photos page's masonry waterfall. Kept as one
+ * tagged value (rather than two parallel variables) so the rest of the
+ * component can't read one kind's layout while the other is active. */
+type Layout = { kind: 'square'; layout: GridLayout } | { kind: 'masonry'; layout: MasonryLayout };
+
+/** The on-screen top/height of one tile, however its layout kind places it —
+ * what `focusTile` needs to scroll a tile into view before focusing it. */
+function cellBounds(layout: Layout, index: number): { top: number; height: number } | undefined {
+  if (layout.kind === 'square') {
+    const rowIndex = layout.layout.rowOfItem[index];
+    const row = rowIndex === undefined ? undefined : layout.layout.rows[rowIndex];
+    return row ? { top: row.top, height: row.height } : undefined;
+  }
+  const col = layout.layout.columnOfItem[index];
+  const position = layout.layout.positionInColumn[index];
+  const cell = col === undefined || position === undefined ? undefined : layout.layout.columns[col]?.[position];
+  return cell ? { top: cell.top, height: cell.height } : undefined;
+}
 
 /** Width assumed before the container has been measured (and in jsdom). */
 const FALLBACK_WIDTH = 1024;
@@ -46,6 +69,9 @@ export interface MediaGridProps {
   files: FileSummary[];
   /** Group under date headings. Only meaningful for a date-sorted list. */
   grouping?: Grouping;
+  /** A column waterfall of varied tile sizes (Photos) instead of the uniform
+   * square grid shared by the other media surfaces. */
+  masonry?: boolean | undefined;
   onOpen: (file: FileSummary) => void;
   /** Omit to make the grid read-only (no selection circles). */
   selection?: Selection;
@@ -65,6 +91,7 @@ export function MediaGrid({
   libraryId,
   files,
   grouping = 'none',
+  masonry = false,
   onOpen,
   selection,
   favorites,
@@ -79,14 +106,21 @@ export function MediaGrid({
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState({ width: 0, gap: 4 });
   const [range, setRange] = useState<[number, number]>([0, -1]);
+  const [masonryRange, setMasonryRange] = useState<{
+    headers: [number, number];
+    columns: [number, number][];
+  }>({ headers: [0, -1], columns: [] });
   const [focusIndex, setFocusIndex] = useState(0);
   const pendingFocus = useRef<number | null>(null);
 
   const groups = useMemo(() => groupFiles(files, grouping), [files, grouping]);
-  const layout = useMemo(
-    () => layoutGrid(groups, gridMetrics(box.width || FALLBACK_WIDTH, box.gap)),
-    [groups, box],
-  );
+  const layout: Layout = useMemo(() => {
+    const width = box.width || FALLBACK_WIDTH;
+    if (masonry) {
+      return { kind: 'masonry', layout: layoutMasonry(groups, masonryMetrics(width, box.gap, targetTileSize(width))) };
+    }
+    return { kind: 'square', layout: layoutGrid(groups, gridMetrics(width, box.gap)) };
+  }, [groups, box, masonry]);
 
   // Scroll handlers read the latest layout through a ref, synced before the
   // range is recomputed below.
@@ -117,9 +151,24 @@ export function MediaGrid({
   const updateRange = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    const top = -el.getBoundingClientRect().top;
-    const next = visibleRows(layoutRef.current.rows, top, top + window.innerHeight, OVERSCAN);
-    setRange((prev) => (prev[0] === next[0] && prev[1] === next[1] ? prev : next));
+    const viewTop = -el.getBoundingClientRect().top;
+    const viewBottom = viewTop + window.innerHeight;
+    const current = layoutRef.current;
+    if (current.kind === 'square') {
+      const next = visibleRows(current.layout.rows, viewTop, viewBottom, OVERSCAN);
+      setRange((prev) => (prev[0] === next[0] && prev[1] === next[1] ? prev : next));
+      return;
+    }
+    const headers = visibleRows(current.layout.headers, viewTop, viewBottom, OVERSCAN);
+    const columns = current.layout.columns.map((col) => visibleRows(col, viewTop, viewBottom, OVERSCAN));
+    setMasonryRange((prev) =>
+      prev.headers[0] === headers[0] &&
+      prev.headers[1] === headers[1] &&
+      prev.columns.length === columns.length &&
+      prev.columns.every((p, i) => p[0] === columns[i]![0] && p[1] === columns[i]![1])
+        ? prev
+        : { headers, columns },
+    );
   }, []);
 
   useLayoutEffect(updateRange, [layout, updateRange]);
@@ -164,19 +213,17 @@ export function MediaGrid({
   // Move keyboard focus to a tile, scrolling it into view first if its row is
   // not mounted yet; focus is applied once the row has rendered.
   const focusTile = useCallback((index: number) => {
-    const current = layoutRef.current;
-    const rowIndex = current.rowOfItem[index];
-    const row = rowIndex === undefined ? undefined : current.rows[rowIndex];
+    const bounds = cellBounds(layoutRef.current, index);
     const el = containerRef.current;
-    if (row && el) {
+    if (bounds && el) {
       const containerTop = el.getBoundingClientRect().top + window.scrollY;
-      const rowTop = containerTop + row.top;
+      const rowTop = containerTop + bounds.top;
       const viewTop = window.scrollY + stickyOffset();
       const viewBottom = window.scrollY + window.innerHeight;
       if (rowTop < viewTop) {
         window.scrollTo({ top: rowTop - stickyOffset() - 8 });
-      } else if (rowTop + row.height > viewBottom) {
-        window.scrollTo({ top: rowTop + row.height - window.innerHeight + 8 });
+      } else if (rowTop + bounds.height > viewBottom) {
+        window.scrollTo({ top: rowTop + bounds.height - window.innerHeight + 8 });
       }
     }
     pendingFocus.current = index;
@@ -227,9 +274,12 @@ export function MediaGrid({
       case 'Home':
       case 'End': {
         event.preventDefault();
-        const next = moveFocus(layout, index, event.key);
+        const next =
+          layout.kind === 'masonry'
+            ? moveMasonryFocus(layout.layout, index, event.key)
+            : moveFocus(layout.layout, index, event.key);
         if (next >= 0) focusTile(next);
-        if (next >= files.length - layout.metrics.columns && hasMore && !loadingMore)
+        if (next >= files.length - layout.layout.metrics.columns && hasMore && !loadingMore)
           onLoadMore?.();
         return;
       }
@@ -249,58 +299,104 @@ export function MediaGrid({
     }
   };
 
-  const [first, last] = range;
-  const visible = last >= first ? layout.rows.slice(first, last + 1) : [];
-  const { tileSize, gap } = layout.metrics;
+  let content: React.ReactNode;
+  if (layout.kind === 'square') {
+    const [first, last] = range;
+    const visible = last >= first ? layout.layout.rows.slice(first, last + 1) : [];
+    const { tileSize, gap } = layout.layout.metrics;
+    content = visible.map((row) =>
+      row.kind === 'header' ? (
+        <h2
+          key={row.key}
+          className="media-date"
+          style={{ transform: `translateY(${row.top}px)`, height: row.height }}
+        >
+          {row.label}
+        </h2>
+      ) : (
+        <div
+          key={row.key}
+          className="media-row"
+          style={{ transform: `translateY(${row.top}px)`, height: tileSize }}
+        >
+          {row.items.map((file, j) => {
+            const index = row.startIndex + j;
+            return (
+              <MediaTile
+                key={file.id}
+                libraryId={libraryId}
+                file={file}
+                index={index}
+                style={{ width: tileSize, height: tileSize, left: j * (tileSize + gap) }}
+                selected={selection?.isSelected(file.id) ?? false}
+                selectable={selectable}
+                selecting={selecting}
+                favorite={favorites?.has(file.id) ?? false}
+                tabbable={index === safeFocus}
+                onActivate={onActivate}
+                onToggleSelect={onToggleSelect}
+                onFocusTile={setFocusIndex}
+                onContextMenu={onContextMenu}
+              />
+            );
+          })}
+        </div>
+      ),
+    );
+  } else {
+    const [hf, hl] = masonryRange.headers;
+    const headerCells = hl >= hf ? layout.layout.headers.slice(hf, hl + 1) : [];
+    const tileCells = layout.layout.columns.flatMap((col, i) => {
+      const [cf, cl] = masonryRange.columns[i] ?? [0, -1];
+      return cl >= cf ? col.slice(cf, cl + 1) : [];
+    });
+    content = (
+      <>
+        {headerCells.map((h) => (
+          <h2
+            key={h.key}
+            className="media-date"
+            style={{ transform: `translateY(${h.top}px)`, height: h.height }}
+          >
+            {h.label}
+          </h2>
+        ))}
+        {tileCells.map((cell) => (
+          <MediaTile
+            key={cell.file.id}
+            libraryId={libraryId}
+            file={cell.file}
+            index={cell.index}
+            style={{ width: cell.width, height: cell.height, top: cell.top, left: cell.left }}
+            selected={selection?.isSelected(cell.file.id) ?? false}
+            selectable={selectable}
+            selecting={selecting}
+            favorite={favorites?.has(cell.file.id) ?? false}
+            tabbable={cell.index === safeFocus}
+            onActivate={onActivate}
+            onToggleSelect={onToggleSelect}
+            onFocusTile={setFocusIndex}
+            onContextMenu={onContextMenu}
+          />
+        ))}
+      </>
+    );
+  }
 
   return (
     <section className="media-grid-wrap" aria-label={label}>
       <div
         ref={containerRef}
-        className={selecting ? 'media-grid is-selecting' : 'media-grid'}
-        style={{ height: layout.totalHeight }}
+        className={
+          selecting
+            ? `media-grid is-selecting${masonry ? ' is-masonry' : ''}`
+            : `media-grid${masonry ? ' is-masonry' : ''}`
+        }
+        style={{ height: layout.layout.totalHeight }}
         onKeyDown={onKeyDown}
         data-testid={testId}
       >
-        {visible.map((row) =>
-          row.kind === 'header' ? (
-            <h2
-              key={row.key}
-              className="media-date"
-              style={{ transform: `translateY(${row.top}px)`, height: row.height }}
-            >
-              {row.label}
-            </h2>
-          ) : (
-            <div
-              key={row.key}
-              className="media-row"
-              style={{ transform: `translateY(${row.top}px)`, height: tileSize }}
-            >
-              {row.items.map((file, j) => {
-                const index = row.startIndex + j;
-                return (
-                  <MediaTile
-                    key={file.id}
-                    libraryId={libraryId}
-                    file={file}
-                    index={index}
-                    style={{ width: tileSize, height: tileSize, left: j * (tileSize + gap) }}
-                    selected={selection?.isSelected(file.id) ?? false}
-                    selectable={selectable}
-                    selecting={selecting}
-                    favorite={favorites?.has(file.id) ?? false}
-                    tabbable={index === safeFocus}
-                    onActivate={onActivate}
-                    onToggleSelect={onToggleSelect}
-                    onFocusTile={setFocusIndex}
-                    onContextMenu={onContextMenu}
-                  />
-                );
-              })}
-            </div>
-          ),
-        )}
+        {content}
       </div>
       <div ref={sentinelRef} className="media-grid-sentinel" aria-hidden="true" />
       {hasMore && onLoadMore && (

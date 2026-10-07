@@ -66,6 +66,9 @@ export interface MediaPageConfig {
   searchPage?: boolean;
   /** Date headings over the grid. Only applied to date-sorted listings. */
   grouping?: Grouping;
+  /** A column waterfall of varied tile sizes instead of the uniform square
+   * grid every other media surface uses. */
+  masonry?: boolean;
   /** A ruler at the foot of the screen for jumping around by date. */
   showTimeline?: boolean;
   subtitle?: string;
@@ -728,6 +731,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
                 libraryId={libraryId}
                 files={files}
                 grouping={grouping}
+                masonry={config.masonry}
                 onOpen={ops.openViewer}
                 selection={selection}
                 favorites={favorites.ids}
