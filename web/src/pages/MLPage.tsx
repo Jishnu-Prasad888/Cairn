@@ -42,6 +42,7 @@ import type { FaceStatus, MLStatus } from '../api/types';
 import { ConfirmDialog } from '../components/Dialog';
 import LibraryPicker from '../components/LibraryPicker';
 import { Toggle } from '../components/ui/Toggle';
+import { useToast } from '../components/ui/Toast';
 import {
   ErrorState,
   LibraryOfflineNotice,
@@ -190,6 +191,7 @@ export default function MLPage() {
   const gate = useLibraryGate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const toast = useToast();
 
   const [busy, setBusy] = useState<string | null>(null);
   const [job, setJob] = useState<Job>(null);
@@ -247,17 +249,14 @@ export default function MLPage() {
   const simTotal = (ml?.signatured ?? 0) + (ml?.pending ?? 0);
 
   // A pass can start without this page's involvement — another tab, or new
-  // photos arriving automatically. Poll while the server reports one running
-  // so the stats and badges stay live instead of freezing at whatever they
-  // were when the page happened to load.
+  // photos arriving automatically — and it only progresses on the server, so
+  // this page has to re-read the status to show it moving: the stats, the
+  // running badge, and the progress bar all come from here while one runs.
   const libraryId = gate.kind === 'ready' ? gate.libraryId : null;
   useEffect(() => {
     if (!libraryId || !ml?.running) return;
-    const controller = new AbortController();
-    waitForSimilarityPass(libraryId, controller.signal).then(() => {
-      if (!controller.signal.aborted) status.reload();
-    });
-    return () => controller.abort();
+    const interval = setInterval(() => status.reload(), 1000);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [libraryId, ml?.running]);
   useEffect(() => {
@@ -334,6 +333,10 @@ export default function MLPage() {
     key: string,
     action: (libraryId: string) => Promise<unknown>,
     message: string,
+    /** Called once the background work this started has actually finished —
+     * not the purge/toggle actions that use this same scope, which have
+     * nothing to wait for. Used for the "pass finished" toast. */
+    onFinished?: (finalStatus: MLStatus | null) => void,
   ) => {
     if (gate.kind !== 'ready') return;
     setBusy(key);
@@ -349,9 +352,10 @@ export default function MLPage() {
         status.reload();
         faces.reload();
         if (scope === 'similarity') {
-          await waitForSimilarityPass(gate.libraryId, unmounted.current.signal);
+          const finalStatus = await waitForSimilarityPass(gate.libraryId, unmounted.current.signal);
           if (unmounted.current.signal.aborted) return;
           status.reload();
+          onFinished?.(finalStatus);
         } else {
           await waitForFacePasses(gate.libraryId, unmounted.current.signal);
           if (unmounted.current.signal.aborted) return;
@@ -548,6 +552,13 @@ export default function MLPage() {
                       'similarity-run',
                       runSimilarityPass,
                       'Similarity pass started in the background.',
+                      (finalStatus) =>
+                        toast({
+                          message: finalStatus
+                            ? `Similarity pass finished — ${fmt(finalStatus.signatured)} photo${finalStatus.signatured === 1 ? '' : 's'} analysed.`
+                            : 'Similarity pass finished.',
+                          tone: 'success',
+                        }),
                     )
                   }
                   disabled={locked || ml?.enabled === false || ml?.running}

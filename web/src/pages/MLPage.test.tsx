@@ -119,6 +119,43 @@ describe('MLPage', () => {
     expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/ml/similarity/pass')).toBe(true);
   });
 
+  it('shows a live progress bar while a pass it started is running, then toasts when it finishes', async () => {
+    let statusReads = 0;
+    setup([
+      (url, init) =>
+        init?.method === 'POST' && url.endsWith('/api/v1/libraries/lib1/ml/similarity/pass')
+          ? json({ library_id: 'lib1', status: 'started' }, 202)
+          : undefined,
+      (url) => {
+        if (!url.endsWith('/api/v1/libraries/lib1/ml')) return undefined;
+        statusReads += 1;
+        // The initial read (page load) is idle, so the button is clickable.
+        // The read right after starting shows it running, with some progress
+        // made; every read after that shows it finished.
+        if (statusReads === 1) return json(mlStatus);
+        return json(
+          statusReads === 2
+            ? { ...mlStatus, pending: 12, signatured: 8427, running: true }
+            : { ...mlStatus, pending: 0, signatured: 8433, running: false },
+        );
+      },
+    ]);
+
+    await screen.findByTestId('ml-stats');
+    fireEvent.click(screen.getByTestId('run-similarity-pass'));
+
+    const progress = await screen.findByTestId('ml-progress');
+    expect(progress).toHaveTextContent('8,427 of 8,439 photos analysed so far');
+
+    expect(
+      await screen.findByText(
+        'Similarity pass finished — 8,433 photos analysed.',
+        {},
+        { timeout: 5000 },
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('starts a face pass and a clustering pass', async () => {
     const fetchMock = setup([
       (url, init) =>
