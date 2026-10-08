@@ -240,8 +240,19 @@
   background: color-mix(in srgb, #000 92%, transparent);
 }
 
+/* `grid-template-rows/columns: minmax(0, 1fr)` rather than leaving the
+   single implicit track at its default `auto` size: an `auto` track sizes
+   itself to its content's intrinsic size, so a `width/height: 100%` media
+   child resolves its percentage against an *indefinite* size and falls back
+   to its own natural dimensions instead — full-resolution photos and videos
+   then render far larger than the stage and just get clipped by the
+   viewport, with no letterboxing and the video controls bar pushed off
+   screen. `minmax(0, 1fr)` gives the track (and so the child's percentage
+   basis) a real, bounded size. */
 .share-viewer-stage {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   padding: var(--space-6) var(--space-5);

@@ -6,6 +6,11 @@ import type { FileSummary } from '../../api/types';
 /**
  * Sharing. Shares are created at a resource key, and a file's key is
  * `file:<library>/<rel-path>`, so a share here exposes exactly this file.
+ *
+ * `read` alone only covers listing and thumbnails — the public viewer's
+ * full-size image and video playback goes through the same download route a
+ * literal save does, so the link has to carry `download` too or opening the
+ * file just 403s silently (see AlbumShareDialog, which hit the same bug).
  */
 export function SharePanel({ libraryId, file }: { libraryId: string; file: FileSummary }) {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -19,7 +24,7 @@ export function SharePanel({ libraryId, file }: { libraryId: string; file: FileS
     setBusy(true);
     setError(null);
     try {
-      const resp = await createShare(libraryId, { key: resourceKey, caps: ['read'] });
+      const resp = await createShare(libraryId, { key: resourceKey, caps: ['read', 'download'] });
       setShareUrl(`${window.location.origin}/s/${resp.token}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));

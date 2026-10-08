@@ -181,6 +181,15 @@ export default function PublicSharePage() {
   const viewerFile = viewerIndex !== null ? files[viewerIndex] : undefined;
   const sharePassword = unlocked ? password : undefined;
 
+  // A failed video/image load (expired share, revoked access, unsupported
+  // format) otherwise fails completely silently — the element just sits
+  // there showing nothing, which looks identical to "still loading". Keyed
+  // by file id rather than cleared on navigation, so moving to a different
+  // file naturally stops showing a stale error without needing an effect.
+  const [mediaError, setMediaError] = useState<{ fileId: string; message: string } | null>(null);
+  const viewerMediaError =
+    viewerFile && mediaError?.fileId === viewerFile.id ? mediaError.message : null;
+
   useEffect(() => {
     if (viewerIndex === null) return;
     const onKey = (event: KeyboardEvent) => {
@@ -365,17 +374,47 @@ export default function PublicSharePage() {
           )}
 
           <div className="share-viewer-stage">
-            {viewerFile.media_type === 'video' ? (
+            {viewerMediaError ? (
+              <div className="share-viewer-fallback">
+                <Icon name={mediaTypeIcon(viewerFile.media_type)} size={48} />
+                <p className="muted">{viewerMediaError}</p>
+              </div>
+            ) : viewerFile.media_type === 'video' ? (
               <video
+                key={viewerFile.id}
                 className="share-viewer-media"
                 src={publicShareDownloadUrl(token, viewerFile.id, sharePassword)}
                 controls
+                playsInline
+                preload="metadata"
+                onClick={(event) => {
+                  const video = event.currentTarget;
+                  if (video.paused) void video.play();
+                  else video.pause();
+                }}
+                onError={(event) => {
+                  const err = event.currentTarget.error;
+                  setMediaError({
+                    fileId: viewerFile.id,
+                    message:
+                      err?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+                        ? 'This video format cannot be played in the browser.'
+                        : 'This video could not be loaded. The link may have expired or access may have been revoked.',
+                  });
+                }}
               />
             ) : isPreviewable(viewerFile) ? (
               <img
                 className="share-viewer-media"
                 src={publicShareDownloadUrl(token, viewerFile.id, sharePassword)}
                 alt={viewerFile.name}
+                onError={() =>
+                  setMediaError({
+                    fileId: viewerFile.id,
+                    message:
+                      'This image could not be loaded. The link may have expired or access may have been revoked.',
+                  })
+                }
               />
             ) : (
               <div className="share-viewer-fallback">
