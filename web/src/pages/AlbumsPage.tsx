@@ -24,6 +24,7 @@ import {
 import type { Album, FileSummary, Library } from '../api/types';
 import { AddFilesDialog } from '../components/albums/AddFilesDialog';
 import { AlbumCard } from '../components/albums/AlbumCard';
+import { AlbumShareDialog } from '../components/albums/AlbumShareDialog';
 import { ConfirmDialog, PromptDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
@@ -89,6 +90,8 @@ export default function AlbumsPage() {
   return <Albums library={gate.library} albumId={albumId} />;
 }
 
+type GridEditing = { album: Album; kind: 'rename' | 'delete' } | null;
+
 function Albums({ library, albumId }: { library: Library; albumId: string | null }) {
   const libraryId = library.id;
   const navigate = useNavigate();
@@ -96,10 +99,23 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<GridEditing>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [sharing, setSharing] = useState<Album | null>(null);
 
   const albums = useLibraryResource(
     useCallback(async (id: string) => (await listAlbums(id)).albums ?? [], []),
   );
+
+  const runEdit = (action: () => Promise<unknown>, after: () => void) => {
+    setEditBusy(true);
+    setEditError(null);
+    action()
+      .then(after)
+      .catch((e: unknown) => setEditError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setEditBusy(false));
+  };
 
   const offline = library.status === 'offline';
   const active = albumId ? (albums.data?.find((a) => a.id === albumId) ?? null) : null;
@@ -201,6 +217,15 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
                 album={album}
                 libraryId={libraryId}
                 onOpen={(a) => navigate(`/albums/${a.id}`)}
+                onRename={(a) => {
+                  setEditError(null);
+                  setEditing({ album: a, kind: 'rename' });
+                }}
+                onShare={(a) => setSharing(a)}
+                onDelete={(a) => {
+                  setEditError(null);
+                  setEditing({ album: a, kind: 'delete' });
+                }}
               />
             </li>
           ))}
@@ -230,6 +255,60 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
         }}
         testId="new-album-dialog"
       />
+
+      <PromptDialog
+        open={editing?.kind === 'rename'}
+        title="Rename album"
+        label="Album name"
+        initialValue={editing?.album.name ?? ''}
+        busy={editBusy}
+        error={editError}
+        onCancel={() => setEditing(null)}
+        onConfirm={(name) => {
+          if (!editing) return;
+          runEdit(
+            () => updateAlbum(libraryId, editing.album.id, { name }),
+            () => {
+              setEditing(null);
+              albums.reload();
+            },
+          );
+        }}
+        testId="rename-album-dialog"
+      />
+
+      <ConfirmDialog
+        open={editing?.kind === 'delete'}
+        title={`Delete album “${editing?.album.name}”?`}
+        destructive
+        confirmLabel="Delete album"
+        busy={editBusy}
+        error={editError}
+        message={
+          <p>
+            Only the album is deleted. The photos and files in it stay exactly where they are in
+            your library.
+          </p>
+        }
+        onCancel={() => setEditing(null)}
+        onConfirm={() => {
+          if (!editing) return;
+          const name = editing.album.name;
+          runEdit(
+            () => deleteAlbum(libraryId, editing.album.id),
+            () => {
+              setEditing(null);
+              toast({ message: `Deleted ${name}`, tone: 'success' });
+              albums.reload();
+            },
+          );
+        }}
+        testId="delete-album-dialog"
+      />
+
+      {sharing && (
+        <AlbumShareDialog libraryId={libraryId} album={sharing} onClose={() => setSharing(null)} />
+      )}
     </main>
   );
 }
@@ -252,6 +331,7 @@ function AlbumDetail({
   const more = useMenuButton();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Editing>(null);
+  const [sharing, setSharing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
@@ -516,6 +596,12 @@ function AlbumDetail({
               icon: 'document',
               onSelect: () => setEditing('describe'),
             },
+            {
+              id: 'share',
+              label: 'Share album',
+              icon: 'share',
+              onSelect: () => setSharing(true),
+            },
             ...(album.cover_file_id
               ? [
                   {
@@ -618,6 +704,10 @@ function AlbumDetail({
         }
         testId="delete-album-dialog"
       />
+
+      {sharing && (
+        <AlbumShareDialog libraryId={libraryId} album={album} onClose={() => setSharing(false)} />
+      )}
 
       {!offline && timelineOpen && <Timeline files={list} label={`Album: ${album.name}`} />}
     </main>

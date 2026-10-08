@@ -1,0 +1,77 @@
+.album-share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.album-share-section h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.album-share-people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.album-share-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.album-share-person-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.album-share-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.album-share-input {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.album-share-input:focus-visible {
+  border-color: var(--color-primary-ink);
+}
+
+.album-share-fresh {
+  padding: var(--space-3);
+  background: var(--color-fill-subtle);
+  border-radius: var(--radius-md);
+}
+
+.album-share-fresh-row {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.album-share-fresh-row .album-share-input {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+}

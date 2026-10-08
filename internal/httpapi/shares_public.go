@@ -65,6 +65,60 @@ func coversKey(ancestor, key string) bool {
 	return strings.HasPrefix(key, ancestor+"/")
 }
 
+// albumIDFromShareKey reports the album id when key is exactly an album
+// entity key (authz.EntityKey("a", libID, id)) — never a deeper key that
+// merely contains the album marker, since an album has no descendants.
+// An album's files can live anywhere in the library and belong to several
+// albums at once, so they are not reachable through the folder/file key
+// hierarchy `coversKey` walks for every other share scope; a public share
+// rooted at an album needs this instead, to resolve to the album's own
+// membership rather than a subtree that does not exist.
+func albumIDFromShareKey(libID, key string) (string, bool) {
+	prefix := libID + "/a:"
+	if !strings.HasPrefix(key, prefix) {
+		return "", false
+	}
+	id := key[len(prefix):]
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
+}
+
+// publicShareAllowsFile reports whether a public share permits an action on
+// one file. For an album-scoped share this is album membership rather than
+// the key-covers check every other scope uses (see albumIDFromShareKey). On
+// an internal error it writes the response itself, signalled by `responded`.
+func (s *Server) publicShareAllowsFile(
+	w http.ResponseWriter, r *http.Request, acc *shareAccess, f *media.File, caps ...authz.Capability,
+) (allowed, responded bool) {
+	albumID, isAlbum := albumIDFromShareKey(acc.libID, acc.share.ResourceKey)
+	if !isAlbum {
+		return acc.shareCan(authz.FileKey(acc.libID, f.RelPath), caps...), false
+	}
+	if !acc.share.Capabilities.All(caps...) {
+		return false, false
+	}
+	store, cleanup, ok := s.openAlbumStore(w, r, acc.library)
+	if !ok {
+		return false, true
+	}
+	defer cleanup()
+	files, err := store.ListFiles(r.Context(), albumID)
+	if err != nil {
+		s.logger.Error("public share album membership", "error", err)
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to check album membership.")
+		return false, true
+	}
+	for _, af := range files {
+		if af.ID == f.ID {
+			return true, false
+		}
+	}
+	return false, false
+}
+
 // handlePublicShareInfo — GET /api/v1/shares/{token}
 // Public share metadata (no capability data leaks; only existence + scope).
 func (s *Server) handlePublicShareInfo(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +151,31 @@ func (s *Server) handlePublicShareListFiles(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+
+	if albumID, isAlbum := albumIDFromShareKey(acc.libID, acc.share.ResourceKey); isAlbum {
+		if !acc.share.Capabilities.All(authz.CapRead) {
+			s.writeForbidden(w, r)
+			return
+		}
+		store, cleanup, ok := s.openAlbumStore(w, r, acc.library)
+		if !ok {
+			return
+		}
+		defer cleanup()
+		files, err := store.ListFiles(r.Context(), albumID)
+		if err != nil {
+			s.logger.Error("public share list album files", "error", err)
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+				CodeInternal, "Failed to list album files.")
+			return
+		}
+		writeJSON(w, s.logger, http.StatusOK, map[string]any{
+			"files": toFileResponses(files),
+			"total": len(files),
+		})
+		return
+	}
+
 	svc, cleanup, ok := s.openMediaService(w, r, acc.library)
 	if !ok {
 		return
@@ -149,7 +228,11 @@ func (s *Server) handlePublicShareGetFile(w http.ResponseWriter, r *http.Request
 		s.writeMediaError(w, r, err)
 		return
 	}
-	if !acc.shareCan(authz.FileKey(acc.libID, f.RelPath), authz.CapRead) {
+	allowed, responded := s.publicShareAllowsFile(w, r, acc, f, authz.CapRead)
+	if responded {
+		return
+	}
+	if !allowed {
 		s.writeForbidden(w, r)
 		return
 	}
@@ -173,7 +256,11 @@ func (s *Server) handlePublicShareDownload(w http.ResponseWriter, r *http.Reques
 		s.writeMediaError(w, r, err)
 		return
 	}
-	if !acc.shareCan(authz.FileKey(acc.libID, f.RelPath), authz.CapRead, authz.CapDownload) {
+	allowed, responded := s.publicShareAllowsFile(w, r, acc, f, authz.CapRead, authz.CapDownload)
+	if responded {
+		return
+	}
+	if !allowed {
 		s.writeForbidden(w, r)
 		return
 	}

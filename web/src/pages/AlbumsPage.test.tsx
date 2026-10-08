@@ -2,10 +2,12 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  admin,
   bodyOf,
   called,
   fileFixture,
   json,
+  member,
   mockApi,
   noContent,
   originalFetch,
@@ -148,7 +150,7 @@ describe('AlbumsPage', () => {
     setup();
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
 
     expect(await screen.findByTestId('album-detail')).toBeInTheDocument();
     expect(screen.getByTestId('file-grid')).toBeInTheDocument();
@@ -172,7 +174,7 @@ describe('AlbumsPage', () => {
     });
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
 
     await screen.findByTestId('album-detail');
     expect(screen.queryByTestId('timeline')).not.toBeInTheDocument();
@@ -185,7 +187,7 @@ describe('AlbumsPage', () => {
     setup();
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('album-detail');
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to albums' }));
@@ -197,7 +199,7 @@ describe('AlbumsPage', () => {
     const fetchMock = setup();
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('file-grid');
 
     // Photos are removed through the selection bar; the album itself is untouched.
@@ -214,7 +216,7 @@ describe('AlbumsPage', () => {
     const confirmSpy = vi.spyOn(window, 'confirm');
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('album-detail');
 
     fireEvent.click(screen.getByRole('button', { name: 'Album options' }));
@@ -240,7 +242,7 @@ describe('AlbumsPage', () => {
     ]);
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('album-detail');
 
     fireEvent.click(screen.getByRole('button', { name: 'Album options' }));
@@ -267,7 +269,7 @@ describe('AlbumsPage', () => {
     ]);
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('file-grid');
 
     fireEvent.click(screen.getByRole('button', { name: 'Select clip.mp4' }));
@@ -284,7 +286,7 @@ describe('AlbumsPage', () => {
     const fetchMock = setup();
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('album-detail');
 
     fireEvent.click(screen.getByRole('button', { name: 'Album options' }));
@@ -303,7 +305,7 @@ describe('AlbumsPage', () => {
     const fetchMock = setup();
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('file-grid');
 
     fireEvent.click(screen.getByTestId('add-files-button'));
@@ -337,7 +339,7 @@ describe('AlbumsPage', () => {
     setup();
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('file-grid');
 
     fireEvent.click(screen.getByTestId('add-files-button'));
@@ -378,7 +380,7 @@ describe('AlbumsPage', () => {
     renderPage(<AlbumsPage />);
 
     await screen.findByTestId('albums-grid');
-    fireEvent.click(screen.getByRole('button', { name: /Vacation/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
     await screen.findByTestId('file-grid');
 
     fireEvent.click(screen.getByTestId('add-files-button'));
@@ -393,5 +395,219 @@ describe('AlbumsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Search' }));
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Search is not indexed.');
+  });
+
+  it('renames an album from the grid card’s own menu, without opening it', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/albums/a1') && init?.method === 'PATCH'
+          ? json({ album: { ...albums.albums[0], name: 'Summer 2026' } })
+          : undefined,
+    ]);
+
+    await screen.findByTestId('albums-grid');
+    fireEvent.click(screen.getByTestId('album-menu-a1'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename album' }));
+
+    const dialog = await screen.findByTestId('rename-album-dialog');
+    fireEvent.change(within(dialog).getByLabelText('Album name'), {
+      target: { value: 'Summer 2026' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'PATCH', '/api/v1/libraries/lib1/albums/a1')).toEqual({
+        name: 'Summer 2026',
+      });
+    });
+    // Still on the grid — renaming from the card never opened the album.
+    expect(await screen.findByTestId('albums-grid')).toBeInTheDocument();
+  });
+
+  it('deletes an album from the grid card’s own menu', async () => {
+    const fetchMock = setup();
+
+    await screen.findByTestId('albums-grid');
+    fireEvent.click(screen.getByTestId('album-menu-a1'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete album' }));
+
+    const dialog = await screen.findByTestId('delete-album-dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete album' }));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/albums/a1')).toBe(true);
+    });
+  });
+
+  it('opens the same card menu with a right-click', async () => {
+    setup();
+
+    await screen.findByTestId('albums-grid');
+    fireEvent.contextMenu(screen.getAllByRole('button', { name: /Vacation/ })[0]!);
+
+    expect(await screen.findByRole('menuitem', { name: 'Rename album' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Share album' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete album' })).toBeInTheDocument();
+  });
+});
+
+describe('AlbumShareDialog', () => {
+  const grant: RouteHandler = (url, init) =>
+    url.endsWith('/api/v1/libraries/lib1/permissions') && !init?.method
+      ? json({
+          grants: [
+            {
+              id: 'g1',
+              user_id: 'u2',
+              resource_key: 'lib1/a:a1',
+              capabilities: ['read'],
+              effect: 'allow',
+              created_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+        })
+      : undefined;
+  const noShares: RouteHandler = (url, init) =>
+    url.endsWith('/api/v1/libraries/lib1/shares') && !init?.method
+      ? json({ shares: [] })
+      : undefined;
+  const activeShare: RouteHandler = (url, init) =>
+    url.endsWith('/api/v1/libraries/lib1/shares') && !init?.method
+      ? json({
+          shares: [
+            {
+              id: 's1',
+              resource_key: 'lib1/a:a1',
+              capabilities: ['read'],
+              has_password: false,
+              created_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+        })
+      : undefined;
+  const other = { id: 'u3', username: 'bob', role: 'user' as const, created_at: '2026-03-03T00:00:00Z' };
+  const users: RouteHandler = (url) =>
+    url.endsWith('/api/v1/users') ? json({ users: [admin, member, other] }) : undefined;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  async function openShareDialog(extra: RouteHandler[]) {
+    const fetchMock = setup(extra);
+    await screen.findByTestId('albums-grid');
+    fireEvent.click(screen.getByTestId('album-menu-a1'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Share album' }));
+    const dialog = await screen.findByTestId('album-share-dialog');
+    return { fetchMock, dialog };
+  }
+
+  it('lists people who already have access, by name', async () => {
+    const { dialog } = await openShareDialog([grant, noShares, users]);
+
+    const people = within(dialog).getByTestId('album-share-people');
+    expect(within(people).getByText('alice')).toBeInTheDocument();
+    expect(within(people).getByText('Can view')).toBeInTheDocument();
+  });
+
+  it('grants a person edit access on the album’s own resource key', async () => {
+    const { fetchMock, dialog } = await openShareDialog([
+      grant,
+      noShares,
+      users,
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/permissions') && init?.method === 'POST'
+          ? json({ grant: { id: 'g2' } }, 201)
+          : undefined,
+    ]);
+
+    fireEvent.change(within(dialog).getByTestId('album-share-user'), {
+      target: { value: 'u3' },
+    });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Can edit' }));
+    fireEvent.click(within(dialog).getByTestId('confirm-album-share'));
+
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/permissions')).toEqual({
+        user_id: 'u3',
+        key: 'lib1/a:a1',
+        caps: ['read', 'edit'],
+        effect: 'allow',
+      });
+    });
+  });
+
+  it('removes a person’s access', async () => {
+    const { fetchMock, dialog } = await openShareDialog([
+      grant,
+      noShares,
+      users,
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/permissions/g1') && init?.method === 'DELETE'
+          ? noContent()
+          : undefined,
+    ]);
+
+    fireEvent.click(within(dialog).getByTestId('revoke-album-grant-g1'));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/permissions/g1')).toBe(true);
+    });
+  });
+
+  it('makes an album public and shows the link exactly once', async () => {
+    const { fetchMock, dialog } = await openShareDialog([
+      grant,
+      noShares,
+      users,
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/shares') && init?.method === 'POST'
+          ? json(
+              {
+                share: {
+                  id: 's1',
+                  resource_key: 'lib1/a:a1',
+                  capabilities: ['read'],
+                  has_password: false,
+                  created_at: '2026-01-01T00:00:00Z',
+                },
+                token: 'tok123',
+              },
+              201,
+            )
+          : undefined,
+    ]);
+
+    fireEvent.click(within(dialog).getByTestId('make-album-public'));
+
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toEqual({
+        key: 'lib1/a:a1',
+        caps: ['read'],
+      });
+    });
+    expect(await within(dialog).findByTestId('album-public-url')).toHaveValue(
+      `${window.location.origin}/s/tok123`,
+    );
+  });
+
+  it('turns off an existing public link', async () => {
+    const { fetchMock, dialog } = await openShareDialog([
+      grant,
+      activeShare,
+      users,
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/shares/s1') && init?.method === 'DELETE'
+          ? noContent()
+          : undefined,
+    ]);
+
+    expect(await within(dialog).findByTestId('turn-off-album-public')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByTestId('turn-off-album-public'));
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/shares/s1')).toBe(true);
+    });
   });
 });

@@ -383,3 +383,98 @@ func TestAuthz_RevokedShareIsImmediatelyDead(t *testing.T) {
 		t.Fatalf("revoked share = %d, want 401", rr.Code)
 	}
 }
+
+// An album's files are not reachable through the folder/file key hierarchy a
+// folder or library share walks — they can live anywhere, so a share rooted
+// at an album entity key needs its own resolution path (albumIDFromShareKey /
+// publicShareAllowsFile in shares_public.go). This exercises that path
+// end to end: list, get, and download through a public album share, and
+// confirms a file that merely lives alongside the album is not leaked.
+func TestAuthz_PublicAlbumShare(t *testing.T) {
+	_, admin, _, libID := newAuthzTestServer(t)
+	inAlbum := uploadFile(t, admin, libID, "photos/sunset.jpg")
+	outsideAlbum := uploadFile(t, admin, libID, "photos/other.jpg")
+
+	create := admin.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/albums",
+		map[string]string{"name": "Holiday"})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create album = %d, body=%s", create.Code, create.Body.String())
+	}
+	var createdAlbum struct {
+		Album struct {
+			ID string `json:"id"`
+		} `json:"album"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &createdAlbum); err != nil {
+		t.Fatalf("unmarshal album: %v", err)
+	}
+	albumID := createdAlbum.Album.ID
+
+	rec := admin.do(t, http.MethodPost,
+		"/api/v1/libraries/"+libID+"/albums/"+albumID+"/files/"+inAlbum, nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("add file to album = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	albumKey := authz.EntityKey("a", libID, albumID)
+	rec = admin.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/shares",
+		map[string]any{"key": albumKey, "caps": []string{"read"}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create album share = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var shared struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &shared); err != nil {
+		t.Fatalf("unmarshal share: %v", err)
+	}
+
+	// Listing the share resolves to the album's own files, not an empty
+	// folder listing — the bug this test guards against.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+shared.Token+"/files", nil)
+	rr := httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("album share list = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	var listed struct {
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if listed.Total != 1 || len(listed.Files) != 1 || listed.Files[0].ID != inAlbum {
+		t.Fatalf("album share list = %+v, want exactly [%s]", listed, inAlbum)
+	}
+
+	// The member file resolves.
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+shared.Token+"/files/"+inAlbum, nil)
+	rr = httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("album share get member file = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+
+	// A file that merely lives in the same library, but was never added to
+	// the album, must not be reachable through the album's share.
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+shared.Token+"/files/"+outsideAlbum, nil)
+	rr = httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("album share get non-member file = %d, want 403", rr.Code)
+	}
+
+	// Read is not download: the share was only granted "read".
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+shared.Token+"/files/"+inAlbum+"/download", nil)
+	rr = httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("album share download without the cap = %d, want 403", rr.Code)
+	}
+}
