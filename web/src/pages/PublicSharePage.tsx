@@ -370,7 +370,6 @@ export default function PublicSharePage() {
                 className="share-viewer-media"
                 src={publicShareDownloadUrl(token, viewerFile.id, sharePassword)}
                 controls
-                autoPlay
               />
             ) : isPreviewable(viewerFile) ? (
               <img
