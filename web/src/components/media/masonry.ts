@@ -86,7 +86,10 @@ export interface MasonryLayout {
 }
 
 /** Lay groups out as a column waterfall. */
-export function layoutMasonry(groups: readonly MediaGroup[], metrics: MasonryMetrics): MasonryLayout {
+export function layoutMasonry(
+  groups: readonly MediaGroup[],
+  metrics: MasonryMetrics,
+): MasonryLayout {
   const { columns: columnCount, columnWidth, gap } = metrics;
   const columns: TileCell[][] = Array.from({ length: columnCount }, () => []);
   const colBottoms = new Array<number>(columnCount).fill(0);

@@ -41,7 +41,9 @@ describe('masonryMetrics', () => {
   });
 
   it('uses more columns on a wider container', () => {
-    expect(masonryMetrics(1600, 4, 196).columns).toBeGreaterThan(masonryMetrics(800, 4, 196).columns);
+    expect(masonryMetrics(1600, 4, 196).columns).toBeGreaterThan(
+      masonryMetrics(800, 4, 196).columns,
+    );
   });
 });
 
@@ -70,7 +72,9 @@ describe('layoutMasonry', () => {
   });
 
   it('computes a total height tall enough for the longest column', () => {
-    const lastTops = layout.columns.map((col) => (col.length ? col[col.length - 1]!.top + col[col.length - 1]!.height : 0));
+    const lastTops = layout.columns.map((col) =>
+      col.length ? col[col.length - 1]!.top + col[col.length - 1]!.height : 0,
+    );
     expect(layout.totalHeight).toBeCloseTo(Math.max(...lastTops), 0);
   });
 
@@ -95,7 +99,9 @@ describe('layoutMasonry', () => {
     expect(colsWithSecondGroupTiles.length).toBeGreaterThan(0);
     for (const col of colsWithSecondGroupTiles) {
       const firstOfGroup = col.find((c) => c.index >= 3);
-      expect(firstOfGroup!.top).toBeGreaterThanOrEqual(secondHeaderTop + headerLayout.headers[1]!.height);
+      expect(firstOfGroup!.top).toBeGreaterThanOrEqual(
+        secondHeaderTop + headerLayout.headers[1]!.height,
+      );
     }
   });
 });

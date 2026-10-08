@@ -281,7 +281,11 @@ export default function SettingsPage() {
               title="Photos layout"
               description="A waterfall of varied tile sizes, or the uniform square grid Videos and Files use."
             >
-              <div className="segmented settings-themes" role="radiogroup" aria-label="Photos layout">
+              <div
+                className="segmented settings-themes"
+                role="radiogroup"
+                aria-label="Photos layout"
+              >
                 {PHOTO_LAYOUT_OPTIONS.map((option) => (
                   <label
                     key={option.value}

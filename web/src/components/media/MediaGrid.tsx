@@ -53,7 +53,10 @@ function cellBounds(layout: Layout, index: number): { top: number; height: numbe
   }
   const col = layout.layout.columnOfItem[index];
   const position = layout.layout.positionInColumn[index];
-  const cell = col === undefined || position === undefined ? undefined : layout.layout.columns[col]?.[position];
+  const cell =
+    col === undefined || position === undefined
+      ? undefined
+      : layout.layout.columns[col]?.[position];
   return cell ? { top: cell.top, height: cell.height } : undefined;
 }
 
@@ -117,7 +120,10 @@ export function MediaGrid({
   const layout: Layout = useMemo(() => {
     const width = box.width || FALLBACK_WIDTH;
     if (masonry) {
-      return { kind: 'masonry', layout: layoutMasonry(groups, masonryMetrics(width, box.gap, targetTileSize(width))) };
+      return {
+        kind: 'masonry',
+        layout: layoutMasonry(groups, masonryMetrics(width, box.gap, targetTileSize(width))),
+      };
     }
     return { kind: 'square', layout: layoutGrid(groups, gridMetrics(width, box.gap)) };
   }, [groups, box, masonry]);
@@ -160,7 +166,9 @@ export function MediaGrid({
       return;
     }
     const headers = visibleRows(current.layout.headers, viewTop, viewBottom, OVERSCAN);
-    const columns = current.layout.columns.map((col) => visibleRows(col, viewTop, viewBottom, OVERSCAN));
+    const columns = current.layout.columns.map((col) =>
+      visibleRows(col, viewTop, viewBottom, OVERSCAN),
+    );
     setMasonryRange((prev) =>
       prev.headers[0] === headers[0] &&
       prev.headers[1] === headers[1] &&
