@@ -193,6 +193,78 @@ describe('PublicSharePage', () => {
     });
   });
 
+  it('shows a thumbnail tile and opens it in a lightbox', async () => {
+    renderShare([
+      (url) => (url.includes('/api/v1/shares/tok1/files?') ? json(firstPage) : undefined),
+      (url) => (url.endsWith('/api/v1/shares/tok1') ? json(shareInfo) : undefined),
+    ]);
+
+    const list = await screen.findByTestId('share-file-list');
+    const img = list.querySelector('.share-tile-img');
+    expect(img).toHaveAttribute('src', expect.stringContaining('/shares/tok1/files/f1/thumbnail'));
+
+    fireEvent.click(within(list).getByRole('button', { name: 'IMG_0001.png' }));
+
+    const viewer = await screen.findByRole('dialog', { name: 'IMG_0001.png' });
+    expect(within(viewer).getByRole('img', { name: 'IMG_0001.png' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('/shares/tok1/files/f1/download'),
+    );
+
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  it('moves between files in the lightbox with the arrow keys', async () => {
+    const second = fileFixture({ id: 'f2', rel_path: 'beach.jpg', name: 'beach.jpg' });
+    renderShare([
+      (url) =>
+        url.includes('/api/v1/shares/tok1/files?')
+          ? json({ files: [fileFixture(), second], next_cursor: '' })
+          : undefined,
+      (url) => (url.endsWith('/api/v1/shares/tok1') ? json(shareInfo) : undefined),
+    ]);
+
+    const list = await screen.findByTestId('share-file-list');
+    fireEvent.click(within(list).getByRole('button', { name: 'IMG_0001.png' }));
+    await screen.findByRole('dialog', { name: 'IMG_0001.png' });
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(await screen.findByRole('dialog', { name: 'beach.jpg' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(await screen.findByRole('dialog', { name: 'IMG_0001.png' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  it('falls back to a plain icon for a file type with no preview', async () => {
+    const doc = fileFixture({
+      id: 'f3',
+      rel_path: 'notes.pdf',
+      name: 'notes.pdf',
+      media_type: 'document',
+      mime_type: 'application/pdf',
+    });
+    renderShare([
+      (url) =>
+        url.includes('/api/v1/shares/tok1/files?') ? json({ files: [doc], next_cursor: '' }) : undefined,
+      (url) => (url.endsWith('/api/v1/shares/tok1') ? json(shareInfo) : undefined),
+    ]);
+
+    const list = await screen.findByTestId('share-file-list');
+    expect(list.querySelector('.share-tile-img')).not.toBeInTheDocument();
+
+    fireEvent.click(within(list).getByRole('button', { name: 'notes.pdf' }));
+    const viewer = await screen.findByRole('dialog', { name: 'notes.pdf' });
+    expect(within(viewer).queryByRole('img')).not.toBeInTheDocument();
+  });
+
   it('says the link is missing its token', async () => {
     mockApi([]);
     renderPage(

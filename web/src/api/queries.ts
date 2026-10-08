@@ -542,12 +542,18 @@ export const getPublicShareFile = (token: string, fileId: string, password?: str
   shareRequest<{ file: FileSummary }>(`/shares/${token}/files/${fileId}`, password);
 
 /**
- * A share's only byte route is `download`, and the server sends it as an
- * attachment — so it is a link to click, never an `<img src>`. There is
- * deliberately no public thumbnail: a share is narrow on purpose.
+ * `<img>`/`<video>` tags fetch by URL and cannot set the password header, so
+ * these carry it as a query parameter instead (the server accepts either;
+ * see `resolveShare`). That is fine for an unauthenticated share — the token
+ * in the URL is already the credential — but it does mean these URLs are as
+ * sensitive as the token itself and should never be logged or copied around.
  */
-export const publicShareDownloadUrl = (token: string, fileId: string): string =>
-  `${API_BASE}/shares/${token}/files/${fileId}/download`;
+export const publicShareDownloadUrl = (token: string, fileId: string, password?: string): string =>
+  `${API_BASE}/shares/${token}/files/${fileId}/download${query({ password })}`;
+
+/** The small JPEG preview a public album/folder share renders as a grid. */
+export const publicShareThumbnailUrl = (token: string, fileId: string, password?: string): string =>
+  `${API_BASE}/shares/${token}/files/${fileId}/thumbnail${query({ password })}`;
 
 /**
  * Downloading a share file needs the password header, which an `<a download>`

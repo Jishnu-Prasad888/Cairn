@@ -1,13 +1,16 @@
 package httpapi
 
 import (
+	"bytes"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
+	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
 )
 
 // sharePasswordHeader carries an optional share password on public requests.
@@ -24,8 +27,17 @@ type shareAccess struct {
 // resolveShare authenticates the share token (and optional password) and
 // resolves the owning library. Denied or malformed shares receive
 // UNAUTHORIZED without revealing which check failed.
+//
+// The password travels as a header on every JSON request, but an `<img>` or
+// `<video>` tag cannot set one — the browser issues a plain GET. Those
+// requests carry the password as a query parameter instead; a header always
+// wins if both are present.
 func (s *Server) resolveShare(w http.ResponseWriter, r *http.Request) (*shareAccess, bool) {
-	sh, err := s.authz.AuthenticateShare(r.Context(), r.PathValue("token"), r.Header.Get(sharePasswordHeader))
+	password := r.Header.Get(sharePasswordHeader)
+	if password == "" {
+		password = r.URL.Query().Get("password")
+	}
+	sh, err := s.authz.AuthenticateShare(r.Context(), r.PathValue("token"), password)
 	if err != nil {
 		s.writeAuthzError(w, r, err)
 		return nil, false
@@ -237,6 +249,60 @@ func (s *Server) handlePublicShareGetFile(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"file": toFileResponse(f)})
+}
+
+// handlePublicShareThumbnail — GET /api/v1/shares/{token}/files/{fileID}/thumbnail
+// So a public share can render a photo grid rather than a bare file list —
+// the same small JPEG preview the authenticated grid uses, generated on
+// demand the first time and cached on disk after that.
+func (s *Server) handlePublicShareThumbnail(w http.ResponseWriter, r *http.Request) {
+	acc, ok := s.resolveShare(w, r)
+	if !ok {
+		return
+	}
+	svc, cleanup, ok := s.openMediaService(w, r, acc.library)
+	if !ok {
+		return
+	}
+	defer cleanup()
+
+	f, err := svc.Store().GetByID(r.Context(), r.PathValue("fileID"))
+	if err != nil {
+		s.writeMediaError(w, r, err)
+		return
+	}
+	allowed, responded := s.publicShareAllowsFile(w, r, acc, f, authz.CapRead)
+	if responded {
+		return
+	}
+	if !allowed {
+		s.writeForbidden(w, r)
+		return
+	}
+
+	cairnDir := filepath.Join(acc.library.Root, ".cairn")
+	data, modTime, err := metadata.ReadThumb(cairnDir, f.ID, s.keys)
+	if err == nil {
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeContent(w, r, f.ID+".jpg", modTime, bytes.NewReader(data))
+		return
+	}
+
+	absPath := filepath.Join(acc.library.Root, filepath.FromSlash(f.RelPath))
+	generated, err := metadata.GenerateThumbnail(absPath, cairnDir, f.ID, s.keys)
+	if err != nil || !generated {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
+			CodeNotFound, "Thumbnail not available for this file.")
+		return
+	}
+	data, modTime, err = metadata.ReadThumb(cairnDir, f.ID, s.keys)
+	if err != nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to open generated thumbnail.")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	http.ServeContent(w, r, f.ID+".jpg", modTime, bytes.NewReader(data))
 }
 
 // handlePublicShareDownload — GET /api/v1/shares/{token}/files/{fileID}/download

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -121,6 +123,55 @@ func uploadFile(t *testing.T, c *testClient, libID, path string) string {
 	rec := rawUpload(t, c, libID, path)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		File struct {
+			ID string `json:"id"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal upload: %v", err)
+	}
+	return resp.File.ID
+}
+
+// uploadJPEG uploads a real, decodable JPEG through the live upload endpoint —
+// unlike uploadFile's placeholder bytes, this is needed wherever the test
+// exercises thumbnail generation, which has to decode the source image.
+func uploadJPEG(t *testing.T, c *testClient, libID, path string) string {
+	t.Helper()
+	var jpegBuf bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 64, 48))
+	if err := jpeg.Encode(&jpegBuf, img, nil); err != nil {
+		t.Fatalf("encode test jpeg: %v", err)
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filepath.Base(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(jpegBuf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.WriteField("path", path); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/libraries/"+libID+"/files/upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	for name, value := range c.cookies {
+		req.AddCookie(&http.Cookie{Name: name, Value: value})
+	}
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+	c.applySetCookies(rec.Result().Cookies())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload jpeg status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	var resp struct {
 		File struct {
@@ -476,5 +527,68 @@ func TestAuthz_PublicAlbumShare(t *testing.T) {
 	admin.handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("album share download without the cap = %d, want 403", rr.Code)
+	}
+}
+
+// A public page renders thumbnails as `<img>` tags, which cannot carry the
+// share's password header — so the password travels as a query parameter
+// instead for exactly this route (resolveShare's fallback). This proves both
+// that fallback and that the thumbnail itself is real, decodable JPEG bytes.
+func TestAuthz_PublicShareThumbnail(t *testing.T) {
+	_, admin, _, libID := newAuthzTestServer(t)
+	fileID := uploadJPEG(t, admin, libID, "photos/sunset.jpg")
+
+	rec := admin.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/shares",
+		map[string]any{
+			"key":      authz.FolderKey(libID, "photos"),
+			"caps":     []string{"read"},
+			"password": "sekrit-pass",
+		})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create share = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal share: %v", err)
+	}
+
+	// No password anywhere — denied, same as every other share route.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+resp.Token+"/files/"+fileID+"/thumbnail", nil)
+	rr := httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("thumbnail without password = %d, want 401", rr.Code)
+	}
+
+	// The header still works (JSON clients, the existing convention).
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+resp.Token+"/files/"+fileID+"/thumbnail", nil)
+	req.Header.Set(sharePasswordHeader, "sekrit-pass")
+	rr = httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("thumbnail with header = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+
+	// And so does the query parameter — what an <img src> actually sends.
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+resp.Token+"/files/"+fileID+"/thumbnail?password=sekrit-pass", nil)
+	rr = httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("thumbnail with query password = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("content-type = %q, want image/jpeg", ct)
+	}
+	body := rr.Body.Bytes()
+	if !bytes.HasPrefix(body, []byte{0xff, 0xd8, 0xff}) {
+		t.Error("served thumbnail is not a JPEG")
+	}
+	if _, _, err := image.Decode(bytes.NewReader(body)); err != nil {
+		t.Errorf("served thumbnail does not decode: %v", err)
 	}
 }

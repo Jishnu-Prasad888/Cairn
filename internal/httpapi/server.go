@@ -324,6 +324,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /api/v1/shares/{token}/files", s.handlePublicShareListFiles)
 		mux.HandleFunc("GET /api/v1/shares/{token}/files/{fileID}", s.handlePublicShareGetFile)
 		mux.HandleFunc("GET /api/v1/shares/{token}/files/{fileID}/download", s.handlePublicShareDownload)
+		mux.HandleFunc("GET /api/v1/shares/{token}/files/{fileID}/thumbnail", s.handlePublicShareThumbnail)
 		mux.HandleFunc("POST /api/v1/shares/{token}/authenticate", s.handlePublicShareAuthenticate)
 	}
 

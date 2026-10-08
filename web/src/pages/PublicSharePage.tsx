@@ -16,10 +16,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 
 import { ApiError } from '../api/client';
-import { downloadPublicShareFile, getPublicShare, listPublicShareFiles } from '../api/queries';
+import {
+  downloadPublicShareFile,
+  getPublicShare,
+  listPublicShareFiles,
+  publicShareDownloadUrl,
+  publicShareThumbnailUrl,
+} from '../api/queries';
 import type { FileSummary, PublicShareInfo } from '../api/types';
-import { formatBytes } from '../api/types';
-import { mediaTypeIcon } from '../components/media';
+import { isPreviewable, mediaTypeIcon } from '../components/media';
 import { Icon } from '../components/ui/Icon';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import './PublicSharePage.css';
@@ -168,6 +173,26 @@ export default function PublicSharePage() {
     }
   };
 
+  // The grid looks like the authenticated album/folder grid; opening a tile
+  // behaves like the authenticated viewer, minus everything that needs an
+  // account (favorites, tags, editing) — just the photo, prev/next, and
+  // download, which is all a visitor with no session can do here.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const viewerFile = viewerIndex !== null ? files[viewerIndex] : undefined;
+  const sharePassword = unlocked ? password : undefined;
+
+  useEffect(() => {
+    if (viewerIndex === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setViewerIndex(null);
+      else if (event.key === 'ArrowLeft') setViewerIndex((i) => (i && i > 0 ? i - 1 : i));
+      else if (event.key === 'ArrowRight')
+        setViewerIndex((i) => (i !== null && i < files.length - 1 ? i + 1 : i));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewerIndex, files.length]);
+
   return (
     <main className="share-view" data-testid="public-share-page">
       <header className="share-view-header">
@@ -241,27 +266,51 @@ export default function PublicSharePage() {
           {/* Only rendered once there is something in it: an empty list is
               announced as a section with nothing in it. */}
           {files.length > 0 && (
-            <ul className="share-file-list" data-testid="share-file-list">
-              {files.map((file) => (
-                <li key={file.id} className="share-file">
-                  <span className="share-file-glyph" aria-hidden="true">
-                    <Icon name={mediaTypeIcon(file.media_type)} />
-                  </span>
-                  <div className="share-file-meta">
-                    <span className="share-file-name">{file.name}</span>
-                    <span className="muted">
-                      {file.media_type} · {formatBytes(file.size_bytes)}
-                    </span>
+            <ul className="share-grid" data-testid="share-file-list">
+              {files.map((file, index) => (
+                <li key={file.id}>
+                  <div className="share-tile">
+                    <button
+                      type="button"
+                      className="share-tile-main"
+                      onClick={() => setViewerIndex(index)}
+                    >
+                      {isPreviewable(file) ? (
+                        <img
+                          className="share-tile-img"
+                          src={publicShareThumbnailUrl(token, file.id, sharePassword)}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          onLoad={(event) => {
+                            event.currentTarget.dataset.loaded = 'true';
+                          }}
+                          onError={(event) => {
+                            event.currentTarget.hidden = true;
+                          }}
+                        />
+                      ) : null}
+                      <span className="share-tile-glyph" aria-hidden="true">
+                        <Icon name={mediaTypeIcon(file.media_type)} size={26} />
+                      </span>
+                      {file.media_type === 'video' && (
+                        <span className="share-tile-badge" aria-hidden="true">
+                          <Icon name="play" size={14} filled />
+                        </span>
+                      )}
+                      <span className="share-tile-caption">{file.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button share-tile-download"
+                      aria-label={`Download ${file.name}`}
+                      onClick={() => void download(file)}
+                      disabled={downloading === file.id}
+                      data-testid={`download-${file.id}`}
+                    >
+                      <Icon name="download" size={16} />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() => void download(file)}
-                    disabled={downloading === file.id}
-                    data-testid={`download-${file.id}`}
-                  >
-                    {downloading === file.id ? 'Downloading…' : 'Download'}
-                  </button>
                 </li>
               ))}
             </ul>
@@ -281,6 +330,73 @@ export default function PublicSharePage() {
             </div>
           )}
         </>
+      )}
+
+      {viewerFile && (
+        <div className="share-viewer" role="dialog" aria-modal="true" aria-label={viewerFile.name}>
+          <button
+            type="button"
+            className="icon-button share-viewer-close"
+            aria-label="Close"
+            onClick={() => setViewerIndex(null)}
+          >
+            <Icon name="close" />
+          </button>
+
+          {viewerIndex! > 0 && (
+            <button
+              type="button"
+              className="icon-button share-viewer-nav share-viewer-prev"
+              aria-label="Previous"
+              onClick={() => setViewerIndex((i) => (i ? i - 1 : i))}
+            >
+              <Icon name="chevron-left" />
+            </button>
+          )}
+          {viewerIndex! < files.length - 1 && (
+            <button
+              type="button"
+              className="icon-button share-viewer-nav share-viewer-next"
+              aria-label="Next"
+              onClick={() => setViewerIndex((i) => (i !== null ? i + 1 : i))}
+            >
+              <Icon name="chevron-right" />
+            </button>
+          )}
+
+          <div className="share-viewer-stage">
+            {viewerFile.media_type === 'video' ? (
+              <video
+                className="share-viewer-media"
+                src={publicShareDownloadUrl(token, viewerFile.id, sharePassword)}
+                controls
+                autoPlay
+              />
+            ) : isPreviewable(viewerFile) ? (
+              <img
+                className="share-viewer-media"
+                src={publicShareDownloadUrl(token, viewerFile.id, sharePassword)}
+                alt={viewerFile.name}
+              />
+            ) : (
+              <div className="share-viewer-fallback">
+                <Icon name={mediaTypeIcon(viewerFile.media_type)} size={48} />
+              </div>
+            )}
+          </div>
+
+          <div className="share-viewer-footer">
+            <span className="share-viewer-name">{viewerFile.name}</span>
+            <button
+              type="button"
+              className="button"
+              onClick={() => void download(viewerFile)}
+              disabled={downloading === viewerFile.id}
+            >
+              {downloading === viewerFile.id ? 'Downloading…' : 'Download'}
+            </button>
+          </div>
+        </div>
       )}
     </main>
   );
