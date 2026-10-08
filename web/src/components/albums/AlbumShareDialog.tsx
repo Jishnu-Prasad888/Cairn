@@ -25,9 +25,15 @@ import './AlbumShareDialog.css';
 
 type AccessLevel = 'view' | 'edit';
 
+/**
+ * `read` alone only covers listing and thumbnails — the viewer's full-size
+ * image and video playback goes through the same download route a literal
+ * save does, so "view" has to carry `download` too or opening a photo in the
+ * album just 403s silently.
+ */
 const CAPS: Record<AccessLevel, Capability[]> = {
-  view: ['read'],
-  edit: ['read', 'edit'],
+  view: ['read', 'download'],
+  edit: ['read', 'download', 'edit'],
 };
 
 function levelOf(caps: Capability[]): AccessLevel {
@@ -120,7 +126,7 @@ export function AlbumShareDialog({
   const makePublic = () => {
     setPublishing(true);
     setPublishError(null);
-    createShare(libraryId, { key, caps: ['read'] })
+    createShare(libraryId, { key, caps: CAPS.view })
       .then((resp) => {
         setFresh({ url: `${window.location.origin}/s/${resp.token}` });
         setCopied(false);

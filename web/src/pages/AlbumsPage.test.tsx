@@ -532,7 +532,7 @@ describe('AlbumShareDialog', () => {
       expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/permissions')).toEqual({
         user_id: 'u3',
         key: 'lib1/a:a1',
-        caps: ['read', 'edit'],
+        caps: ['read', 'download', 'edit'],
         effect: 'allow',
       });
     });
@@ -584,7 +584,7 @@ describe('AlbumShareDialog', () => {
     await waitFor(() => {
       expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toEqual({
         key: 'lib1/a:a1',
-        caps: ['read'],
+        caps: ['read', 'download'],
       });
     });
     expect(await within(dialog).findByTestId('album-public-url')).toHaveValue(
