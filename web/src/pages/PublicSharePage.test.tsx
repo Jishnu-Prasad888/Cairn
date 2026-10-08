@@ -253,7 +253,9 @@ describe('PublicSharePage', () => {
     });
     renderShare([
       (url) =>
-        url.includes('/api/v1/shares/tok1/files?') ? json({ files: [doc], next_cursor: '' }) : undefined,
+        url.includes('/api/v1/shares/tok1/files?')
+          ? json({ files: [doc], next_cursor: '' })
+          : undefined,
       (url) => (url.endsWith('/api/v1/shares/tok1') ? json(shareInfo) : undefined),
     ]);
 

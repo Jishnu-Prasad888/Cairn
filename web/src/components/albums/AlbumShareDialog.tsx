@@ -66,19 +66,21 @@ export function AlbumShareDialog({
 
   const grants = useResource(
     useCallback(
-      async () =>
-        (await listGrants(libraryId)).grants?.filter((g) => g.resource_key === key) ?? [],
+      async () => (await listGrants(libraryId)).grants?.filter((g) => g.resource_key === key) ?? [],
       [libraryId, key],
     ),
   );
   const shares = useResource(
     useCallback(
-      async () =>
-        (await listShares(libraryId)).shares?.filter((s) => s.resource_key === key) ?? [],
+      async () => (await listShares(libraryId)).shares?.filter((s) => s.resource_key === key) ?? [],
       [libraryId, key],
     ),
   );
-  const users = useResource(useCallback(() => listUsers(), []), [], isAdmin);
+  const users = useResource(
+    useCallback(() => listUsers(), []),
+    [],
+    isAdmin,
+  );
   const userNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const u of users.data?.users ?? []) map.set(u.id, u.username);
@@ -240,10 +242,7 @@ export function AlbumShareDialog({
             )}
             <div className="segmented" role="radiogroup" aria-label="Access level">
               {(['view', 'edit'] as const).map((l) => (
-                <label
-                  key={l}
-                  className={level === l ? 'segmented-item active' : 'segmented-item'}
-                >
+                <label key={l} className={level === l ? 'segmented-item active' : 'segmented-item'}>
                   <input
                     type="radio"
                     name="album-share-level"
@@ -282,9 +281,7 @@ export function AlbumShareDialog({
 
           {!activeShare && !fresh && (
             <>
-              <p className="muted">
-                Anyone with the link can view this album without signing in.
-              </p>
+              <p className="muted">Anyone with the link can view this album without signing in.</p>
               <button
                 type="button"
                 className="button"

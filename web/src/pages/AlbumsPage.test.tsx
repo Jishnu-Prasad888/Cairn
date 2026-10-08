@@ -485,7 +485,12 @@ describe('AlbumShareDialog', () => {
           ],
         })
       : undefined;
-  const other = { id: 'u3', username: 'bob', role: 'user' as const, created_at: '2026-03-03T00:00:00Z' };
+  const other = {
+    id: 'u3',
+    username: 'bob',
+    role: 'user' as const,
+    created_at: '2026-03-03T00:00:00Z',
+  };
   const users: RouteHandler = (url) =>
     url.endsWith('/api/v1/users') ? json({ users: [admin, member, other] }) : undefined;
 

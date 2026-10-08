@@ -960,7 +960,7 @@ describe('MediaPage', () => {
     expect(link.value).toMatch(/\/s\/tok123$/);
     expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toMatchObject({
       key: 'file:lib1/IMG_0001.png',
-      caps: ['read'],
+      caps: ['read', 'download'],
     });
   });
 

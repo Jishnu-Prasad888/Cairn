@@ -37,10 +37,24 @@ export function AlbumCard({
 
   const items: MenuEntry[] = withDangerLast([
     ...(onRename
-      ? [{ id: 'rename', label: 'Rename album', icon: 'edit' as const, onSelect: () => onRename(album) }]
+      ? [
+          {
+            id: 'rename',
+            label: 'Rename album',
+            icon: 'edit' as const,
+            onSelect: () => onRename(album),
+          },
+        ]
       : []),
     ...(onShare
-      ? [{ id: 'share', label: 'Share album', icon: 'share' as const, onSelect: () => onShare(album) }]
+      ? [
+          {
+            id: 'share',
+            label: 'Share album',
+            icon: 'share' as const,
+            onSelect: () => onShare(album),
+          },
+        ]
       : []),
     ...(onDelete
       ? [
