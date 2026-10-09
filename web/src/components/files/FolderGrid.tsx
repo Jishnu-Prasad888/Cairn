@@ -1,6 +1,8 @@
 /**
  * The sub-folders of the current folder, as compact tiles above its files.
- * Each is a drop target for moving files in.
+ * Each is a drop target for moving files in, and — when `onShare` is given
+ * — carries a small share button for a public/person link to that folder
+ * and everything under it.
  */
 
 import { useState } from 'react';
@@ -15,10 +17,12 @@ export function FolderGrid({
   folders,
   onOpen,
   onDropFile,
+  onShare,
 }: {
   folders: Folder[];
   onOpen: (folder: Folder) => void;
   onDropFile?: (event: React.DragEvent, folderPath: string) => void;
+  onShare?: (folder: Folder) => void;
 }) {
   const [over, setOver] = useState<string | null>(null);
   if (folders.length === 0) return null;
@@ -26,7 +30,7 @@ export function FolderGrid({
   return (
     <ul className="folder-grid" aria-label="Folders" data-testid="folder-grid">
       {folders.map((folder) => (
-        <li key={folder.id}>
+        <li key={folder.id} className="folder-tile-wrap">
           <button
             type="button"
             className={over === folder.rel_path ? 'folder-tile is-drop-target' : 'folder-tile'}
@@ -52,6 +56,17 @@ export function FolderGrid({
               </span>
             </span>
           </button>
+          {onShare && (
+            <button
+              type="button"
+              className="icon-button folder-tile-share"
+              aria-label={`Share ${folder.name}`}
+              onClick={() => onShare(folder)}
+              data-testid={`share-folder-${folder.id}`}
+            >
+              <Icon name="share" size={16} />
+            </button>
+          )}
         </li>
       ))}
     </ul>

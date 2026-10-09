@@ -71,6 +71,31 @@
   list-style: none;
 }
 
+.folder-tile-wrap {
+  position: relative;
+}
+
+.folder-tile-share {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  z-index: var(--z-raised);
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.folder-tile-wrap:hover .folder-tile-share,
+.folder-tile-wrap:focus-within .folder-tile-share {
+  opacity: 1;
+}
+
+.folder-tile-share:hover {
+  background: var(--color-surface);
+}
+
 .folder-tile {
   display: flex;
   align-items: center;
@@ -78,6 +103,7 @@
   width: 100%;
   height: 56px;
   padding: 0 var(--space-4);
+  padding-right: calc(var(--space-4) + 28px);
   color: var(--color-text-primary);
   text-align: left;
   background: var(--color-surface);

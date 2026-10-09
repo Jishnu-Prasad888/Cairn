@@ -267,6 +267,50 @@ describe('PublicSharePage', () => {
     expect(within(viewer).queryByRole('img')).not.toBeInTheDocument();
   });
 
+  it('skips the grid for a file share and opens the single file directly', async () => {
+    renderShare([
+      (url) => (url.includes('/api/v1/shares/tok1/files?') ? json(firstPage) : undefined),
+      (url) =>
+        url.endsWith('/api/v1/shares/tok1')
+          ? json({ share: { ...shareInfo.share, resource_type: 'file' } })
+          : undefined,
+    ]);
+
+    const viewer = await screen.findByRole('dialog', { name: 'IMG_0001.png' });
+    expect(within(viewer).getByRole('img', { name: 'IMG_0001.png' })).toBeInTheDocument();
+    expect(screen.queryByTestId('share-file-list')).not.toBeInTheDocument();
+    // Nothing to browse back to, so there is no close button.
+    expect(within(viewer).queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+  });
+
+  it('renders a memory share through MemoryReader, not the file grid', async () => {
+    const memory = {
+      id: 'm1',
+      title: 'Beach day',
+      body: '',
+      description: '',
+      location: 'Goa',
+      tags: [],
+      revision: 1,
+      deleted: false,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      blocks: [{ id: 'b1', type: 'text', markdown: 'What a day.' }],
+    };
+    renderShare([
+      (url) => (url.endsWith('/api/v1/shares/tok1/memory') ? json({ memory }) : undefined),
+      (url) =>
+        url.endsWith('/api/v1/shares/tok1')
+          ? json({ share: { ...shareInfo.share, resource_type: 'memory' } })
+          : undefined,
+    ]);
+
+    const reader = await screen.findByTestId('memory-reader');
+    expect(within(reader).getByText('Beach day')).toBeInTheDocument();
+    expect(within(reader).getByText('What a day.')).toBeInTheDocument();
+    expect(screen.queryByTestId('share-file-list')).not.toBeInTheDocument();
+  });
+
   it('says the link is missing its token', async () => {
     mockApi([]);
     renderPage(

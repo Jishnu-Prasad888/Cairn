@@ -97,38 +97,112 @@ func albumIDFromShareKey(libID, key string) (string, bool) {
 	return id, true
 }
 
+// memoryIDFromShareKey reports the memory id when key is exactly a memory
+// entity key (authz.EntityKey("m", libID, id)) — the same shape as
+// albumIDFromShareKey, since a memory is likewise not part of the
+// folder/file tree `coversKey` walks.
+func memoryIDFromShareKey(libID, key string) (string, bool) {
+	prefix := libID + "/m:"
+	if !strings.HasPrefix(key, prefix) {
+		return "", false
+	}
+	id := key[len(prefix):]
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
+}
+
+// relPathFromShareKey reports the library-relative path a folder- or
+// file-scoped share key encodes, and whether the terminal segment is a file
+// (marker x:) rather than a folder (marker f:). It is the inverse of
+// authz.FolderKey/authz.FileKey, so a folder or file share is fully
+// self-describing from its token alone. Reports ok=false for a library-root
+// key or any other resource type (album, memory, tag), which resolve by id
+// instead.
+func relPathFromShareKey(libID, key string) (relPath string, isFile bool, ok bool) {
+	if key == libID {
+		return "", false, false
+	}
+	prefix := libID + "/"
+	if !strings.HasPrefix(key, prefix) {
+		return "", false, false
+	}
+	segs := strings.Split(key[len(prefix):], "/")
+	parts := make([]string, 0, len(segs))
+	for i, seg := range segs {
+		switch {
+		case strings.HasPrefix(seg, "f:"):
+			parts = append(parts, seg[len("f:"):])
+		case strings.HasPrefix(seg, "x:") && i == len(segs)-1:
+			parts = append(parts, seg[len("x:"):])
+			return strings.Join(parts, "/"), true, true
+		default:
+			return "", false, false
+		}
+	}
+	return strings.Join(parts, "/"), false, true
+}
+
 // publicShareAllowsFile reports whether a public share permits an action on
-// one file. For an album-scoped share this is album membership rather than
-// the key-covers check every other scope uses (see albumIDFromShareKey). On
-// an internal error it writes the response itself, signalled by `responded`.
+// one file. For an album- or memory-scoped share this is membership in that
+// album/memory rather than the key-covers check every other scope uses (see
+// albumIDFromShareKey/memoryIDFromShareKey) — neither is part of the
+// folder/file tree `coversKey` walks, and a memory's images can reference
+// files anywhere in the library. On an internal error it writes the
+// response itself, signalled by `responded`.
 func (s *Server) publicShareAllowsFile(
 	w http.ResponseWriter, r *http.Request, acc *shareAccess, f *media.File, caps ...authz.Capability,
 ) (allowed, responded bool) {
-	albumID, isAlbum := albumIDFromShareKey(acc.libID, acc.share.ResourceKey)
-	if !isAlbum {
-		return acc.shareCan(authz.FileKey(acc.libID, f.RelPath), caps...), false
-	}
-	if !acc.share.Capabilities.All(caps...) {
+	if albumID, isAlbum := albumIDFromShareKey(acc.libID, acc.share.ResourceKey); isAlbum {
+		if !acc.share.Capabilities.All(caps...) {
+			return false, false
+		}
+		store, cleanup, ok := s.openAlbumStore(w, r, acc.library)
+		if !ok {
+			return false, true
+		}
+		defer cleanup()
+		files, err := store.ListFiles(r.Context(), albumID)
+		if err != nil {
+			s.logger.Error("public share album membership", "error", err)
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+				CodeInternal, "Failed to check album membership.")
+			return false, true
+		}
+		for _, af := range files {
+			if af.ID == f.ID {
+				return true, false
+			}
+		}
 		return false, false
 	}
-	store, cleanup, ok := s.openAlbumStore(w, r, acc.library)
-	if !ok {
-		return false, true
-	}
-	defer cleanup()
-	files, err := store.ListFiles(r.Context(), albumID)
-	if err != nil {
-		s.logger.Error("public share album membership", "error", err)
-		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
-			CodeInternal, "Failed to check album membership.")
-		return false, true
-	}
-	for _, af := range files {
-		if af.ID == f.ID {
-			return true, false
+	if memoryID, isMemory := memoryIDFromShareKey(acc.libID, acc.share.ResourceKey); isMemory {
+		if !acc.share.Capabilities.All(caps...) {
+			return false, false
 		}
+		store, cleanup, ok := s.openMemoryStore(w, r, acc.library)
+		if !ok {
+			return false, true
+		}
+		defer cleanup()
+		doc, err := store.GetDocument(r.Context(), memoryID)
+		if err != nil {
+			s.logger.Error("public share memory membership", "error", err)
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+				CodeInternal, "Failed to check memory membership.")
+			return false, true
+		}
+		for _, b := range doc.Blocks {
+			for _, img := range b.Images {
+				if img.SourceFileID == f.ID {
+					return true, false
+				}
+			}
+		}
+		return false, false
 	}
-	return false, false
+	return acc.shareCan(authz.FileKey(acc.libID, f.RelPath), caps...), false
 }
 
 // handlePublicShareInfo — GET /api/v1/shares/{token}
@@ -142,10 +216,11 @@ func (s *Server) handlePublicShareInfo(w http.ResponseWriter, r *http.Request) {
 	// covers and the owning library name.
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{
 		"share": map[string]any{
-			"resource_key": acc.share.ResourceKey,
-			"library":      acc.library.Name,
-			"has_password": acc.share.PasswordHash.Valid,
-			"expires_at":   shareExpiresString(acc.share),
+			"resource_key":  acc.share.ResourceKey,
+			"resource_type": string(authz.ParseKeyType(acc.share.ResourceKey)),
+			"library":       acc.library.Name,
+			"has_password":  acc.share.PasswordHash.Valid,
+			"expires_at":    shareExpiresString(acc.share),
 		},
 	})
 }
@@ -194,7 +269,31 @@ func (s *Server) handlePublicShareListFiles(w http.ResponseWriter, r *http.Reque
 	}
 	defer cleanup()
 
+	// A file- or folder-scoped share is fully self-describing from its
+	// token alone: the relative path lives in the resource key itself, so
+	// the caller never has to know and pass it as a query param.
+	keyRelPath, isFileKey, hasRelPath := relPathFromShareKey(acc.libID, acc.share.ResourceKey)
+	if isFileKey {
+		if !acc.share.Capabilities.All(authz.CapRead) {
+			s.writeForbidden(w, r)
+			return
+		}
+		f, err := svc.Store().GetByRelPath(r.Context(), keyRelPath)
+		if err != nil {
+			s.writeMediaError(w, r, err)
+			return
+		}
+		writeJSON(w, s.logger, http.StatusOK, map[string]any{
+			"files": toFileResponses([]*media.File{f}),
+			"total": 1,
+		})
+		return
+	}
+
 	folder := r.URL.Query().Get("folder")
+	if folder == "" && hasRelPath {
+		folder = keyRelPath
+	}
 	if !acc.shareCan(folderKeyFromParent(acc.libID, folder), authz.CapRead) {
 		s.writeForbidden(w, r)
 		return

@@ -1,83 +1,26 @@
-import { useCallback, useState } from 'react';
-
-import { createShare } from '../../api/queries';
+import { fileKey } from '../../api/resourceKeys';
 import type { FileSummary } from '../../api/types';
+import { ShareDialogBody } from '../sharing/ShareDialog';
 
 /**
- * Sharing. Shares are created at a resource key, and a file's key is
- * `file:<library>/<rel-path>`, so a share here exposes exactly this file.
- *
+ * Sharing one file — the viewer's Share tab, embedded directly in the
+ * already-open viewer panel (not a dialog of its own; see ShareDialogBody).
  * `read` alone only covers listing and thumbnails — the public viewer's
  * full-size image and video playback goes through the same download route a
- * literal save does, so the link has to carry `download` too or opening the
+ * literal save does, so "view" has to carry `download` too or opening the
  * file just 403s silently (see AlbumShareDialog, which hit the same bug).
  */
 export function SharePanel({ libraryId, file }: { libraryId: string; file: FileSummary }) {
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const resourceKey = `file:${libraryId}/${file.rel_path}`;
-
-  const create = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const resp = await createShare(libraryId, { key: resourceKey, caps: ['read', 'download'] });
-      setShareUrl(`${window.location.origin}/s/${resp.token}`);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [libraryId, resourceKey]);
-
-  const copy = async () => {
-    if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   return (
     <div data-testid="viewer-share">
-      <p className="muted">
-        A read-only link that anyone with the URL (and the password, if you set one) can open
-        without a Cairn account. Manage links from the Sharing page.
-      </p>
-      <p className="viewer-share-key">
-        <code>{resourceKey}</code>
-      </p>
-      {shareUrl ? (
-        <div className="viewer-share-result">
-          <label className="visually-hidden" htmlFor="viewer-share-url">
-            Share link
-          </label>
-          <input id="viewer-share-url" className="viewer-tag-input" readOnly value={shareUrl} />
-          <button type="button" className="button" onClick={() => void copy()}>
-            {copied ? 'Copied' : 'Copy link'}
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="button primary-button"
-          onClick={() => void create()}
-          disabled={busy}
-          data-testid="viewer-create-share"
-        >
-          {busy ? 'Creating…' : 'Create a read-only link'}
-        </button>
-      )}
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
+      <ShareDialogBody
+        libraryId={libraryId}
+        resourceKey={fileKey(libraryId, file.rel_path)}
+        resourceLabel="file"
+        testIdPrefix="file"
+        viewCaps={['read', 'download']}
+        editCaps={['read', 'download', 'edit']}
+      />
     </div>
   );
 }

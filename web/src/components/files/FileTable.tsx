@@ -23,6 +23,7 @@ interface FileTableProps {
   folders?: Folder[];
   onOpen: (file: FileSummary) => void;
   onOpenFolder?: (folder: Folder) => void;
+  onShareFolder?: (folder: Folder) => void;
   selection: Selection;
   /** Show where each file lives — useful for search results, noise in a folder. */
   showLocation?: boolean;
@@ -44,6 +45,7 @@ export function FileTable({
   folders = [],
   onOpen,
   onOpenFolder,
+  onShareFolder,
   selection,
   showLocation = false,
   sort,
@@ -130,7 +132,19 @@ export function FileTable({
             </td>
             <td className="col-date" />
             {showLocation && <td className="col-location" />}
-            <td className="col-actions" />
+            <td className="col-actions">
+              {onShareFolder && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`Share ${folder.name}`}
+                  onClick={() => onShareFolder(folder)}
+                  data-testid={`share-folder-${folder.id}`}
+                >
+                  <Icon name="share" size={16} />
+                </button>
+              )}
+            </td>
           </tr>
         ))}
         {files.map((file) => {
