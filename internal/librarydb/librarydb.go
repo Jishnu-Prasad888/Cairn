@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 
@@ -59,6 +60,22 @@ func OpenDB(cairnDir string) (*DB, error) {
 // <cairnDir>/library.db and applies any pending schema migrations.
 func Open(cairnDir string) (*sql.DB, error) {
 	path := filepath.Join(cairnDir, dbFileName)
+
+	// Every call opens its own *sql.DB pointed at the same file — callers
+	// across internal/ml and elsewhere each hold their own short-lived
+	// connection rather than sharing one. Two Opens of the same library
+	// racing here (e.g. a background ML pass started just before the
+	// library is reopened) would otherwise both open a connection to the
+	// file at once: migrate()'s check-then-ALTER isn't atomic across
+	// connections, so both could see a column missing and both try to add
+	// it, and even once that part is serialized, a second connection's Ping
+	// can land mid-ALTER on the first and come back SQLITE_BUSY. Holding
+	// this per-path lock for the whole open — not just migrate() — keeps
+	// only one connection ever touching a given library's file at a time.
+	mu := migrationLock(path)
+	mu.Lock()
+	defer mu.Unlock()
+
 	pool, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("open library database: %w", err)
@@ -81,6 +98,26 @@ func Open(cairnDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("migrate library database: %w", err)
 	}
 	return pool, nil
+}
+
+var (
+	migrationLocksMu sync.Mutex
+	migrationLocks   = map[string]*sync.Mutex{}
+)
+
+// migrationLock returns the mutex guarding migrate() for the library database
+// at path, creating it on first use. One mutex per path, kept for the life of
+// the process, so concurrent Opens of the same library serialize their
+// migration while Opens of different libraries do not block each other.
+func migrationLock(path string) *sync.Mutex {
+	migrationLocksMu.Lock()
+	defer migrationLocksMu.Unlock()
+	mu, ok := migrationLocks[path]
+	if !ok {
+		mu = &sync.Mutex{}
+		migrationLocks[path] = mu
+	}
+	return mu
 }
 
 func dsn(path string) string {
