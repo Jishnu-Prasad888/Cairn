@@ -431,8 +431,11 @@ export interface ShareListResponse {
  * `library` is the library's *name*, not an object — the public route leaks no
  * ids, only the scope and the label a visitor would see.
  */
+export type PublicShareResourceType = 'library' | 'folder' | 'file' | 'album' | 'memory' | 'tag';
+
 export interface PublicShareInfo {
   resource_key: string;
+  resource_type: PublicShareResourceType;
   library?: string;
   has_password: boolean;
   expires_at?: string;

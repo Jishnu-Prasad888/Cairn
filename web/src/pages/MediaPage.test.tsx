@@ -109,7 +109,7 @@ describe('MediaPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Files' })).toBeInTheDocument();
     expect(await screen.findByTestId('file-grid')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /2024/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^2024/ })).toBeInTheDocument();
     expect(screen.getByText('IMG_0001.png')).toBeInTheDocument();
     expect(screen.getByText('clip.mp4')).toBeInTheDocument();
   });
@@ -156,7 +156,7 @@ describe('MediaPage', () => {
     const fetchMock = setup([(url) => (url.includes('folder=2024') ? json(pageOne) : undefined)]);
 
     await screen.findByTestId('file-grid');
-    fireEvent.click(screen.getByRole('button', { name: /2024/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^2024/ }));
 
     await waitFor(() => {
       expect(called(fetchMock, 'GET', 'folder=2024')).toBe(true);
@@ -166,6 +166,49 @@ describe('MediaPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'All files' })).toBeInTheDocument();
     });
+  });
+
+  it('shares a folder on its canonical resource key, not the folder path alone', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/permissions') && !init?.method
+          ? json({ grants: [] })
+          : undefined,
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/shares') && !init?.method
+          ? json({ shares: [] })
+          : undefined,
+      (url, init) =>
+        init?.method === 'POST' && url.endsWith('/api/v1/libraries/lib1/shares')
+          ? json(
+              {
+                share: {
+                  id: 'sh1',
+                  resource_key: 'lib1/f:2024',
+                  capabilities: ['read', 'download'],
+                },
+                token: 'tok123',
+              },
+              201,
+            )
+          : undefined,
+    ]);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByTestId('share-folder-dir1'));
+
+    const dialog = await screen.findByTestId('folder-share-dialog');
+    fireEvent.click(within(dialog).getByTestId('make-folder-public'));
+
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toEqual({
+        key: 'lib1/f:2024',
+        caps: ['read', 'download'],
+      });
+    });
+    expect(await within(dialog).findByTestId('folder-public-url')).toHaveValue(
+      `${window.location.origin}/s/tok123`,
+    );
   });
 
   it('sends the chosen sort to the API', async () => {
@@ -248,7 +291,7 @@ describe('MediaPage', () => {
       expect(screen.getByText('IMG_0001.png')).toBeInTheDocument();
     });
     // A search means "anywhere in this library", so the folders step aside.
-    expect(screen.queryByRole('button', { name: /2024/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^2024/ })).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: 'zzz' } });
     expect(await screen.findByTestId('search-empty')).toBeInTheDocument();
@@ -930,13 +973,25 @@ describe('MediaPage', () => {
     expect(await screen.findByTestId('viewer-similar-unavailable')).toBeInTheDocument();
   });
 
-  it('creates a read-only share link for a file', async () => {
+  it('creates a public link for a file on its canonical resource key', async () => {
     const fetchMock = setup([
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/permissions') && !init?.method
+          ? json({ grants: [] })
+          : undefined,
+      (url, init) =>
+        url.endsWith('/api/v1/libraries/lib1/shares') && !init?.method
+          ? json({ shares: [] })
+          : undefined,
       (url, init) =>
         init?.method === 'POST' && url.endsWith('/api/v1/libraries/lib1/shares')
           ? json(
               {
-                share: { id: 'sh1', key: 'file:lib1/IMG_0001.png', caps: ['read'] },
+                share: {
+                  id: 'sh1',
+                  resource_key: 'lib1/x:IMG_0001.png',
+                  capabilities: ['read', 'download'],
+                },
                 token: 'tok123',
               },
               201,
@@ -949,17 +1004,15 @@ describe('MediaPage', () => {
     fireEvent.click(await screen.findByTestId('viewer-tab-share'));
 
     const panel = await screen.findByTestId('viewer-share');
-    expect(panel).toHaveTextContent('file:lib1/IMG_0001.png');
-
-    fireEvent.click(screen.getByTestId('viewer-create-share'));
+    fireEvent.click(within(panel).getByTestId('make-file-public'));
 
     await waitFor(() => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toBe(true);
     });
-    const link = (await screen.findByLabelText('Share link')) as HTMLInputElement;
+    const link = (await within(panel).findByTestId('file-public-url')) as HTMLInputElement;
     expect(link.value).toMatch(/\/s\/tok123$/);
-    expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toMatchObject({
-      key: 'file:lib1/IMG_0001.png',
+    expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toEqual({
+      key: 'lib1/x:IMG_0001.png',
       caps: ['read', 'download'],
     });
   });
@@ -1023,7 +1076,7 @@ describe('MediaPage', () => {
     expect(await screen.findByTestId('clipboard-bar')).toHaveTextContent('1 file ready to move');
 
     // Same folder: nothing to move. Go into a folder first.
-    fireEvent.click(screen.getByRole('button', { name: /2024/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^2024/ }));
     await waitFor(() => expect(called(fetchMock, 'GET', 'folder=2024')).toBe(true));
     fireEvent.keyDown(window, { key: 'v', ctrlKey: true });
     await waitFor(() => expect(called(fetchMock, 'POST', '/files/f1/move')).toBe(true));

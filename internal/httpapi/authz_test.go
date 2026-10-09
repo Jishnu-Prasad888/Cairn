@@ -592,3 +592,226 @@ func TestAuthz_PublicShareThumbnail(t *testing.T) {
 		t.Errorf("served thumbnail does not decode: %v", err)
 	}
 }
+
+// A folder share must be fully self-describing from its token alone — no
+// `?folder=` query param should be required to see the folder's own
+// contents, since nothing before this test ever set one.
+func TestAuthz_PublicFolderShareSelfDescribing(t *testing.T) {
+	_, admin, _, libID := newAuthzTestServer(t)
+	inFolder := uploadFile(t, admin, libID, "trip/2024/photo.jpg")
+	outsideFolder := uploadFile(t, admin, libID, "other/photo.jpg")
+
+	rec := admin.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/shares",
+		map[string]any{"key": authz.FolderKey(libID, "trip/2024"), "caps": []string{"read"}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create folder share = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var shared struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &shared); err != nil {
+		t.Fatalf("unmarshal share: %v", err)
+	}
+
+	infoReq := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+shared.Token, nil)
+	infoRR := httptest.NewRecorder()
+	admin.handler.ServeHTTP(infoRR, infoReq)
+	var info struct {
+		Share struct {
+			ResourceType string `json:"resource_type"`
+		} `json:"share"`
+	}
+	if err := json.Unmarshal(infoRR.Body.Bytes(), &info); err != nil {
+		t.Fatalf("unmarshal share info: %v", err)
+	}
+	if info.Share.ResourceType != "folder" {
+		t.Fatalf("resource_type = %q, want folder", info.Share.ResourceType)
+	}
+
+	// No ?folder= query param — the share key alone must resolve it.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+shared.Token+"/files", nil)
+	rr := httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("folder share list = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	var listed struct {
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if listed.Total != 1 || len(listed.Files) != 1 || listed.Files[0].ID != inFolder {
+		t.Fatalf("folder share list = %+v, want exactly [%s]", listed, inFolder)
+	}
+
+	// A file outside the shared folder must not be reachable by id either.
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+shared.Token+"/files/"+outsideFolder, nil)
+	rr = httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("folder share non-member file = %d, want 403", rr.Code)
+	}
+}
+
+// A single-file share must resolve to exactly that file from the token
+// alone, the same way album/memory shares resolve from membership.
+func TestAuthz_PublicFileShare(t *testing.T) {
+	_, admin, _, libID := newAuthzTestServer(t)
+	fileID := uploadFile(t, admin, libID, "trip/photo.jpg")
+
+	rec := admin.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/shares",
+		map[string]any{"key": authz.FileKey(libID, "trip/photo.jpg"), "caps": []string{"read", "download"}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create file share = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var shared struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &shared); err != nil {
+		t.Fatalf("unmarshal share: %v", err)
+	}
+
+	infoReq := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+shared.Token, nil)
+	infoRR := httptest.NewRecorder()
+	admin.handler.ServeHTTP(infoRR, infoReq)
+	var info struct {
+		Share struct {
+			ResourceType string `json:"resource_type"`
+		} `json:"share"`
+	}
+	if err := json.Unmarshal(infoRR.Body.Bytes(), &info); err != nil {
+		t.Fatalf("unmarshal share info: %v", err)
+	}
+	if info.Share.ResourceType != "file" {
+		t.Fatalf("resource_type = %q, want file", info.Share.ResourceType)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+shared.Token+"/files", nil)
+	rr := httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("file share list = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	var listed struct {
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if listed.Total != 1 || len(listed.Files) != 1 || listed.Files[0].ID != fileID {
+		t.Fatalf("file share list = %+v, want exactly [%s]", listed, fileID)
+	}
+
+	dl := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+shared.Token+"/files/"+fileID+"/download", nil)
+	dlRR := httptest.NewRecorder()
+	admin.handler.ServeHTTP(dlRR, dl)
+	if dlRR.Code != http.StatusOK {
+		t.Fatalf("file share download = %d, want 200 (body=%s)", dlRR.Code, dlRR.Body.String())
+	}
+}
+
+// A memory share exposes the referenced photos through the same
+// files/{id}/download and thumbnail routes every other share scope uses,
+// gated by membership in the memory's own image blocks — not by the
+// visitor's access to the rest of the library.
+func TestAuthz_PublicMemoryShare(t *testing.T) {
+	_, admin, _, libID := newAuthzTestServer(t)
+	inMemory := uploadJPEG(t, admin, libID, "trip/cover.jpg")
+	outsideMemory := uploadJPEG(t, admin, libID, "trip/other.jpg")
+
+	create := admin.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/memories",
+		map[string]any{
+			"title": "Trip",
+			"blocks": []map[string]any{
+				{"type": "image", "images": []map[string]string{{"file_id": inMemory}}},
+			},
+		})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create memory = %d, body=%s", create.Code, create.Body.String())
+	}
+	var createdMemory struct {
+		Memory struct {
+			ID string `json:"id"`
+		} `json:"memory"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &createdMemory); err != nil {
+		t.Fatalf("unmarshal memory: %v", err)
+	}
+	memoryID := createdMemory.Memory.ID
+
+	memKey := authz.EntityKey("m", libID, memoryID)
+	rec := admin.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/shares",
+		map[string]any{"key": memKey, "caps": []string{"read", "download"}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create memory share = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var shared struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &shared); err != nil {
+		t.Fatalf("unmarshal share: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/shares/"+shared.Token+"/memory", nil)
+	rr := httptest.NewRecorder()
+	admin.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("public memory get = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+	var doc struct {
+		Memory struct {
+			Blocks []struct {
+				Images []struct {
+					FileID string `json:"file_id"`
+					Media  struct {
+						Available    bool   `json:"available"`
+						ThumbnailURL string `json:"thumbnail_url"`
+						OriginalURL  string `json:"original_url"`
+					} `json:"media"`
+				} `json:"images"`
+			} `json:"blocks"`
+		} `json:"memory"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal public memory: %v", err)
+	}
+	if len(doc.Memory.Blocks) != 1 || len(doc.Memory.Blocks[0].Images) != 1 {
+		t.Fatalf("public memory blocks = %+v, want one image block with one image", doc.Memory.Blocks)
+	}
+	img := doc.Memory.Blocks[0].Images[0]
+	if img.FileID != inMemory || !img.Media.Available {
+		t.Fatalf("public memory image = %+v, want available member %s", img, inMemory)
+	}
+	wantPrefix := "/api/v1/shares/" + shared.Token + "/files/" + inMemory
+	if img.Media.ThumbnailURL != wantPrefix+"/thumbnail" || img.Media.OriginalURL != wantPrefix+"/download" {
+		t.Fatalf("public memory image urls = %+v, want share-relative %s", img.Media, wantPrefix)
+	}
+
+	// The referenced file resolves through the generic file routes, gated
+	// by memory membership rather than a separate per-file grant.
+	thumb := httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+shared.Token+"/files/"+inMemory+"/thumbnail", nil)
+	thumbRR := httptest.NewRecorder()
+	admin.handler.ServeHTTP(thumbRR, thumb)
+	if thumbRR.Code != http.StatusOK {
+		t.Fatalf("memory share thumbnail = %d, want 200 (body=%s)", thumbRR.Code, thumbRR.Body.String())
+	}
+
+	// A file that merely lives in the same library, but is not referenced
+	// by this memory, must not be reachable through the memory's share.
+	denied := httptest.NewRequest(http.MethodGet,
+		"/api/v1/shares/"+shared.Token+"/files/"+outsideMemory+"/download", nil)
+	deniedRR := httptest.NewRecorder()
+	admin.handler.ServeHTTP(deniedRR, denied)
+	if deniedRR.Code != http.StatusForbidden {
+		t.Fatalf("memory share non-member file = %d, want 403", deniedRR.Code)
+	}
+}

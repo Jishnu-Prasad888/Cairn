@@ -27,6 +27,7 @@ import type { FileSummary, PublicShareInfo } from '../api/types';
 import { isPreviewable, mediaTypeIcon } from '../components/media';
 import { Icon } from '../components/ui/Icon';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
+import { PublicMemoryPage } from './PublicMemoryPage';
 import './PublicSharePage.css';
 
 type ShareState =
@@ -94,8 +95,14 @@ export default function PublicSharePage() {
         ? settledShare.value
         : { kind: 'loading' };
 
+  // A memory share's content is a block document, not a file listing — it
+  // never touches the files endpoint at all. A file share lists exactly one
+  // file and skips the grid, going straight to the single-item viewer below.
+  const isMemoryShare = state.kind === 'unlocked' && state.share.resource_type === 'memory';
+  const isFileShare = state.kind === 'unlocked' && state.share.resource_type === 'file';
+
   // The first page is derived from the fetch; "load more" appends to `extra`.
-  const filesKey = state.kind === 'unlocked' ? `${shareKey}|${folder}` : null;
+  const filesKey = state.kind === 'unlocked' && !isMemoryShare ? `${shareKey}|${folder}` : null;
   const [settledFiles, setSettledFiles] = useState<
     | {
         key: string;
@@ -178,7 +185,12 @@ export default function PublicSharePage() {
   // account (favorites, tags, editing) — just the photo, prev/next, and
   // download, which is all a visitor with no session can do here.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const viewerFile = viewerIndex !== null ? files[viewerIndex] : undefined;
+  // A file share has nothing to browse — its one file is "open" as soon as
+  // it's loaded, with no grid behind it to return to (there's no close
+  // button in that mode, so viewerIndex itself never needs to change here).
+  const activeViewerIndex =
+    viewerIndex !== null ? viewerIndex : isFileShare && files.length > 0 ? 0 : null;
+  const viewerFile = activeViewerIndex !== null ? files[activeViewerIndex] : undefined;
   const sharePassword = unlocked ? password : undefined;
 
   // A failed video/image load (expired share, revoked access, unsupported
@@ -242,12 +254,18 @@ export default function PublicSharePage() {
         </section>
       )}
 
-      {state.kind === 'unlocked' && (
+      {state.kind === 'unlocked' && isMemoryShare && (
+        <PublicMemoryPage token={token} password={sharePassword} />
+      )}
+
+      {state.kind === 'unlocked' && !isMemoryShare && (
         <>
-          <h1 className="share-view-title">
-            {state.share.resource_key}
-            {folder && <span className="muted"> — {folder}</span>}
-          </h1>
+          {!isFileShare && (
+            <h1 className="share-view-title">
+              {state.share.resource_key}
+              {folder && <span className="muted"> — {folder}</span>}
+            </h1>
+          )}
           {state.share.expires_at && (
             <p className="muted">
               This link expires on{' '}
@@ -266,15 +284,16 @@ export default function PublicSharePage() {
           )}
           {filesLoading && files.length === 0 && <LoadingState label="Loading files…" />}
 
-          {files.length === 0 && !filesLoading && !filesError && (
+          {!isFileShare && files.length === 0 && !filesLoading && !filesError && (
             <EmptyState title="Nothing here" testId="share-empty">
               <p className="muted">This share is empty, or everything in it has been removed.</p>
             </EmptyState>
           )}
 
           {/* Only rendered once there is something in it: an empty list is
-              announced as a section with nothing in it. */}
-          {files.length > 0 && (
+              announced as a section with nothing in it. A file share skips
+              the grid entirely — the viewer below opens on its own file. */}
+          {!isFileShare && files.length > 0 && (
             <ul className="share-grid" data-testid="share-file-list">
               {files.map((file, index) => (
                 <li key={file.id}>
@@ -343,14 +362,16 @@ export default function PublicSharePage() {
 
       {viewerFile && (
         <div className="share-viewer" role="dialog" aria-modal="true" aria-label={viewerFile.name}>
-          <button
-            type="button"
-            className="icon-button share-viewer-close"
-            aria-label="Close"
-            onClick={() => setViewerIndex(null)}
-          >
-            <Icon name="close" />
-          </button>
+          {!isFileShare && (
+            <button
+              type="button"
+              className="icon-button share-viewer-close"
+              aria-label="Close"
+              onClick={() => setViewerIndex(null)}
+            >
+              <Icon name="close" />
+            </button>
+          )}
 
           {viewerIndex! > 0 && (
             <button

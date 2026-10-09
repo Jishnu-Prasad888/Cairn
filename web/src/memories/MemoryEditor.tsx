@@ -38,6 +38,7 @@ import {
   PenLine,
   Redo2,
   Save,
+  Share2,
   Trash2,
   Type,
   Undo2,
@@ -66,6 +67,8 @@ import { Lightbox } from './Lightbox';
 import { LiveMarkdownEditor, type LiveMarkdownEditorHandle } from './LiveMarkdownEditor';
 import { MediaPicker } from './MediaPicker';
 import { MemoryDetails } from './MemoryDetails';
+import { memoryKey } from '../api/resourceKeys';
+import { ShareDialog } from '../components/sharing/ShareDialog';
 import { formatMemoryDate } from './format';
 import { MemoryReader } from './MemoryReader';
 import {
@@ -156,6 +159,7 @@ export function MemoryEditor({
   const [lightbox, setLightbox] = useState<{ images: MemoryImage[]; id: string } | null>(null);
   const [details, setDetails] = useState(false);
   const [history, setHistory] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [linking, setLinking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -541,6 +545,15 @@ export function MemoryEditor({
         <button type="button" className="button" onClick={() => setHistory(true)}>
           <History size={15} aria-hidden="true" />
           History
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => setSharing(true)}
+          data-testid="share-memory"
+        >
+          <Share2 size={15} aria-hidden="true" />
+          Share
         </button>
         <button
           type="button"
@@ -937,6 +950,19 @@ export function MemoryEditor({
         onChange={doc.setMeta}
         onClose={() => setDetails(false)}
       />
+
+      {sharing && (
+        <ShareDialog
+          libraryId={libraryId}
+          resourceKey={memoryKey(libraryId, memoryId)}
+          title={`Share "${meta.title || 'Untitled memory'}"`}
+          resourceLabel="memory"
+          testIdPrefix="memory"
+          viewCaps={['read']}
+          editCaps={['read', 'edit']}
+          onClose={() => setSharing(false)}
+        />
+      )}
 
       <VersionHistory
         open={history}

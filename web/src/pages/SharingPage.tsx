@@ -17,6 +17,7 @@ import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
 import { useLibraryResource } from '../api/resources';
 import { createShare, listShares, revokeShare } from '../api/queries';
+import { parseAdminResourceKey } from '../api/resourceKeys';
 import { ALL_CAPABILITIES, CAPABILITY_LABEL } from '../api/types';
 import type { Capability, Share } from '../api/types';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
@@ -59,7 +60,7 @@ function NewShareDialog({
     setBusy(true);
     setError(null);
     createShare(libraryId, {
-      key: resourceKey.trim(),
+      key: parseAdminResourceKey(libraryId, resourceKey),
       caps,
       ...(password ? { password } : {}),
       ...(expires ? { expires_at: new Date(expires).toISOString() } : {}),
@@ -108,9 +109,10 @@ function NewShareDialog({
           />
         </label>
         <p className="share-hint">
-          A whole library is <code>library:&lt;id&gt;</code>. One file is{' '}
-          <code>file:&lt;library-id&gt;/&lt;relative-path&gt;</code> — the viewer’s Share tab
-          creates those for you.
+          A whole library is <code>library:&lt;id&gt;</code>, a folder and everything under it is{' '}
+          <code>folder:&lt;path&gt;</code>, and one file is <code>file:&lt;path&gt;</code> (the
+          library id prefix on the path is optional — the dialogs elsewhere in Cairn create these
+          for you).
         </p>
 
         <fieldset className="share-caps">

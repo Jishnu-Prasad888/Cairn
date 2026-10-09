@@ -122,7 +122,7 @@ describe('SharingPage', () => {
       expect(called(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toBe(true);
     });
     expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/shares')).toEqual({
-      key: 'file:lib1/beach.jpg',
+      key: 'lib1/x:beach.jpg',
       caps: ['read'],
     });
 

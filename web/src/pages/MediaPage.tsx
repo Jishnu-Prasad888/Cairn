@@ -20,7 +20,8 @@ import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
 import { copyFile, createFolder, moveFile } from '../api/queries';
 import type { FileSort, MediaFilter, SortOrder } from '../api/queries';
-import type { FileSummary, Library } from '../api/types';
+import { folderKey } from '../api/resourceKeys';
+import type { FileSummary, Folder, Library } from '../api/types';
 import { PromptDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
 import { Breadcrumbs } from '../components/files/Breadcrumbs';
@@ -28,6 +29,7 @@ import { FileTable } from '../components/files/FileTable';
 import { FilterPanel } from '../components/files/FilterPanel';
 import { EMPTY_RANGE, hasRangeFilters, type RangeFilters } from '../components/files/filters';
 import { FolderGrid } from '../components/files/FolderGrid';
+import { ShareDialog } from '../components/sharing/ShareDialog';
 import type { Grouping } from '../components/media/layout';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
@@ -191,6 +193,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
   const [pasting, setPasting] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
+  const [shareFolder, setShareFolder] = useState<Folder | null>(null);
 
   const setView = (next: 'grid' | 'list') => {
     setViewState(next);
@@ -707,6 +710,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
           folders={folders}
           onOpen={(f) => openFolder(f.rel_path)}
           onDropFile={(e, p) => void moveInto(e, p)}
+          onShare={setShareFolder}
         />
       )}
 
@@ -719,6 +723,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
               folders={folders}
               onOpen={ops.openViewer}
               onOpenFolder={(f) => openFolder(f.rel_path)}
+              onShareFolder={setShareFolder}
               selection={selection}
               showLocation={listing.searching}
               sort={listing.searching ? undefined : { sort, order }}
@@ -830,6 +835,19 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
         }}
         testId="new-folder-dialog"
       />
+
+      {shareFolder && (
+        <ShareDialog
+          libraryId={libraryId}
+          resourceKey={folderKey(libraryId, shareFolder.rel_path)}
+          title={`Share "${shareFolder.name}"`}
+          resourceLabel="folder"
+          testIdPrefix="folder"
+          viewCaps={['read', 'download']}
+          editCaps={['read', 'download', 'edit']}
+          onClose={() => setShareFolder(null)}
+        />
+      )}
 
       {timelineVisible && <Timeline files={timelineFiles} label={config.title} />}
     </main>

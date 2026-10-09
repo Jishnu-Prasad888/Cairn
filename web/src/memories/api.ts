@@ -3,7 +3,7 @@
  * maps to one documented route in docs/openapi.yaml.
  */
 
-import { apiGet, apiPatch, apiPost, apiPut } from '../api/client';
+import { apiGet, apiPatch, apiPost, apiPut, apiRequest } from '../api/client';
 import type {
   ImageBlock,
   MemoryBlock,
@@ -18,6 +18,18 @@ const base = (libraryId: string, memoryId: string) =>
 
 export const getMemoryDocument = (libraryId: string, memoryId: string) =>
   apiGet<MemoryResponse>(base(libraryId, memoryId));
+
+/**
+ * The public, unauthenticated counterpart: a memory-scoped share token
+ * resolves straight to its one memory, with every media URL already
+ * share-relative (see internal/httpapi/memories_public.go), so the result
+ * is MemoryReader-ready as-is — no library id, no session.
+ */
+export function getPublicShareMemory(token: string, password?: string): Promise<MemoryResponse> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (password) headers['X-Cairn-Share-Password'] = password;
+  return apiRequest<MemoryResponse>(`/shares/${token}/memory`, { headers });
+}
 
 export const createMemoryDocument = (
   libraryId: string,
