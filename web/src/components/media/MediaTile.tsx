@@ -11,6 +11,7 @@ import { memo, useRef, useState } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent } from 'react';
 
 import type { FileSummary } from '../../api/types';
+import { LibraryTag } from '../LibraryTag';
 import { Icon } from '../ui/Icon';
 import { thumbnailUrl, mediaTypeIcon } from '../media';
 import { VideoThumb } from './VideoThumb';
@@ -57,6 +58,9 @@ function MediaTileImpl({
 
   const isVideo = file.media_type === 'video';
   const hasThumb = (file.media_type === 'photo' || isVideo) && !failed;
+  // The file belongs to a specific library; the tile always renders for it,
+  // even when the grid merged several libraries.
+  const itemLibraryId = file.library_id || libraryId;
 
   const cancelPress = () => {
     if (press.current) clearTimeout(press.current.timer);
@@ -135,11 +139,11 @@ function MediaTileImpl({
         }}
       >
         {hasThumb && isVideo ? (
-          <VideoThumb libraryId={libraryId} fileId={file.id} className="media-tile-img" />
+          <VideoThumb libraryId={itemLibraryId} fileId={file.id} className="media-tile-img" />
         ) : hasThumb ? (
           <img
             className="media-tile-img"
-            src={thumbnailUrl(libraryId, file)}
+            src={thumbnailUrl(itemLibraryId, file)}
             alt=""
             loading="lazy"
             decoding="async"
@@ -170,6 +174,8 @@ function MediaTileImpl({
           <Icon name="star" size={14} filled />
         </span>
       )}
+
+      <LibraryTag libraryId={file.library_id} corner />
 
       {selectable && (
         <button

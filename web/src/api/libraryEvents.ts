@@ -31,3 +31,22 @@ export function useLibraryChangeTick(libraryId: string | null): number {
   }, [libraryId]);
   return tick;
 }
+
+/** A counter that ticks when any of `libraryIds` is announced as changed. */
+export function useLibrariesChangeTick(libraryIds: readonly string[]): number {
+  // A stable string identity for the set, so an inline array does not
+  // re-subscribe on every render.
+  const key = libraryIds.join(',');
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!key) return;
+    const ids = new Set(key.split(','));
+    const onChange = (e: Event) => {
+      const id = (e as CustomEvent<{ libraryId: string }>).detail?.libraryId;
+      if (ids.has(id)) setTick((n) => n + 1);
+    };
+    window.addEventListener(EVENT, onChange);
+    return () => window.removeEventListener(EVENT, onChange);
+  }, [key]);
+  return tick;
+}

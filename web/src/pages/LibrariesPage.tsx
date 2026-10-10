@@ -436,12 +436,17 @@ function ReconnectDialog({ library, onClose }: { library: Library; onClose: () =
 }
 
 function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }) {
-  const { refresh, selectLibrary, libraryId } = useLibraries();
+  const { refresh, selectLibrary, libraryId, isLibraryOpen, toggleLibraryOpen, openLibraryIds } =
+    useLibraries();
   const [status, setStatus] = useState<IndexStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [confirmUnregister, setConfirmUnregister] = useState(false);
+
+  const open = isLibraryOpen(library.id);
+  const selected = libraryId === library.id;
+  const lastOpen = open && openLibraryIds.length <= 1;
 
   const loadStatus = useCallback(() => {
     getIndexStatus(library.id)
@@ -489,14 +494,28 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
         </div>
 
         <div className="library-row-actions">
+          <label
+            className={open ? 'button active library-toggle' : 'button library-toggle'}
+            title={open ? 'Hide this library from the merged pages' : 'Show this library on every page'}
+          >
+            <input
+              type="checkbox"
+              checked={open}
+              disabled={lastOpen}
+              onChange={() => toggleLibraryOpen(library.id)}
+              data-testid={`toggle-open-${library.id}`}
+            />
+            {open ? 'On' : 'Off'}
+          </label>
           {!offline && (
             <button
               type="button"
-              className="button"
+              className="button primary-button"
               onClick={() => selectLibrary(library.id)}
-              disabled={libraryId === library.id}
+              disabled={selected}
+              data-testid="select-library-button"
             >
-              {libraryId === library.id ? 'Selected' : 'Open'}
+              {selected ? 'Selected' : 'Make primary'}
             </button>
           )}
           {offline && isAdmin && (

@@ -21,6 +21,38 @@ import { forgetSearch, readRecentSearches, rememberSearch } from '../../lib/rece
 import { Icon, type IconName } from '../ui/Icon';
 import './SearchBox.css';
 
+/** A top-bar search narrowed to one page's domain. */
+export type SearchScope = 'files' | 'memories' | 'albums';
+
+interface SearchLabels {
+  placeholder: string;
+  aria: string;
+  hint: string;
+}
+
+const SCOPE_LABELS: Record<SearchScope | 'default', SearchLabels> = {
+  default: {
+    placeholder: 'Search your photos, files, people…',
+    aria: 'Search Cairn',
+    hint: 'Search everything',
+  },
+  files: {
+    placeholder: 'Search files and folders…',
+    aria: 'Search files and folders',
+    hint: 'Search files and folders',
+  },
+  memories: {
+    placeholder: 'Search memories…',
+    aria: 'Search memories',
+    hint: 'Search memories',
+  },
+  albums: {
+    placeholder: 'Search albums…',
+    aria: 'Search albums',
+    hint: 'Search albums',
+  },
+};
+
 interface Suggestion {
   id: string;
   label: string;
@@ -50,10 +82,13 @@ export function SearchBox({
   inputRef: externalRef,
   autoFocus = false,
   className,
+  scope,
 }: {
   inputRef?: React.RefObject<HTMLInputElement | null>;
   autoFocus?: boolean;
   className?: string;
+  /** Narrow plain Enter (and the "search this page" suggestion) to a page. */
+  scope?: SearchScope;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -62,6 +97,7 @@ export function SearchBox({
   const localRef = useRef<HTMLInputElement | null>(null);
   const inputRef = externalRef ?? localRef;
   const wrapRef = useRef<HTMLFormElement | null>(null);
+  const labels = SCOPE_LABELS[scope ?? 'default'];
 
   const urlQuery =
     location.pathname === '/search' ? (new URLSearchParams(location.search).get('q') ?? '') : '';
@@ -106,24 +142,34 @@ export function SearchBox({
 
   const q = query.trim();
   const suggestions = useMemo<Suggestion[]>(() => {
+    /** Where a bare query lands: the page's own search when scoped. */
+    const target = (text: string) => {
+      const encoded = encodeURIComponent(text);
+      if (scope === 'files') {
+        const lib = new URLSearchParams(location.search).get('lib');
+        return lib ? `/files?q=${encoded}&lib=${encodeURIComponent(lib)}` : `/files?q=${encoded}`;
+      }
+      if (scope === 'memories') return `/memories?q=${encoded}`;
+      if (scope === 'albums') return `/albums?q=${encoded}`;
+      return `/search?q=${encoded}`;
+    };
     if (!q) {
       return recent.map((text) => ({
         id: `recent:${text}`,
         label: text,
         icon: 'clock',
-        to: `/search?q=${encodeURIComponent(text)}`,
+        to: target(text),
         remember: text,
         recent: true,
       }));
     }
-    const encoded = encodeURIComponent(q);
     const list: Suggestion[] = [
       {
         id: 'all',
         label: q,
-        hint: 'Search everything',
+        hint: labels.hint,
         icon: 'search',
-        to: `/search?q=${encoded}`,
+        to: target(q),
         remember: q,
       },
       {
@@ -131,7 +177,7 @@ export function SearchBox({
         label: q,
         hint: 'in Photos',
         icon: 'photo',
-        to: `/search?q=${encoded}&type=photo`,
+        to: `/search?q=${encodeURIComponent(q)}&type=photo`,
         remember: q,
       },
       {
@@ -139,7 +185,7 @@ export function SearchBox({
         label: q,
         hint: 'in Videos',
         icon: 'video',
-        to: `/search?q=${encoded}&type=video`,
+        to: `/search?q=${encodeURIComponent(q)}&type=video`,
         remember: q,
       },
     ];
@@ -183,7 +229,7 @@ export function SearchBox({
         );
     }
     return list;
-  }, [q, recent, entities, libraryId]);
+  }, [q, recent, entities, libraryId, labels.hint, scope, location.search]);
 
   const showList = open && (suggestions.length > 0 || !q);
 
@@ -205,7 +251,21 @@ export function SearchBox({
     if (q) rememberSearch(q);
     setOpen(false);
     inputRef.current?.blur();
-    navigate(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
+    if (q.trim() === '') {
+      navigate('/search');
+      return;
+    }
+    const encoded = encodeURIComponent(q);
+    if (scope === 'files') {
+      const lib = new URLSearchParams(location.search).get('lib');
+      navigate(lib ? `/files?q=${encoded}&lib=${encodeURIComponent(lib)}` : `/files?q=${encoded}`);
+    } else if (scope === 'memories') {
+      navigate(`/memories?q=${encoded}`);
+    } else if (scope === 'albums') {
+      navigate(`/albums?q=${encoded}`);
+    } else {
+      navigate(`/search?q=${encoded}`);
+    }
   };
 
   const openList = () => {
@@ -254,12 +314,12 @@ export function SearchBox({
         ref={inputRef}
         type="search"
         role="combobox"
-        aria-label="Search Cairn"
+        aria-label={labels.aria}
         aria-expanded={showList}
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={active >= 0 ? `${listboxId}-${active}` : undefined}
-        placeholder="Search your photos, files, people…"
+        placeholder={labels.placeholder}
         autoComplete="off"
         spellCheck={false}
         autoFocus={autoFocus}
@@ -295,7 +355,13 @@ export function SearchBox({
         <div className="search-suggestions">
           {suggestions.length === 0 ? (
             <p className="search-suggestions-hint">
-              Search by file name, folder, tag, album, or person.
+              {scope === 'memories'
+                ? 'Search memory titles, text, captions, and tags.'
+                : scope === 'albums'
+                  ? 'Search album names.'
+                  : scope === 'files'
+                    ? 'Search by file name or the folder a file lives in.'
+                    : 'Search by file name, folder, tag, album, or person.'}
             </p>
           ) : (
             <>

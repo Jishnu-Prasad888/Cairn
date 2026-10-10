@@ -8,6 +8,7 @@
 import { useState } from 'react';
 
 import type { Folder } from '../../api/types';
+import { LibraryTag } from '../LibraryTag';
 import { Icon } from '../ui/Icon';
 import './Files.css';
 
@@ -67,6 +68,7 @@ export function FolderGrid({
               <Icon name="share" size={16} />
             </button>
           )}
+          <LibraryTag libraryId={folder.library_id} corner />
         </li>
       ))}
     </ul>

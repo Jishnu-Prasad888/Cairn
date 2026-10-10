@@ -12,6 +12,7 @@ import type { FileSummary, Folder } from '../../api/types';
 import { formatBytes } from '../../api/types';
 import { formatDate } from '../../lib/dates';
 import { fileExtension, mediaLabel, thumbnailUrl, mediaTypeIcon } from '../media';
+import { LibraryTag } from '../LibraryTag';
 import type { Selection } from '../media/useSelection';
 import { VideoThumb } from '../media/VideoThumb';
 import { Icon } from '../ui/Icon';
@@ -124,6 +125,7 @@ export function FileTable({
                   <Icon name="folder" size={20} />
                 </span>
                 <span className="file-row-name">{folder.name}</span>
+                <LibraryTag libraryId={folder.library_id} />
               </button>
             </th>
             <td className="col-type">Folder</td>
@@ -183,11 +185,15 @@ export function FileTable({
                   title={file.rel_path}
                 >
                   {file.media_type === 'video' ? (
-                    <VideoThumb libraryId={libraryId} fileId={file.id} className="file-row-thumb" />
+                    <VideoThumb
+                      libraryId={file.library_id || libraryId}
+                      fileId={file.id}
+                      className="file-row-thumb"
+                    />
                   ) : file.media_type === 'photo' ? (
                     <img
                       className="file-row-thumb"
-                      src={thumbnailUrl(libraryId, file)}
+                      src={thumbnailUrl(file.library_id || libraryId, file)}
                       alt=""
                       loading="lazy"
                       decoding="async"
@@ -198,6 +204,7 @@ export function FileTable({
                     </span>
                   )}
                   <span className="file-row-name">{file.name}</span>
+                  <LibraryTag libraryId={file.library_id} />
                 </button>
               </th>
               <td className="col-type">

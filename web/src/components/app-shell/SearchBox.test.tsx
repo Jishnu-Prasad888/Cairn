@@ -98,3 +98,57 @@ describe('SearchBox', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });
+
+describe('SearchBox scoped by page', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('lands a plain files search on the files page', async () => {
+    mockApi();
+    renderPage(
+      <>
+        <SearchBox scope="files" />
+        <Routes>
+          <Route path="*" element={<Where />} />
+        </Routes>
+      </>,
+    );
+    fireEvent.change(screen.getByLabelText('Search files and folders'), {
+      target: { value: 'beach' },
+    });
+    fireEvent.submit(screen.getByRole('search'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/files?q=beach'));
+  });
+
+  it('lands a plain memories search on the memories page', async () => {
+    mockApi();
+    renderPage(
+      <>
+        <SearchBox scope="memories" />
+        <Routes>
+          <Route path="*" element={<Where />} />
+        </Routes>
+      </>,
+    );
+    fireEvent.change(screen.getByLabelText('Search memories'), { target: { value: 'camping' } });
+    fireEvent.submit(screen.getByRole('search'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/memories?q=camping'));
+  });
+
+  it('lands a plain albums search on the albums page', async () => {
+    mockApi();
+    renderPage(
+      <>
+        <SearchBox scope="albums" />
+        <Routes>
+          <Route path="*" element={<Where />} />
+        </Routes>
+      </>,
+    );
+    fireEvent.change(screen.getByLabelText('Search albums'), { target: { value: 'summer' } });
+    fireEvent.submit(screen.getByRole('search'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/albums?q=summer'));
+  });
+});

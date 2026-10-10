@@ -9,6 +9,7 @@
 import type { Album } from '../../api/types';
 import { formatDate } from '../../lib/dates';
 import { thumbnailUrl } from '../media';
+import { LibraryTag } from '../LibraryTag';
 import { Icon } from '../ui/Icon';
 import { Menu, type MenuEntry, useMenuButton, withDangerLast } from '../ui/Menu';
 import './AlbumCard.css';
@@ -34,6 +35,9 @@ export function AlbumCard({
   const menu = useMenuButton();
   const preview = album.preview_file_id ?? album.cover_file_id;
   const count = album.file_count;
+  // An aggregated album grid passes one libraryId for everyone, but the card
+  // must fetch its cover from the library the album actually lives in.
+  const itemLibraryId = album.library_id || libraryId;
 
   const items: MenuEntry[] = withDangerLast([
     ...(onRename
@@ -84,7 +88,7 @@ export function AlbumCard({
         <span className="album-card-cover">
           {preview ? (
             <img
-              src={thumbnailUrl(libraryId, { id: preview })}
+              src={thumbnailUrl(itemLibraryId, { id: preview })}
               alt=""
               loading="lazy"
               decoding="async"
@@ -107,6 +111,8 @@ export function AlbumCard({
             : `Updated ${formatDate(album.updated_at)}`}
         </span>
       </button>
+
+      <LibraryTag libraryId={album.library_id} corner />
 
       {hasMenu && (
         <button

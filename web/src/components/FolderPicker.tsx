@@ -15,6 +15,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 
 import { listFolders } from '../api/queries';
+import { LibraryTag } from './LibraryTag';
 import './FolderPicker.css';
 
 /**
@@ -136,7 +137,10 @@ export function FolderPicker({
     <div className="folder-picker">
       {showMenu && (
         <div className="folder-picker-menu">
-          <label htmlFor={selectId}>Pick an existing folder</label>
+          <span className="folder-picker-label-row">
+            <label htmlFor={selectId}>Pick an existing folder</label>
+            <LibraryTag libraryId={libraryId} />
+          </span>
           <select
             id={selectId}
             value={value}
@@ -157,7 +161,10 @@ export function FolderPicker({
       )}
 
       <div className="folder-picker-field">
-        <label htmlFor={inputId}>{label}</label>
+        <span className="folder-picker-label-row">
+          <label htmlFor={inputId}>{label}</label>
+          <LibraryTag libraryId={libraryId} />
+        </span>
         <input
           id={inputId}
           type="text"

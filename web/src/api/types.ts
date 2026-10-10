@@ -300,6 +300,12 @@ export interface Album {
   file_count?: number;
   /** The file that represents the album: its cover, else its first photo. */
   preview_file_id?: string;
+  /**
+   * The library the album lives in. The per-library API always returns it via
+   * the frontend's aggregation layer, even though the server type does not
+   * carry it.
+   */
+  library_id?: string;
 }
 
 export interface AlbumListResponse {

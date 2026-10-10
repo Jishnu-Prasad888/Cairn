@@ -56,7 +56,7 @@ export default function TagsPage() {
     activeTag !== null,
   );
 
-  const ops = useFileOperations(gate.kind === 'ready' ? gate.libraryId : '', () => {
+  const ops = useFileOperations([gate.kind === 'ready' ? gate.libraryId : ''], () => {
     files.reload();
     tags.reload();
   });

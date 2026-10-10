@@ -35,7 +35,11 @@ import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
 import { Timeline } from '../components/media/Timeline';
 import { useFavorites } from '../components/media/useFavorites';
-import { type ListingQuery, useFileListing } from '../components/media/useFileListing';
+import {
+  type ListingQuery,
+  useAggregatedFileListing,
+  useFileListing,
+} from '../components/media/useFileListing';
 import { useMediaActions } from '../components/media/useMediaActions';
 import { useSelection } from '../components/media/useSelection';
 import { useTimelineAutoload } from '../components/media/useTimelineAutoload';
@@ -158,11 +162,35 @@ export default function MediaPage({ config }: { config: MediaPageConfig }) {
       </main>
     );
   }
-  return <MediaBrowser config={config} library={gate.library} />;
+  return (
+    <MediaBrowser
+      config={config}
+      library={gate.library}
+      libraries={gate.libraries}
+      openLibraryIds={gate.openLibraryIds}
+    />
+  );
 }
 
-function MediaBrowser({ config, library }: { config: MediaPageConfig; library: Library }) {
-  const libraryId = library.id;
+function MediaBrowser({
+  config,
+  library,
+  libraries,
+  openLibraryIds,
+}: {
+  config: MediaPageConfig;
+  library: Library;
+  libraries: Library[];
+  /** The libraries the user has open; the page merges them. */
+  openLibraryIds: string[];
+}) {
+  // The primary library is the selected one — it always sits in the open set —
+  // and is where uploads, new folders, and other single-target actions land.
+  const primaryId = openLibraryIds.includes(library.id)
+    ? library.id
+    : (openLibraryIds[0] ?? library.id);
+  const primaryLibrary = libraries.find((l) => l.id === primaryId) ?? library;
+  const multiOpen = openLibraryIds.length > 1;
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToast();
@@ -179,6 +207,16 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
   const person = config.searchPage ? (params.get('person') ?? undefined) : undefined;
   const album = config.searchPage ? (params.get('album') ?? undefined) : undefined;
   const tag = config.searchPage ? (params.get('tag') ?? undefined) : undefined;
+
+  // A `lib=` query pins the browset to one library (clicking a folder sets
+  // it). At the root with no pin and several libraries open, the page merges
+  // them all instead — that is the aggregated view.
+  const libParam = params.get('lib');
+  const pinId =
+    libParam && openLibraryIds.includes(libParam) ? libParam : undefined;
+  const merged = multiOpen && pinId === undefined && (folderMode ? folder === '' : true);
+  // The single library everything routes to when not merging.
+  const scopedId = merged ? undefined : (pinId ?? primaryId);
 
   const [sortValue, setSortValue] = useState<SortValue>('mod_time:desc');
   const [sort, order] = sortValue.split(':') as [FileSort, SortOrder];
@@ -228,17 +266,22 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
 
   /** Step into a folder. Each folder is a history entry, so Back steps out. */
   const openFolder = useCallback(
-    (path: string) => {
+    (path: string, from?: string) => {
       setParams((prev) => {
         const next = new URLSearchParams(prev);
         if (path) next.set('folder', path);
         else next.delete('folder');
+        // A folder belongs to one library; when several are open, pin the
+        // browse to it. Stepping out to the root unwinds back to the merged
+        // view, and single-library mode never carries a `lib` at all.
+        if (from) next.set('lib', from);
+        else if (!multiOpen || !path) next.delete('lib');
         next.delete('q');
         next.delete('view');
         return next;
       });
     },
-    [setParams],
+    [setParams, multiOpen],
   );
 
   const query: ListingQuery = {
@@ -256,10 +299,17 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
     withFolders: folderMode && !q,
   };
 
-  const listing = useFileListing(libraryId, query, {
-    enabled: !offline,
+  // In the merged view every open library is listed; otherwise the pinned (or
+  // only) library is. The unused variant is disabled, so only one fetch runs.
+  const mergedListing = useAggregatedFileListing(openLibraryIds, query, {
+    enabled: merged, // offline libraries are skipped one at a time inside
     refreshKey: uploads.completed,
   });
+  const singleListing = useFileListing(scopedId ?? '', query, {
+    enabled: !merged && !offline,
+    refreshKey: uploads.completed,
+  });
+  const listing = merged ? mergedListing : singleListing;
   const { files, folders, total } = listing;
 
   // The timeline ruler on a folder is scoped to that folder and its
@@ -277,19 +327,27 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
     ...EMPTY_RANGE,
     withFolders: false,
   };
-  const timelineListing = useFileListing(libraryId, timelineQuery, {
-    enabled: showTimeline && timelineOpen && folderMode && !q,
+  const mergedTimeline = useAggregatedFileListing(openLibraryIds, timelineQuery, {
+    enabled: showTimeline && timelineOpen && folderMode && !q && merged,
   });
+  const singleTimeline = useFileListing(scopedId ?? '', timelineQuery, {
+    enabled: showTimeline && timelineOpen && folderMode && !q && !merged,
+  });
+  const timelineListing = merged ? mergedTimeline : singleTimeline;
   const timelineFiles = folderMode ? timelineListing.files : files;
 
-  const favorites = useFavorites(libraryId);
-  const selection = useSelection(files, `${libraryId}|${JSON.stringify(query)}`);
-  const ops = useFileOperations(libraryId, listing.reload);
+  const favorites = useFavorites(openLibraryIds);
+  const selection = useSelection(files, `${scopedId ?? openLibraryIds.join('+')}|${JSON.stringify(query)}`);
+  const ops = useFileOperations(openLibraryIds, listing.reload);
 
-  // New folders and paste target a folder, so they only make sense while
-  // browsing one. Acting on files works on search results too.
-  const canManage = folderMode && !offline && !q;
+  // New folders, paste, and drag-onto-folder moves all target a folder, which
+  // only makes sense while browsing one library. The merged root shows every
+  // library's content but has no single "here" to act upon. Acting on files
+  // works anywhere, including on search results.
+  const canManage = folderMode && !offline && !q && !merged;
   const canActOnFiles = folderMode && !offline;
+  // Uploads go to the selected (primary) library, or the pinned one.
+  const uploadLibraryId = scopedId ?? primaryId;
 
   const stash = (mode: Clipboard['mode']) => {
     if (selection.selectedFiles.length === 0) return;
@@ -307,10 +365,10 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
           // Moving a file to the folder it is already in changes nothing.
           return sameFolder
             ? Promise.resolve()
-            : moveFile(libraryId, f.rel_path, f.id, folder, f.name);
+            : moveFile(uploadLibraryId, f.rel_path, f.id, folder, f.name);
         }
         return copyFile(
-          libraryId,
+          uploadLibraryId,
           f.rel_path,
           f.id,
           folder,
@@ -339,7 +397,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
   };
 
   const actions = useMediaActions({
-    libraryId,
+    libraryId: primaryId,
     selection,
     favorites,
     ops,
@@ -364,29 +422,36 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
     onChanged: listing.reload,
     onShowInFolder: folderMode
       ? undefined
-      : (file) =>
+      : (file) => {
+          const lib = multiOpen && file.library_id ? `&lib=${encodeURIComponent(file.library_id)}` : '';
           navigate(
-            file.folder_path ? `/files?folder=${encodeURIComponent(file.folder_path)}` : '/files',
-          ),
+            file.folder_path
+              ? `/files?folder=${encodeURIComponent(file.folder_path)}${lib}`
+              : `/files${lib}`,
+          );
+        },
   });
 
   const canUpload = !offline && (folderMode || config.type === 'photo' || config.type === 'video');
   const uploadFiles = useCallback(
     (incoming: File[]) => {
-      if (incoming.length) uploads.enqueue(libraryId, incoming, folderMode ? folder : '');
+      if (incoming.length) uploads.enqueue(uploadLibraryId, incoming, folderMode ? folder : '');
     },
-    [uploads, libraryId, folderMode, folder],
+    [uploads, uploadLibraryId, folderMode, folder],
   );
   const drop = useFileDrop(uploadFiles, canUpload);
 
-  // Dragging a tile onto a folder or a breadcrumb moves it there.
+  // Dragging a tile onto a folder or a breadcrumb moves it there. This needs a
+  // destination folder, so the merged root — several libraries with no "here" —
+  // does not offer it.
   const moveInto = async (event: React.DragEvent, destination: string) => {
     event.preventDefault();
+    if (merged) return;
     const raw = event.dataTransfer.getData('application/cairn-file');
     if (!raw) return;
     try {
       const dragged = JSON.parse(raw) as { id: string; rel_path: string; name: string };
-      await moveFile(libraryId, dragged.rel_path, dragged.id, destination, dragged.name);
+      await moveFile(uploadLibraryId, dragged.rel_path, dragged.id, destination, dragged.name);
       toast({ message: `Moved to ${destination || 'All files'}`, tone: 'success' });
       listing.reload();
     } catch (e: unknown) {
@@ -451,8 +516,13 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
     return () => window.removeEventListener('keydown', onShortcut);
   });
 
+  // Date headings need a single date stream; the merged view is one combined,
+  // date-woven grid and deliberately has none — its tiles are sized purely by
+  // how many items there are, whatever library each came from.
   const grouping: Grouping =
-    config.grouping && sort === 'mod_time' && !listing.searching ? config.grouping : 'none';
+    config.grouping && sort === 'mod_time' && !listing.searching && !merged
+      ? config.grouping
+      : 'none';
   const filtersActive = hasRangeFilters(range);
   const timelineVisible =
     showTimeline && timelineOpen && (folderMode ? !q : sort === 'mod_time' && !listing.searching);
@@ -530,7 +600,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
         }
       />
 
-      {offline && <LibraryOfflineNotice library={library} />}
+      {!merged && offline && <LibraryOfflineNotice library={library} />}
 
       {clipboard && canActOnFiles && (
         <div className="clipboard-bar" role="status" data-testid="clipboard-bar">
@@ -560,7 +630,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
           {folderMode && !q ? (
             <Breadcrumbs
               folderPath={folder}
-              onNavigate={openFolder}
+              onNavigate={(p) => openFolder(p, multiOpen && !merged ? scopedId : undefined)}
               onDropFile={(e, p) => void moveInto(e, p)}
             />
           ) : (
@@ -708,7 +778,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
       {ready && view === 'grid' && (
         <FolderGrid
           folders={folders}
-          onOpen={(f) => openFolder(f.rel_path)}
+          onOpen={(f) => openFolder(f.rel_path, multiOpen ? f.library_id : undefined)}
           onDropFile={(e, p) => void moveInto(e, p)}
           onShare={setShareFolder}
         />
@@ -718,11 +788,11 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
         <>
           {view === 'list' ? (
             <FileTable
-              libraryId={libraryId}
+              libraryId={scopedId ?? primaryId}
               files={files}
               folders={folders}
               onOpen={ops.openViewer}
-              onOpenFolder={(f) => openFolder(f.rel_path)}
+              onOpenFolder={(f) => openFolder(f.rel_path, multiOpen ? f.library_id : undefined)}
               onShareFolder={setShareFolder}
               selection={selection}
               showLocation={listing.searching}
@@ -733,7 +803,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
           ) : (
             files.length > 0 && (
               <MediaGrid
-                libraryId={libraryId}
+                libraryId={scopedId ?? primaryId}
                 files={files}
                 grouping={grouping}
                 masonry={config.masonry}
@@ -775,7 +845,8 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
           <div className="drop-overlay-card">
             <Icon name="upload" size={28} />
             <span>
-              Drop to upload to {folderMode && folder ? folder.split('/').pop() : library.name}
+              Drop to upload to{' '}
+              {folderMode && folder ? folder.split('/').pop() : primaryLibrary.name}
             </span>
           </div>
         </div>
@@ -783,7 +854,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
 
       {ops.viewer && (
         <ViewerModal
-          libraryId={libraryId}
+          libraryId={ops.viewerLibraryId}
           file={ops.viewer}
           siblings={files}
           onNavigate={ops.openViewer}
@@ -812,7 +883,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
         label="Folder name"
         placeholder="Summer 2026"
         confirmLabel="Create"
-        hint="The folder is created in the library right away."
+        hint={`The folder is created in ${primaryLibrary.name} right away.`}
         busy={folderBusy}
         error={folderError}
         onCancel={() => {
@@ -825,7 +896,7 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
           const newPath = folder ? `${folder}/${clean}` : clean;
           setFolderBusy(true);
           setFolderError(null);
-          createFolder(libraryId, newPath)
+          createFolder(uploadLibraryId, newPath)
             .then(() => {
               setNewFolderOpen(false);
               openFolder(newPath);
@@ -838,8 +909,8 @@ function MediaBrowser({ config, library }: { config: MediaPageConfig; library: L
 
       {shareFolder && (
         <ShareDialog
-          libraryId={libraryId}
-          resourceKey={folderKey(libraryId, shareFolder.rel_path)}
+          libraryId={shareFolder.library_id || uploadLibraryId}
+          resourceKey={folderKey(shareFolder.library_id || uploadLibraryId, shareFolder.rel_path)}
           title={`Share "${shareFolder.name}"`}
           resourceLabel="folder"
           testIdPrefix="folder"

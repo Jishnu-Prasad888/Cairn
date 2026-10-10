@@ -1280,4 +1280,111 @@ describe('MediaPage', () => {
       await waitFor(() => expect(screen.queryByTestId('timeline')).not.toBeInTheDocument());
     });
   });
+
+  describe('multiple open libraries', () => {
+    const lib1Folder = {
+      folders: [{ id: 'dir1', rel_path: '2024', name: '2024', file_count: 2, library_id: 'lib1' }],
+    };
+    const lib2Folder = {
+      folders: [
+        {
+          id: 'dir2',
+          rel_path: 'Archive',
+          name: 'Archive',
+          file_count: 1,
+          library_id: 'lib2',
+        },
+      ],
+    };
+    const lib2Page = {
+      files: [
+        fileFixture({
+          id: 'f3',
+          library_id: 'lib2',
+          rel_path: 'holiday.png',
+          name: 'holiday.png',
+          // Newer than lib1's photos, so the combined stream leads with it.
+          mod_time: '2026-09-05T00:00:00Z',
+        }),
+      ],
+      next_cursor: '',
+      total: 1,
+    };
+    // When two libraries are open, both are asked.
+    function setup() {
+      localStorage.setItem('cairn.library', 'lib1');
+      localStorage.setItem('cairn.libraries.open', JSON.stringify(['lib1', 'lib2']));
+      return mockApi(
+        apiRules([
+          (url) =>
+            url.includes('/api/v1/libraries/lib1/folders') ? json(lib1Folder) : undefined,
+          (url) =>
+            url.includes('/api/v1/libraries/lib2/folders') ? json(lib2Folder) : undefined,
+          (url) => (url.includes('/api/v1/libraries/lib2/files?') ? json(lib2Page) : undefined),
+          (url) =>
+            url.includes('/api/v1/libraries/lib2/favorites') ? json({ files: [] }) : undefined,
+        ]),
+        { libraries: [libraryFixture(), libraryFixture({ id: 'lib2', name: 'Archive' })] },
+      );
+    }
+
+    it('merges the two libraries at the root and labels each card', async () => {
+      const fetchMock = setup();
+      renderPage(<MediaPage config={CONFIG} />);
+
+      expect(await screen.findByTestId('file-grid')).toBeInTheDocument();
+
+      // Both libraries' content is on the page: lib1's folder and files, plus
+      // lib2's folder and file.
+      expect(screen.getByRole('button', { name: /^2024/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Archive/ })).toBeInTheDocument();
+      expect(screen.getByText('IMG_0001.png')).toBeInTheDocument();
+      expect(screen.getByText('holiday.png')).toBeInTheDocument();
+      expect(screen.getByTestId('result-count')).toHaveTextContent('Showing 3 of 3');
+
+      // The page asked both libraries (folders and files each).
+      expect(called(fetchMock, 'GET', '/libraries/lib1/files?')).toBe(true);
+      expect(called(fetchMock, 'GET', '/libraries/lib2/files?')).toBe(true);
+
+      // The grid interleaves the libraries by date instead of showing one
+      // library then the next: lib2's newer file leads, then lib1's pair.
+      const grid = screen.getByTestId('file-grid');
+      const tileNames = Array.from(grid.querySelectorAll('.media-tile-main')).map(
+        (tile) => tile.getAttribute('aria-label'),
+      );
+      expect(tileNames).toEqual(['holiday.png', 'IMG_0001.png', 'clip.mp4']);
+
+      // Merged mode is one flat grid: no day-by-day headings.
+      expect(grid.querySelector('.media-date')).toBeNull();
+
+      // A tile from lib2 is labelled with lib2; the folder too. With two
+      // libraries open the tags show, and only when their own library is any.
+      const tags = screen.getAllByTestId('library-tag');
+      expect(tags.some((tag) => tag.getAttribute('data-library-id') === 'lib2')).toBe(true);
+      const archiveTile = screen.getByRole('button', { name: /^Archive/ }).closest('li');
+      expect(archiveTile!.querySelector('[data-testid="library-tag"]')).toHaveAttribute(
+        'data-library-id',
+        'lib2',
+      );
+    });
+
+    it('scopes to lib1 once a lib1 folder from it is opened', async () => {
+      const fetchMock = setup();
+      renderPage(<MediaPage config={CONFIG} />);
+
+      await screen.findByTestId('file-grid');
+      // Both libraries were queried for the merged root.
+      expect(called(fetchMock, 'GET', '/libraries/lib2/files?')).toBe(true);
+      const lib2Calls = () =>
+        fetchMock.mock.calls.filter(([input]) => String(input).includes('lib2/files')).length;
+
+      fireEvent.click(screen.getByRole('button', { name: /^2024/ }));
+
+      // The browse is pinned to lib1; lib2 is no longer consulted.
+      await waitFor(() =>
+        expect(called(fetchMock, 'GET', '/libraries/lib1/files?folder=2024')).toBe(true),
+      );
+      expect(lib2Calls()).toBe(1);
+    });
+  });
 });

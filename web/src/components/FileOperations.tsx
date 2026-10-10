@@ -37,6 +37,8 @@ interface PendingState {
 export interface FileOperations {
   /** The file currently in the viewer, or null. */
   viewer: FileSummary | null;
+  /** The library the viewer's file lives in — must be passed on to the modal. */
+  viewerLibraryId: string;
   openViewer: (file: FileSummary) => void;
   closeViewer: () => void;
   /** Let the viewer (or a page) route a file operation into the dialogs. */
@@ -47,24 +49,31 @@ export interface FileOperations {
   busy: boolean;
 }
 
+/** Every operation below happens in the library the file belongs to. */
+const libFor = (libraryIds: readonly string[], file: FileSummary): string =>
+  file.library_id || libraryIds[0] || '';
+
 /**
  * Wires the viewer's file operations to real dialogs.
  *
- * @param libraryId the library the files belong to
+ * @param libraryIds the libraries a page shows. The first is the primary one
+ *   used for anything without a per-file library, e.g. resolving a `?view=`
+ *   deep link when the page merged several libraries.
  * @param onChanged called after any successful mutation, so the caller reloads
  * @param permanent when true the trash dialog runs a permanent delete instead
  *   of a soft delete — that is the Trash page, not the media browser
  */
 export function useFileOperations(
-  libraryId: string,
+  libraryIds: readonly string[],
   onChanged: () => void,
   { permanent = false }: { permanent?: boolean } = {},
 ): FileOperations {
-  const viewerState = useViewerParam(libraryId);
-  const { viewer, closeViewer } = viewerState;
+  const viewerState = useViewerParam(libraryIds);
+  const { viewer, viewerLibraryId, closeViewer } = viewerState;
   const [pending, setPending] = useState<PendingState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const primaryId = libraryIds[0] || '';
 
   const closeDialog = useCallback(() => {
     setPending(null);
@@ -132,6 +141,7 @@ export function useFileOperations(
           if (!pending) return;
           const target = pending.file;
           const kind = pending.kind;
+          const libraryId = libFor(libraryIds, target);
           void run(
             () =>
               kind === 'permanent'
@@ -155,7 +165,9 @@ export function useFileOperations(
         onConfirm={(name) => {
           if (pending?.kind !== 'rename') return;
           const target = pending.file;
-          void run(() => renameFile(libraryId, target.rel_path, target.id, name));
+          void run(() =>
+            renameFile(libFor(libraryIds, target), target.rel_path, target.id, name),
+          );
         }}
         testId="rename-dialog"
       />
@@ -168,7 +180,7 @@ export function useFileOperations(
         hint="A path relative to the library root. Leave empty to move to the top level."
         control={(field) => (
           <FolderPicker
-            libraryId={libraryId}
+            libraryId={pending ? libFor(libraryIds, pending.file) : primaryId}
             value={field.value}
             onChange={field.setValue}
             label="Destination folder"
@@ -183,7 +195,9 @@ export function useFileOperations(
         onConfirm={(dest) => {
           if (pending?.kind !== 'move') return;
           const target = pending.file;
-          void run(() => moveFile(libraryId, target.rel_path, target.id, dest, target.name));
+          void run(() =>
+            moveFile(libFor(libraryIds, target), target.rel_path, target.id, dest, target.name),
+          );
         }}
         testId="move-dialog"
       />
@@ -196,7 +210,7 @@ export function useFileOperations(
         hint="A copy is created on disk; the original stays where it is."
         control={(field) => (
           <FolderPicker
-            libraryId={libraryId}
+            libraryId={pending ? libFor(libraryIds, pending.file) : primaryId}
             value={field.value}
             onChange={field.setValue}
             label="Destination folder"
@@ -211,7 +225,9 @@ export function useFileOperations(
         onConfirm={(dest) => {
           if (pending?.kind !== 'copy') return;
           const target = pending.file;
-          void run(() => copyFile(libraryId, target.rel_path, target.id, dest, target.name));
+          void run(() =>
+            copyFile(libFor(libraryIds, target), target.rel_path, target.id, dest, target.name),
+          );
         }}
         testId="copy-dialog"
       />
@@ -220,6 +236,7 @@ export function useFileOperations(
 
   return {
     viewer,
+    viewerLibraryId,
     openViewer: viewerState.openViewer,
     closeViewer,
     requestAction,
@@ -235,12 +252,21 @@ export function useFileOperations(
  * phone's back gesture) closes the viewer instead of leaving the page; paging
  * to the next photo replaces it, so Back does not step through every photo
  * seen. A link or a reload with `?view=` reopens the same file.
+ *
+ * When a page merges several open libraries, a reloaded `?view=` has no library
+ * of its own, so the file is looked up in each library until one has it. The
+ * library it was found in is remembered and returned as `viewerLibraryId`, so
+ * every thumbnail and panel in the modal hits the right library.
  */
-function useViewerParam(libraryId: string) {
+function useViewerParam(libraryIds: readonly string[]) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const viewId = params.get('view');
   const [file, setFile] = useState<FileSummary | null>(null);
+  // Which library the current file belongs to. A file opened from a grid
+  // carries its own `library_id`; a `?view=` resolved from the server has to
+  // be remembered here because the file object fetched does.
+  const [fileLibraryId, setFileLibraryId] = useState<string>('');
   // Whether this page pushed the entry: only then is "close" a step back.
   const pushedRef = useRef(false);
   useEffect(() => {
@@ -257,33 +283,43 @@ function useViewerParam(libraryId: string) {
   useEffect(() => {
     const changed = seenViewId.current !== viewId;
     seenViewId.current = viewId;
-    if (!changed || !viewId || !libraryId || file?.id === viewId) return;
+    if (!changed || !viewId || file?.id === viewId || libraryIds.length === 0) return;
     let cancelled = false;
-    getFile(libraryId, viewId)
-      .then((resp) => {
-        if (!cancelled) setFile(resp.file);
-      })
-      .catch(() => {
-        // A file that no longer exists: drop the parameter quietly.
-        if (!cancelled) {
-          setParams(
-            (prev) => {
-              const next = new URLSearchParams(prev);
-              next.delete('view');
-              return next;
-            },
-            { replace: true },
-          );
+    // Try in open order; on a single-library page that is the one lookup that
+    // files always got before. `some` stops at the first library that has it.
+    (async () => {
+      for (const libraryId of libraryIds) {
+        if (cancelled) return;
+        try {
+          const resp = await getFile(libraryId, viewId);
+          if (cancelled) return;
+          setFile(resp.file);
+          setFileLibraryId(libraryId);
+          return;
+        } catch {
+          // Not here; try the next library.
         }
-      });
+      }
+      if (cancelled) return;
+      // A file that no longer exists anywhere: drop the parameter quietly.
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('view');
+          return next;
+        },
+        { replace: true },
+      );
+    })();
     return () => {
       cancelled = true;
     };
-  }, [viewId, libraryId, file?.id, setParams]);
+  }, [viewId, libraryIds, file?.id, setParams]);
 
   const openViewer = useCallback(
     (next: FileSummary) => {
       setFile(next);
+      setFileLibraryId(next.library_id || libraryIds[0] || '');
       const replacing = params.has('view');
       if (!replacing) pushedRef.current = true;
       setParams(
@@ -295,7 +331,7 @@ function useViewerParam(libraryId: string) {
         { replace: replacing },
       );
     },
-    [params, setParams],
+    [params, setParams, libraryIds],
   );
 
   const closeViewer = useCallback(() => {
@@ -318,5 +354,5 @@ function useViewerParam(libraryId: string) {
   }, [navigate, setParams]);
 
   const viewer = viewId ? file : null;
-  return { viewer, openViewer, closeViewer };
+  return { viewer, viewerLibraryId: viewer ? fileLibraryId : '', openViewer, closeViewer };
 }

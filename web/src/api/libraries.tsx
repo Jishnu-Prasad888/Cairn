@@ -22,6 +22,8 @@ import { ApiError, apiGet } from './client';
 import type { Library } from './types';
 
 export const LIBRARY_STORAGE_KEY = 'cairn.library';
+/** The set of libraries the user has opened, as a JSON array of ids. */
+export const OPEN_LIBRARIES_STORAGE_KEY = 'cairn.libraries.open';
 
 /** Read the remembered library id, or null when there is nothing to restore. */
 export function readStoredLibraryId(): string | null {
@@ -47,24 +49,64 @@ export function storeLibraryId(id: string | null): void {
   }
 }
 
+/** The libraries that were open last visit. */
+export function readOpenLibraryIds(): string[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(OPEN_LIBRARIES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function storeOpenLibraryIds(ids: string[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (ids.length > 0) {
+      localStorage.setItem(OPEN_LIBRARIES_STORAGE_KEY, JSON.stringify(ids));
+    } else {
+      localStorage.removeItem(OPEN_LIBRARIES_STORAGE_KEY);
+    }
+  } catch {
+    // A failed write only means the choice is not remembered next visit.
+  }
+}
+
 export interface LibrariesState {
   /** True until the first /libraries response has been handled. */
   loading: boolean;
   /** Libraries the signed-in user can read. Empty is a valid, non-error state. */
   libraries: Library[];
-  /** The selected library, or null when there is nothing to select. */
+  /**
+   * The "primary" library. Most single-library actions (upload, new album,
+   * permissions) act on this one; the content pages aggregate every open
+   * library instead (see `openLibraries`).
+   */
   library: Library | null;
-  /** Id of the selected library, for building request paths. */
+  /** Id of the primary library, for building single-library request paths. */
   libraryId: string | null;
-  /** Select a different library; persisted for the next visit. */
+  /** Every library the user has opened, in the order they opened them. */
+  openLibraries: Library[];
+  /** Ids of the open libraries, validated against the visible list. */
+  openLibraryIds: string[];
+  /** Select the primary library and make sure it is open; persisted. */
   selectLibrary: (id: string) => void;
+  /** Replace the whole open set at once. */
+  setOpenLibraries: (ids: string[]) => void;
+  /** Open a library if it is closed, close it if it is open. */
+  toggleLibraryOpen: (id: string) => void;
+  /** True when `id` is currently open. */
+  isLibraryOpen: (id: string) => boolean;
   /** Re-fetch the list, e.g. after registering or unregistering a library. */
   refresh: () => void;
   /** A load failure. Distinct from "no libraries". */
   error: string | null;
   /** True when the list loaded and there is nothing to show. */
   isEmpty: boolean;
-  /** True when the selected library is present but its storage is unreachable. */
+  /** True when the primary library's storage is unreachable. */
   libraryOffline: boolean;
 }
 
@@ -80,6 +122,7 @@ const LibrariesContext = createContext<LibrariesState | null>(null);
  */
 export function LibrariesProvider({ children }: { children: ReactNode }) {
   const [requestedId, setRequestedId] = useState<string | null>(() => readStoredLibraryId());
+  const [requestedOpen, setRequestedOpen] = useState<string[]>(() => readOpenLibraryIds());
   const [reloadKey, setReloadKey] = useState(0);
   // The list is per account. Fetching it before anyone is signed in yields a
   // 401 that would otherwise stay on screen after sign-in ("authentication
@@ -141,16 +184,73 @@ export function LibrariesProvider({ children }: { children: ReactNode }) {
     return (firstOnline ?? libraries[0])?.id ?? null;
   }, [libraries, requestedId]);
 
+  // The open set is the requested one, minus any library that is no longer
+  // visible (revoked or unregistered). It is never empty while a library
+  // exists: it falls back to the single selected library, so every page still
+  // has something to show.
+  const visibleIds = useMemo(() => new Set(libraries.map((lib) => lib.id)), [libraries]);
+  const openLibraryIds = useMemo(() => {
+    const kept = requestedOpen.filter((id) => visibleIds.has(id));
+    if (kept.length > 0) return kept;
+    return selectedId ? [selectedId] : [];
+  }, [requestedOpen, visibleIds, selectedId]);
+
+  // The primary library is the selected one when it is open, else the first
+  // open one — used for the actions that can only target a single library.
+  const primaryId = useMemo(() => {
+    if (selectedId && openLibraryIds.includes(selectedId)) return selectedId;
+    return openLibraryIds[0] ?? null;
+  }, [openLibraryIds, selectedId]);
+
   const selectLibrary = useCallback((id: string) => {
     setRequestedId(id);
     storeLibraryId(id);
+    setRequestedOpen((prev) => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id];
+      storeOpenLibraryIds(next);
+      return next;
+    });
   }, []);
+
+  const setOpenLibraries = useCallback(
+    (ids: string[]) => {
+      setRequestedOpen(ids);
+      storeOpenLibraryIds(ids);
+      if (ids.length > 0 && !ids.includes(requestedId ?? '')) {
+        setRequestedId(ids[0]!);
+        storeLibraryId(ids[0]!);
+      }
+    },
+    [requestedId],
+  );
+
+  const toggleLibraryOpen = useCallback(
+    (id: string) => {
+      const isOpen = openLibraryIds.includes(id);
+      // Keep at least one library open: every content page needs one to show.
+      if (isOpen && openLibraryIds.length <= 1) return;
+      const next = isOpen ? openLibraryIds.filter((x) => x !== id) : [...openLibraryIds, id];
+      setOpenLibraries(next);
+    },
+    [openLibraryIds, setOpenLibraries],
+  );
+
+  const isLibraryOpen = useCallback((id: string) => openLibraryIds.includes(id), [openLibraryIds]);
 
   const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
 
   const library = useMemo(
-    () => libraries.find((lib) => lib.id === selectedId) ?? null,
-    [libraries, selectedId],
+    () => libraries.find((lib) => lib.id === primaryId) ?? null,
+    [libraries, primaryId],
+  );
+
+  const openLibraries = useMemo(
+    () =>
+      openLibraryIds
+        .map((id) => libraries.find((lib) => lib.id === id))
+        .filter((lib): lib is Library => lib !== undefined),
+    [libraries, openLibraryIds],
   );
 
   const value = useMemo<LibrariesState>(
@@ -159,13 +259,30 @@ export function LibrariesProvider({ children }: { children: ReactNode }) {
       libraries,
       library,
       libraryId: library?.id ?? null,
+      openLibraries,
+      openLibraryIds,
       selectLibrary,
+      setOpenLibraries,
+      toggleLibraryOpen,
+      isLibraryOpen,
       refresh,
       error,
       isEmpty: !loading && error === null && libraries.length === 0,
       libraryOffline: library?.status === 'offline',
     }),
-    [libraries, loading, library, selectLibrary, refresh, error],
+    [
+      libraries,
+      loading,
+      library,
+      openLibraries,
+      openLibraryIds,
+      selectLibrary,
+      setOpenLibraries,
+      toggleLibraryOpen,
+      isLibraryOpen,
+      refresh,
+      error,
+    ],
   );
 
   return <LibrariesContext.Provider value={value}>{children}</LibrariesContext.Provider>;
@@ -186,7 +303,12 @@ export function useLibraries(): LibrariesState {
     libraries: [],
     library: null,
     libraryId: null,
+    openLibraries: [],
+    openLibraryIds: [],
     selectLibrary: () => {},
+    setOpenLibraries: () => {},
+    toggleLibraryOpen: () => {},
+    isLibraryOpen: () => false,
     refresh: () => {},
     error: null,
     isEmpty: false,
@@ -208,17 +330,48 @@ export type LibraryGate =
       library: Library;
       libraryId: string;
       libraries: Library[];
+      /** Every library the user has opened; content pages aggregate these. */
+      openLibraries: Library[];
+      openLibraryIds: string[];
       selectLibrary: (id: string) => void;
     };
 
 export function useLibraryGate(): LibraryGate {
   const state = useLibraries();
-  const { loading, error, isEmpty, library, libraryId, libraries, selectLibrary } = state;
+  const {
+    loading,
+    error,
+    isEmpty,
+    library,
+    libraryId,
+    libraries,
+    openLibraries,
+    openLibraryIds,
+    selectLibrary,
+  } = state;
 
   return useMemo<LibraryGate>(() => {
     if (loading) return { kind: 'loading' };
     if (error) return { kind: 'error', message: error };
     if (isEmpty || !library || !libraryId) return { kind: 'empty' };
-    return { kind: 'ready', library, libraryId, libraries, selectLibrary };
-  }, [loading, error, isEmpty, library, libraryId, libraries, selectLibrary]);
+    return {
+      kind: 'ready',
+      library,
+      libraryId,
+      libraries,
+      openLibraries,
+      openLibraryIds,
+      selectLibrary,
+    };
+  }, [
+    loading,
+    error,
+    isEmpty,
+    library,
+    libraryId,
+    libraries,
+    openLibraries,
+    openLibraryIds,
+    selectLibrary,
+  ]);
 }

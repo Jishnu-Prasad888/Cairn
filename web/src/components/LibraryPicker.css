@@ -1,0 +1,72 @@
+/* The open-libraries panel beside the header picker. */
+
+.library-picker-open {
+  position: relative;
+}
+
+.library-picker-open .status-badge {
+  position: static;
+}
+
+.library-open-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 260px;
+  max-width: 320px;
+  padding: var(--space-2);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-popover, 0 8px 30px rgba(0, 0, 0, 0.14));
+}
+
+.library-open-panel-note {
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.library-open-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.library-open-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1);
+  border-radius: var(--radius-1, 6px);
+  cursor: pointer;
+}
+
+.library-open-row:hover {
+  background: var(--color-fill-subtle);
+}
+
+.library-open-row input[type='checkbox']:disabled {
+  cursor: not-allowed;
+}
+
+.library-open-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-open-selected {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}

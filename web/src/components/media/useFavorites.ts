@@ -8,59 +8,79 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { addFavorite, listFavorites, removeFavorite } from '../../api/queries';
 
+/** One file to favorite or unfavorite, in its own library. */
+export interface FavoriteTarget {
+  id: string;
+  /** The library the file lives in; defaults to the hook's first library. */
+  libraryId?: string;
+}
+
 export interface Favorites {
   ids: ReadonlySet<string>;
   has: (id: string) => boolean;
-  /** Add (or with `false`, remove) every id; resolves to how many failed. */
-  set: (ids: string[], value: boolean) => Promise<number>;
+  /** Add (or with `false`, remove) every target; resolves to how many failed. */
+  set: (targets: FavoriteTarget[], value: boolean) => Promise<number>;
 }
 
-export function useFavorites(libraryId: string | null, refreshKey = 0): Favorites {
-  const [state, setState] = useState<{ libraryId: string; ids: ReadonlySet<string> } | null>(null);
+/**
+ * The signed-in user's favorites, as a set of file ids, with optimistic add and
+ * remove. On a page that merges several open libraries the set spans all of
+ * them, and each toggle writes to the library its file lives in.
+ */
+export function useFavorites(libraryIds: readonly string[], refreshKey = 0): Favorites {
+  const [state, setState] = useState<{ key: string; ids: ReadonlySet<string> } | null>(null);
+  const key = libraryIds.join(',');
 
   useEffect(() => {
-    if (!libraryId) return;
+    if (!key) return;
     let cancelled = false;
-    listFavorites(libraryId)
-      .then((resp) => {
-        if (!cancelled) {
-          setState({ libraryId, ids: new Set((resp.files ?? []).map((f) => f.id)) });
+    Promise.allSettled(
+      libraryIds.map((libraryId) =>
+        listFavorites(libraryId).then((resp) => (resp.files ?? []).map((f) => f.id)),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const ids = new Set<string>();
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          result.value.forEach((id) => ids.add(id));
         }
-      })
-      .catch(() => {
-        // No favorites badge is better than an error over a photo grid.
-        if (!cancelled) setState({ libraryId, ids: new Set() });
-      });
+      }
+      setState({ key, ids });
+    });
     return () => {
       cancelled = true;
     };
-  }, [libraryId, refreshKey]);
+  }, [key, refreshKey, libraryIds]);
 
-  const ids = state && state.libraryId === libraryId ? state.ids : EMPTY;
+  const ids = state && state.key === key ? state.ids : EMPTY;
 
   const set = useCallback(
-    async (targets: string[], value: boolean) => {
-      if (!libraryId) return targets.length;
+    async (targets: FavoriteTarget[], value: boolean) => {
+      if (targets.length === 0) return 0;
       // Optimistic: the star changes now, and is put back for any that fail.
       setState((prev) => {
-        const next = new Set(prev?.libraryId === libraryId ? prev.ids : []);
-        targets.forEach((id) => (value ? next.add(id) : next.delete(id)));
-        return { libraryId, ids: next };
+        const next = new Set(prev?.key === key ? prev.ids : []);
+        targets.forEach((t) => (value ? next.add(t.id) : next.delete(t.id)));
+        return { key, ids: next };
       });
       const results = await Promise.allSettled(
-        targets.map((id) => (value ? addFavorite(libraryId, id) : removeFavorite(libraryId, id))),
+        targets.map((t) => {
+          const libraryId = t.libraryId || libraryIds[0] || '';
+          return value ? addFavorite(libraryId, t.id) : removeFavorite(libraryId, t.id);
+        }),
       );
       const failed = targets.filter((_, i) => results[i]?.status === 'rejected');
       if (failed.length) {
         setState((prev) => {
-          const next = new Set(prev?.ids ?? []);
-          failed.forEach((id) => (value ? next.delete(id) : next.add(id)));
-          return { libraryId, ids: next };
+          const next = new Set(prev?.key === key ? prev.ids : []);
+          failed.forEach((t) => (value ? next.delete(t.id) : next.add(t.id)));
+          return { key, ids: next };
         });
       }
       return failed.length;
     },
-    [libraryId],
+    [key, libraryIds],
   );
 
   const has = useCallback((id: string) => ids.has(id), [ids]);

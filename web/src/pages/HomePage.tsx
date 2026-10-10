@@ -170,7 +170,7 @@ function Home({ library }: { library: Library }) {
     }, []),
   );
 
-  const ops = useFileOperations(libraryId, home.reload);
+  const ops = useFileOperations([libraryId], home.reload);
   const data = home.data;
 
   // A freshly added library is empty until its first scan has run. The shell

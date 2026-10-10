@@ -1,45 +1,85 @@
 /**
  * Favorites — everything the signed-in user has starred. Per person: nobody
- * else sees your favorites.
+ * else sees your favorites. With several libraries open, the favorites of all
+ * of them are merged, each tile labelled with its library.
  */
 
 import { useCallback, useState } from 'react';
 
-import { useLibraryResource } from '../api/resources';
+import { useLibraryGate } from '../api/libraries';
+import { useOpenLibrariesResource } from '../api/resources';
 import { listFavorites } from '../api/queries';
 import type { Library } from '../api/types';
 import { useFileOperations } from '../components/FileOperations';
-import { LibraryGatePage } from '../components/LibraryGatePage';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
 import { useFavorites } from '../components/media/useFavorites';
 import { useMediaActions } from '../components/media/useMediaActions';
 import { useSelection } from '../components/media/useSelection';
-import { EmptyState, ErrorState, LibraryOfflineNotice, PageHeader } from '../components/States';
+import { EmptyState, ErrorState, LibraryOfflineNotice, PageHeader, NoLibrariesState } from '../components/States';
+import { useAuth } from '../auth/authContext';
 import { Menu, type MenuAnchor, type MenuEntry } from '../components/ui/Menu';
 import { ViewerModal } from '../components/ViewerModal';
 
 export default function FavoritesPage() {
+  const gate = useLibraryGate();
+  const { user } = useAuth();
+
+  if (gate.kind === 'loading') {
+    return (
+      <main className="page media-page">
+        <PageHeader title="Favorites" />
+        <MediaGridSkeleton />
+      </main>
+    );
+  }
+  if (gate.kind === 'error') {
+    return (
+      <main className="page media-page">
+        <PageHeader title="Favorites" />
+        <ErrorState message={gate.message} title="Couldn't load your libraries" />
+      </main>
+    );
+  }
+  if (gate.kind === 'empty') {
+    return (
+      <main className="page media-page">
+        <PageHeader title="Favorites" />
+        <NoLibrariesState isAdmin={user?.role === 'admin'} />
+      </main>
+    );
+  }
   return (
-    <LibraryGatePage title="Favorites">
-      {(library) => <Favorites library={library} />}
-    </LibraryGatePage>
+    <Favorites
+      primaryId={gate.library.id}
+      library={gate.library}
+      openLibraryIds={gate.openLibraryIds}
+    />
   );
 }
 
-function Favorites({ library }: { library: Library }) {
-  const libraryId = library.id;
+function Favorites({
+  primaryId,
+  library,
+  openLibraryIds,
+}: {
+  primaryId: string;
+  library: Library;
+  openLibraryIds: string[];
+}) {
   const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
-  const favorites = useLibraryResource(
+  const favorites = useOpenLibrariesResource(
     useCallback(async (id: string) => (await listFavorites(id)).files ?? [], []),
   );
   const files = favorites.data ?? [];
+  const multiOpen = openLibraryIds.length > 1;
+  const offline = library.status === 'offline';
 
-  const starred = useFavorites(libraryId, files.length);
-  const selection = useSelection(files, libraryId);
-  const ops = useFileOperations(libraryId, favorites.reload);
+  const starred = useFavorites(openLibraryIds, files.length);
+  const selection = useSelection(files, openLibraryIds.join('+'));
+  const ops = useFileOperations(openLibraryIds, favorites.reload);
   const actions = useMediaActions({
-    libraryId,
+    libraryId: primaryId,
     selection,
     favorites: starred,
     ops,
@@ -65,7 +105,7 @@ function Favorites({ library }: { library: Library }) {
         subtitle={count > 0 ? `${count} ${count === 1 ? 'favorite' : 'favorites'}` : undefined}
       />
 
-      {library.status === 'offline' && <LibraryOfflineNotice library={library} />}
+      {!multiOpen && offline && <LibraryOfflineNotice library={library} />}
       {favorites.error && (
         <ErrorState
           message={favorites.error}
@@ -83,7 +123,7 @@ function Favorites({ library }: { library: Library }) {
 
       {files.length > 0 && (
         <MediaGrid
-          libraryId={libraryId}
+          libraryId={primaryId}
           files={files}
           onOpen={ops.openViewer}
           selection={selection}
@@ -98,7 +138,7 @@ function Favorites({ library }: { library: Library }) {
 
       {ops.viewer && (
         <ViewerModal
-          libraryId={libraryId}
+          libraryId={ops.viewerLibraryId}
           file={ops.viewer}
           siblings={files}
           onNavigate={ops.openViewer}

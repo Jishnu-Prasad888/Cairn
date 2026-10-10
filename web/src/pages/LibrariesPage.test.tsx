@@ -343,4 +343,33 @@ describe('LibrariesPage', () => {
     expect(within(row).queryByRole('button', { name: 'Unregister' })).not.toBeInTheDocument();
     expect(screen.getByText(/Adding, reconnecting, and scanning libraries/)).toBeInTheDocument();
   });
+
+  it('marks a second library as open and keeps the last one open', async () => {
+    mockApi([(url) => (url.includes('/index/status') ? json(indexStatus) : undefined)], {
+      libraries: [libraryFixture(), libraryFixture({ id: 'lib2', name: 'Archive' })],
+    });
+    renderPage(<LibrariesPage />);
+
+    const rows = await screen.findAllByTestId('library-row');
+    const [lib1Row, lib2Row] = rows;
+    const toggle1 = within(lib1Row!).getByTestId('toggle-open-lib1');
+    const toggle2 = within(lib2Row!).getByTestId('toggle-open-lib2');
+
+    // Only the selected primary library is open to begin with.
+    expect(toggle1).toBeChecked();
+    expect(toggle2).not.toBeChecked();
+
+    // Open the second library.
+    fireEvent.click(toggle2);
+    expect(toggle2).toBeChecked();
+    expect(toggle1).toBeChecked();
+
+    // Closing the other is fine while another stays open.
+    fireEvent.click(toggle1);
+    expect(toggle1).not.toBeChecked();
+    expect(toggle2).toBeChecked();
+
+    // The last open library cannot be closed.
+    expect(toggle2).toBeDisabled();
+  });
 });

@@ -11,7 +11,7 @@ import { useLibraries } from '../../api/libraries';
 import { Icon } from '../ui/Icon';
 import { useUploads } from '../upload/UploadProvider';
 import { AccountMenu } from './AccountMenu';
-import { SettingsSearch } from './SettingsSearch';
+import { ContextSearch } from './ContextSearch';
 
 export function TopBar({
   searchRef,
@@ -37,7 +37,7 @@ export function TopBar({
       </Link>
 
       <div className="topbar-search">
-        <SettingsSearch inputRef={searchRef} />
+        <ContextSearch inputRef={searchRef} />
       </div>
 
       <div className="topbar-actions">

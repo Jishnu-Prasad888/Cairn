@@ -16,9 +16,9 @@
  * lint rules push you towards.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { useLibraryChangeTick } from './libraryEvents';
+import { useLibrariesChangeTick, useLibraryChangeTick } from './libraryEvents';
 import { useLibraryGate } from './libraries';
 
 /** The states every page has to handle. */
@@ -112,6 +112,143 @@ export function useLibraryResource<T>(
     reload,
     libraryId: libraryId ?? '',
   };
+}
+
+export interface AggregatedLibraryResource<T> {
+  /**
+   * Every open library's items, concatenated in open order. Each item carries
+   * the `library_id` it came from (injected when the server type lacks one), so
+   * the cards can label which library an item belongs to.
+   */
+  data: Array<T & { library_id: string }> | null;
+  loading: boolean;
+  error: string | null;
+  reload: () => void;
+  /** The libraries that were aggregated, in order. */
+  libraryIds: string[];
+}
+
+/**
+ * Load `fn` for a set of libraries and merge the results.
+ *
+ * This is {@link useLibraryResource} lifted from one library to a set of
+ * libraries: the same "one list, one error" contract, but the list is the
+ * concatenation of each library's own list. Each item is tagged with its
+ * `library_id` (the file/folder types already have one; the rest are given it
+ * here) so a grid tile can name the library it belongs to.
+ *
+ * A library that fails is skipped; the merged list is only an error when every
+ * library failed, so one unplugged drive does not blank the whole page.
+ */
+function useLibrariesResource<T extends object>(
+  libraryIds: readonly string[],
+  fn: (libraryId: string) => Promise<T[]>,
+  deps: readonly unknown[] = [],
+  enabled = true,
+): AggregatedLibraryResource<T> {
+  const [settled, setSettled] = useState<{
+    key: string;
+    data: Array<T & { library_id: string }>;
+    error: string | null;
+  } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const fnRef = useRef(fn);
+  useEffect(() => {
+    fnRef.current = fn;
+  });
+
+  const libraryKey = libraryIds.join(',');
+  const active = enabled && libraryIds.length > 0;
+  const changeTick = useLibrariesChangeTick(libraryIds);
+
+  const key = active ? `${libraryKey}|${JSON.stringify(deps)}|${reloadKey}` : null;
+
+  useEffect(() => {
+    if (key === null) return;
+    let cancelled = false;
+    const ids = key.slice(0, key.indexOf('|')).split(',').filter(Boolean);
+    Promise.allSettled(ids.map((id) => fnRef.current(id).then((items) => ({ id, items }))))
+      .then((results) => {
+        if (cancelled) return;
+        const merged: Array<T & { library_id: string }> = [];
+        let firstError: string | null = null;
+        let anyOk = false;
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            anyOk = true;
+            for (const item of result.value.items) {
+              merged.push({ ...item, library_id: result.value.id });
+            }
+          } else if (firstError === null) {
+            firstError = toMessage(result.reason);
+          }
+        }
+        setSettled({
+          key,
+          data: merged,
+          // Only blank the page when nothing at all could be loaded.
+          error: anyOk ? null : firstError,
+        });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setSettled({ key, data: [], error: toMessage(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // The key encodes every input, so it is the only dependency that matters.
+  }, [key, changeTick]);
+
+  const current = key !== null && settled?.key === key ? settled : null;
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  return {
+    data: current?.data ?? null,
+    loading: key !== null && current === null,
+    error: current?.error ?? null,
+    reload,
+    libraryIds: [...libraryIds],
+  };
+}
+
+/**
+ * Load `fn` for every library the user has opened and merge the results.
+ *
+ * Content pages (Photos, Files, …) aggregate the *open* set; the library
+ * picker decides which libraries feed them.
+ */
+export function useOpenLibrariesResource<T extends object>(
+  fn: (libraryId: string) => Promise<T[]>,
+  deps: readonly unknown[] = [],
+  enabled = true,
+): AggregatedLibraryResource<T> {
+  const gate = useLibraryGate();
+  const libraryIds = useMemo(
+    () => (gate.kind === 'ready' ? gate.openLibraryIds : []),
+    [gate],
+  );
+  return useLibrariesResource(libraryIds, fn, deps, enabled);
+}
+
+/**
+ * Load `fn` for every library the user can read, open or not, and merge the
+ * results. This is the "show everything, regardless of library" variant — the
+ * albums grid uses it so a library that is only glanced at still contributes
+ * its albums.
+ */
+export function useAllLibrariesResource<T extends object>(
+  fn: (libraryId: string) => Promise<T[]>,
+  deps: readonly unknown[] = [],
+  enabled = true,
+): AggregatedLibraryResource<T> {
+  const gate = useLibraryGate();
+  const libraryIds = useMemo(
+    () => (gate.kind === 'ready' ? gate.libraries.map((lib) => lib.id) : []),
+    [gate],
+  );
+  return useLibrariesResource(libraryIds, fn, deps, enabled);
 }
 
 /**

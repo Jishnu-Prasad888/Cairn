@@ -12,8 +12,8 @@
  */
 
 import { LayoutGrid, List, Plus, Search } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
@@ -110,20 +110,41 @@ export default function MemoriesPage() {
   const navigate = useNavigate();
   const { memoryId } = useParams();
   const settings = useMemorySettings();
+  // The page-aware top-bar search drives this page through `?q=`.
+  const [params] = useSearchParams();
+  const urlQ = params.get('q') ?? '';
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(() =>
     read(localStorage, VIEW_KEY) === 'list' ? 'list' : 'grid',
   );
-  const [filter, setFilter] = useState(() => read(sessionStorage, QUERY_KEY) ?? '');
-  const [query, setQuery] = useState(() => (read(sessionStorage, QUERY_KEY) ?? '').trim());
+  const [filter, setFilter] = useState(() =>
+    urlQ ? urlQ : (read(sessionStorage, QUERY_KEY) ?? ''),
+  );
+  const [query, setQuery] = useState(() => (urlQ || (read(sessionStorage, QUERY_KEY) ?? '')).trim());
   const [widthRef, width] = useWidth();
 
   useEffect(() => {
     const t = setTimeout(() => setQuery(filter.trim()), 300);
     return () => clearTimeout(t);
   }, [filter]);
+
+  // A new `?q=` from the top-bar search (or a shared link) filters the page,
+  // exactly as if it had been typed in its own search box. Only a *change* of
+  // the URL query is applied, so typing in the page's own box is never undone
+  // by the URL still carrying the old value.
+  const lastUrlQRef = useRef(urlQ);
+  useEffect(() => {
+    if (!urlQ) {
+      lastUrlQRef.current = '';
+      return;
+    }
+    if (lastUrlQRef.current === urlQ) return;
+    lastUrlQRef.current = urlQ;
+    setFilter(urlQ);
+    write(sessionStorage, QUERY_KEY, urlQ);
+  }, [urlQ]);
 
   const memories = useLibraryResource<MemorySummary[]>(
     useCallback(

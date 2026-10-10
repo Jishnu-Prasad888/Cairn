@@ -9,16 +9,17 @@
 
 import { useCallback, useState } from 'react';
 
-import { useLibraryResource } from '../api/resources';
+import { useAuth } from '../auth/authContext';
+import { useLibraryGate } from '../api/libraries';
+import { useOpenLibrariesResource } from '../api/resources';
 import { deleteForever, listTrash, restoreFile } from '../api/queries';
 import type { FileSummary, Library } from '../api/types';
 import { ConfirmDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
-import { LibraryGatePage } from '../components/LibraryGatePage';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
 import { useSelection } from '../components/media/useSelection';
-import { EmptyState, ErrorState, LibraryOfflineNotice, PageHeader } from '../components/States';
+import { EmptyState, ErrorState, LibraryOfflineNotice, NoLibrariesState, PageHeader } from '../components/States';
 import { Icon } from '../components/ui/Icon';
 import { Menu, type MenuAnchor } from '../components/ui/Menu';
 import { useToast } from '../components/ui/Toast';
@@ -26,33 +27,77 @@ import { ViewerModal } from '../components/ViewerModal';
 import './TrashPage.css';
 
 export default function TrashPage() {
+  const gate = useLibraryGate();
+  const { user } = useAuth();
+
+  if (gate.kind === 'loading') {
+    return (
+      <main className="page media-page trash-page">
+        <PageHeader title="Trash" />
+        <MediaGridSkeleton />
+      </main>
+    );
+  }
+  if (gate.kind === 'error') {
+    return (
+      <main className="page media-page trash-page">
+        <PageHeader title="Trash" />
+        <ErrorState message={gate.message} title="Couldn't load your libraries" />
+      </main>
+    );
+  }
+  if (gate.kind === 'empty') {
+    return (
+      <main className="page media-page trash-page">
+        <PageHeader title="Trash" />
+        <NoLibrariesState isAdmin={user?.role === 'admin'} />
+      </main>
+    );
+  }
   return (
-    <LibraryGatePage title="Trash">{(library) => <Trash library={library} />}</LibraryGatePage>
+    <Trash
+      primaryId={gate.library.id}
+      library={gate.library}
+      openLibraryIds={gate.openLibraryIds}
+    />
   );
 }
 
 const plural = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`;
 
-function Trash({ library }: { library: Library }) {
-  const libraryId = library.id;
+function Trash({
+  primaryId,
+  library,
+  openLibraryIds,
+}: {
+  primaryId: string;
+  library: Library;
+  openLibraryIds: string[];
+}) {
   const toast = useToast();
   const [erasing, setErasing] = useState<FileSummary[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ anchor: MenuAnchor; file: FileSummary } | null>(null);
+  const multiOpen = openLibraryIds.length > 1;
+  const offline = library.status === 'offline';
 
-  const trash = useLibraryResource(
+  // Restoring / erasing happens in the library the file's trash entry belongs
+  // to, which the aggregated listing tags each file with.
+  const libOf = (f: FileSummary) => f.library_id || primaryId;
+
+  const trash = useOpenLibrariesResource(
     useCallback(async (id: string) => (await listTrash(id)).files ?? [], []),
   );
   const files = trash.data ?? EMPTY;
-  const selection = useSelection(files, libraryId);
+  const selection = useSelection(files, openLibraryIds.join('+'));
 
   // The viewer here offers "Delete forever" in place of a second soft delete.
-  const ops = useFileOperations(libraryId, trash.reload, { permanent: true });
+  const ops = useFileOperations(openLibraryIds, trash.reload, { permanent: true });
 
   const restore = async (targets: FileSummary[]) => {
     setBusy(true);
-    const results = await Promise.allSettled(targets.map((f) => restoreFile(libraryId, f.id)));
+    const results = await Promise.allSettled(targets.map((f) => restoreFile(libOf(f), f.id)));
     setBusy(false);
     const failed = results.filter((r) => r.status === 'rejected').length;
     if (failed) {
@@ -74,7 +119,7 @@ function Trash({ library }: { library: Library }) {
     if (!erasing) return;
     setBusy(true);
     setError(null);
-    const results = await Promise.allSettled(erasing.map((f) => deleteForever(libraryId, f.id)));
+    const results = await Promise.allSettled(erasing.map((f) => deleteForever(libOf(f), f.id)));
     setBusy(false);
     const failed = results.filter((r) => r.status === 'rejected').length;
     if (failed) {
@@ -156,7 +201,7 @@ function Trash({ library }: { library: Library }) {
         }
       />
 
-      {library.status === 'offline' && <LibraryOfflineNotice library={library} />}
+      {!multiOpen && offline && <LibraryOfflineNotice library={library} />}
 
       {files.length > 0 && (
         <p className="trash-note">
@@ -181,7 +226,7 @@ function Trash({ library }: { library: Library }) {
 
       {files.length > 0 && (
         <MediaGrid
-          libraryId={libraryId}
+          libraryId={primaryId}
           files={files}
           onOpen={ops.openViewer}
           selection={selection}
@@ -219,7 +264,7 @@ function Trash({ library }: { library: Library }) {
 
       {ops.viewer && (
         <ViewerModal
-          libraryId={libraryId}
+          libraryId={ops.viewerLibraryId}
           file={ops.viewer}
           siblings={files}
           onNavigate={ops.openViewer}

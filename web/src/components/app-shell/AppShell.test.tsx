@@ -15,6 +15,7 @@ function shell(route = '/') {
           <Route element={<AppShell />}>
             <Route path="/" element={<p>home content</p>} />
             <Route path="/photos" element={<p>photos content</p>} />
+            <Route path="/files" element={<p>files content</p>} />
             <Route path="/settings" element={<p>settings content</p>} />
           </Route>
         </Routes>
@@ -128,7 +129,7 @@ describe('AppShell', () => {
 
   it('sends the settings search to the matching settings section', async () => {
     mockApi();
-    shell();
+    shell('/settings');
 
     fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'theme' } });
     fireEvent.submit(screen.getByRole('search'));
@@ -136,12 +137,24 @@ describe('AppShell', () => {
     expect(await screen.findByText('settings content')).toBeInTheDocument();
   });
 
-  it('focuses the settings search with the slash key', () => {
+  it('focuses the library search with the slash key on content pages', () => {
     mockApi();
-    shell();
+    shell('/photos');
 
     fireEvent.keyDown(window, { key: '/' });
-    expect(screen.getByLabelText('Search settings')).toHaveFocus();
+    expect(screen.getByLabelText('Search Cairn')).toHaveFocus();
+  });
+
+  it('narrows the top-bar search to files on the files page', () => {
+    mockApi();
+    shell('/files');
+
+    fireEvent.change(screen.getByLabelText('Search files and folders'), {
+      target: { value: 'beach' },
+    });
+    fireEvent.submit(screen.getByRole('search'));
+
+    expect(screen.getByText('files content')).toBeInTheDocument();
   });
 
   it('shows who is signed in and lets them sign out', async () => {

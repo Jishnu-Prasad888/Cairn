@@ -56,11 +56,11 @@ export interface MediaActions {
  * Save several files one after another. Browsers allow a burst of downloads
  * only when they are spaced out, and may ask the person once to allow them.
  */
-function downloadAll(libraryId: string, files: FileSummary[]) {
+function downloadAll(files: FileSummary[]) {
   files.forEach((file, i) => {
     setTimeout(() => {
       const a = document.createElement('a');
-      a.href = downloadUrl(libraryId, file);
+      a.href = downloadUrl(file.library_id || '', file);
       a.download = file.name;
       a.rel = 'noreferrer';
       document.body.appendChild(a);
@@ -101,7 +101,7 @@ export function useMediaActions({
     async (files: FileSummary[], value: boolean) => {
       if (!favorites) return;
       const failed = await favorites.set(
-        files.map((f) => f.id),
+        files.map((f) => ({ id: f.id, libraryId: f.library_id })),
         value,
       );
       if (failed) {
@@ -130,7 +130,7 @@ export function useMediaActions({
     setBusy(true);
     setError(null);
     const results = await Promise.allSettled(
-      trashing.map((f) => softDeleteFile(libraryId, f.rel_path, f.id)),
+      trashing.map((f) => softDeleteFile(f.library_id || libraryId, f.rel_path, f.id)),
     );
     const failed = results.filter((r) => r.status === 'rejected').length;
     setBusy(false);
@@ -151,6 +151,15 @@ export function useMediaActions({
   };
 
   const files = selection.selectedFiles;
+  // The album dialog lists one library's albums, so it can only take the files
+  // that live there. Mixed-library selections add what they can to the primary
+  // library and say so in the toast. The targets are the dialog's snapshot,
+  // stable even if the selection clears while it is open.
+  const albumTargetsSnapshot = albumTargets ?? files;
+  const albumLibraryId = albumTargetsSnapshot[0]?.library_id ?? libraryId;
+  const albumFiles = albumTargetsSnapshot.filter(
+    (f) => (f.library_id || libraryId) === albumLibraryId,
+  );
   const allFavorite =
     favorites !== undefined && files.length > 0 && files.every((f) => favorites.has(f.id));
 
@@ -163,13 +172,13 @@ export function useMediaActions({
                 id: 'download',
                 label: 'Download',
                 icon: 'download' as const,
-                href: downloadUrl(libraryId, files[0]!),
+                href: downloadUrl(files[0]!.library_id || libraryId, files[0]!),
               }
             : {
                 id: 'download',
                 label: 'Download',
                 icon: 'download' as const,
-                onClick: () => downloadAll(libraryId, files),
+                onClick: () => downloadAll(files),
               },
         ]
       : []),
@@ -224,7 +233,7 @@ export function useMediaActions({
         id: 'download',
         label: 'Download',
         icon: 'download',
-        href: downloadUrl(libraryId, file),
+        href: downloadUrl(file.library_id || libraryId, file),
       });
     }
     if (can.album) {
@@ -315,14 +324,15 @@ export function useMediaActions({
       />
       <AlbumPickerDialog
         open={albumTargets !== null}
-        libraryId={libraryId}
-        fileIds={(albumTargets ?? []).map((f) => f.id)}
+        libraryId={albumLibraryId}
+        fileIds={albumFiles.map((f) => f.id)}
         onClose={() => setAlbumTargets(null)}
         onDone={({ album, added, failed }) => {
           setAlbumTargets(null);
-          if (failed) {
+          const skipped = albumTargets ? albumTargets.length - added - failed : 0;
+          if (failed || skipped) {
             toast({
-              message: `Added ${added} to ${album.name}; ${failed} couldn't be added`,
+              message: `Added ${added} to ${album.name}${skipped ? `; ${skipped} ${skipped === 1 ? 'came from another library' : 'came from other libraries'}` : ''}${failed ? `; ${failed} couldn't be added` : ''}`,
               tone: 'error',
             });
           } else {

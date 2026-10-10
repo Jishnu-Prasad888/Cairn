@@ -8,11 +8,11 @@
  */
 
 import { useCallback, useState } from 'react';
-import { matchPath, useLocation, useNavigate } from 'react-router-dom';
+import { matchPath, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
-import { useLibraryResource } from '../api/resources';
+import { useAllLibrariesResource, useLibraryResource } from '../api/resources';
 import {
   createAlbum,
   deleteAlbum,
@@ -87,24 +87,44 @@ export default function AlbumsPage() {
       </main>
     );
   }
-  return <Albums library={gate.library} albumId={albumId} />;
+  return <Albums library={gate.library} libraries={gate.libraries} primaryId={gate.library.id} openLibraryIds={gate.openLibraryIds} albumId={albumId} />;
 }
 
 type GridEditing = { album: Album; kind: 'rename' | 'delete' } | null;
 
-function Albums({ library, albumId }: { library: Library; albumId: string | null }) {
-  const libraryId = library.id;
+function Albums({
+  library,
+  libraries,
+  primaryId,
+  openLibraryIds,
+  albumId,
+}: {
+  library: Library;
+  libraries: Library[];
+  primaryId: string;
+  openLibraryIds: string[];
+  albumId: string | null;
+}) {
   const navigate = useNavigate();
   const toast = useToast();
+  const [params] = useSearchParams();
+  // The top-bar search lands here as `?q=`; it filters the grid by name.
+  const filter = (params.get('q') ?? '').trim().toLowerCase();
   const [creating, setCreating] = useState(false);
+  const [createLibraryId, setCreateLibraryId] = useState(primaryId);
   const [busy, setBusy] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [editing, setEditing] = useState<GridEditing>(null);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [sharing, setSharing] = useState<Album | null>(null);
+  const multiOpen = openLibraryIds.length > 1;
 
-  const albums = useLibraryResource(
+  // The merged grid knows which library each album belongs to; an album's own
+  // edits go to that library, and new albums land in the primary one.
+  const libOf = (album: Album) => album.library_id || primaryId;
+
+  const albums = useAllLibrariesResource(
     useCallback(async (id: string) => (await listAlbums(id)).albums ?? [], []),
   );
 
@@ -119,6 +139,8 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
 
   const offline = library.status === 'offline';
   const active = albumId ? (albums.data?.find((a) => a.id === albumId) ?? null) : null;
+  const all = albums.data ?? [];
+  const visible = filter ? all.filter((a) => a.name.toLowerCase().includes(filter)) : all;
 
   if (albumId) {
     if (albums.data && !active) {
@@ -138,7 +160,7 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
     if (active) {
       return (
         <AlbumDetail
-          key={active.id}
+          key={`${active.library_id || primaryId}:${active.id}`}
           library={library}
           album={active}
           onBack={() => navigate('/albums')}
@@ -154,7 +176,9 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
         title="Albums"
         subtitle={
           albums.data && albums.data.length > 0
-            ? `${albums.data.length} ${albums.data.length === 1 ? 'album' : 'albums'}`
+            ? filter
+              ? `${visible.length} of ${all.length} ${all.length === 1 ? 'album' : 'albums'}`
+              : `${all.length} ${all.length === 1 ? 'album' : 'albums'}`
             : undefined
         }
         controls={
@@ -164,6 +188,11 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
               className="button primary-button"
               onClick={() => {
                 setPromptError(null);
+                setCreateLibraryId(
+                  libraries.some((l) => l.id === primaryId && l.status !== 'offline')
+                    ? primaryId
+                    : (libraries.find((l) => l.status !== 'offline')?.id ?? primaryId),
+                );
                 setCreating(true);
               }}
               data-testid="new-album-button"
@@ -175,7 +204,7 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
         }
       />
 
-      {offline && <LibraryOfflineNotice library={library} />}
+      {!multiOpen && offline && <LibraryOfflineNotice library={library} />}
       {albums.error && (
         <ErrorState message={albums.error} onRetry={albums.reload} title="Couldn't load albums" />
       )}
@@ -188,7 +217,7 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
         </div>
       )}
 
-      {albums.data !== null && albums.data.length === 0 && (
+      {albums.data !== null && all.length === 0 && (
         <EmptyState
           title="No albums yet"
           testId="albums-empty"
@@ -198,7 +227,10 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
               <button
                 type="button"
                 className="button primary-button"
-                onClick={() => setCreating(true)}
+                onClick={() => {
+                  setPromptError(null);
+                  setCreating(true);
+                }}
               >
                 Create an album
               </button>
@@ -209,13 +241,22 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
         </EmptyState>
       )}
 
-      {albums.data !== null && albums.data.length > 0 && (
+      {albums.data !== null && all.length > 0 && filter && visible.length === 0 && (
+        <EmptyState title="No albums match" testId="albums-filter-empty" icon="search">
+          <p>
+            Nothing in any library matches “{params.get('q')}”. Try fewer words, or check the
+            spelling.
+          </p>
+        </EmptyState>
+      )}
+
+      {albums.data !== null && visible.length > 0 && (
         <ul className="album-grid" data-testid="albums-grid" aria-label="Albums">
-          {albums.data.map((album) => (
+          {visible.map((album) => (
             <li key={album.id}>
               <AlbumCard
                 album={album}
-                libraryId={libraryId}
+                libraryId={primaryId}
                 onOpen={(a) => navigate(`/albums/${a.id}`)}
                 onRename={(a) => {
                   setEditError(null);
@@ -240,14 +281,30 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
         busy={busy}
         error={promptError}
         onCancel={() => setCreating(false)}
+        control={({ value, setValue }) => (
+          <NewAlbumFields
+            name={value}
+            onNameChange={setValue}
+            libraries={libraries}
+            libraryId={createLibraryId}
+            onLibraryChange={setCreateLibraryId}
+          />
+        )}
         onConfirm={(name) => {
           setBusy(true);
           setPromptError(null);
-          createAlbum(libraryId, name)
+          const target = libraries.find((l) => l.id === createLibraryId);
+          createAlbum(createLibraryId, name)
             .then((resp) => {
               setCreating(false);
               albums.reload();
-              toast({ message: `Created ${name}`, tone: 'success' });
+              toast({
+                message:
+                  libraries.length > 1 && target
+                    ? `Created ${name} in ${target.name}`
+                    : `Created ${name}`,
+                tone: 'success',
+              });
               navigate(`/albums/${resp.album.id}`);
             })
             .catch((e: unknown) => setPromptError(e instanceof Error ? e.message : String(e)))
@@ -267,7 +324,7 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
         onConfirm={(name) => {
           if (!editing) return;
           runEdit(
-            () => updateAlbum(libraryId, editing.album.id, { name }),
+            () => updateAlbum(libOf(editing.album), editing.album.id, { name }),
             () => {
               setEditing(null);
               albums.reload();
@@ -295,7 +352,7 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
           if (!editing) return;
           const name = editing.album.name;
           runEdit(
-            () => deleteAlbum(libraryId, editing.album.id),
+            () => deleteAlbum(libOf(editing.album), editing.album.id),
             () => {
               setEditing(null);
               toast({ message: `Deleted ${name}`, tone: 'success' });
@@ -307,7 +364,11 @@ function Albums({ library, albumId }: { library: Library; albumId: string | null
       />
 
       {sharing && (
-        <AlbumShareDialog libraryId={libraryId} album={sharing} onClose={() => setSharing(null)} />
+        <AlbumShareDialog
+          libraryId={libOf(sharing)}
+          album={sharing}
+          onClose={() => setSharing(null)}
+        />
       )}
     </main>
   );
@@ -326,7 +387,7 @@ function AlbumDetail({
   onBack: () => void;
   onChanged: () => void;
 }) {
-  const libraryId = library.id;
+  const libraryId = album.library_id || library.id;
   const toast = useToast();
   const more = useMenuButton();
   const [adding, setAdding] = useState(false);
@@ -355,9 +416,9 @@ function AlbumDetail({
     onChanged();
   }, [files, onChanged]);
 
-  const favorites = useFavorites(libraryId);
+  const favorites = useFavorites([libraryId]);
   const selection = useSelection(list, album.id);
-  const ops = useFileOperations(libraryId, reloadAll);
+  const ops = useFileOperations([libraryId], reloadAll);
 
   const remove = async (targets: FileSummary[]) => {
     const results = await Promise.allSettled(
@@ -715,3 +776,59 @@ function AlbumDetail({
 }
 
 const EMPTY: FileSummary[] = [];
+
+/**
+ * The New album dialog's fields: the album name, and — when more than one
+ * library exists — which library the album should be created in. An offline
+ * library cannot hold a new album, so it is offered but disabled.
+ */
+function NewAlbumFields({
+  name,
+  onNameChange,
+  libraries,
+  libraryId,
+  onLibraryChange,
+}: {
+  name: string;
+  onNameChange: (name: string) => void;
+  libraries: Library[];
+  libraryId: string;
+  onLibraryChange: (id: string) => void;
+}) {
+  return (
+    <>
+      <label className="dialog-label" htmlFor="new-album-name">
+        Album name
+      </label>
+      <input
+        id="new-album-name"
+        className="dialog-input"
+        type="text"
+        placeholder="Summer 2026"
+        value={name}
+        onChange={(event) => onNameChange(event.target.value)}
+      />
+      {libraries.length > 1 && (
+        <>
+          <label className="dialog-label" htmlFor="new-album-library">
+            Library
+          </label>
+          <select
+            id="new-album-library"
+            className="dialog-input"
+            value={libraryId}
+            onChange={(event) => onLibraryChange(event.target.value)}
+            data-testid="new-album-library"
+          >
+            {libraries.map((lib) => (
+              <option key={lib.id} value={lib.id} disabled={lib.status === 'offline'}>
+                {lib.name}
+                {lib.status === 'offline' ? ' · offline' : ''}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+    </>
+  );
+}
