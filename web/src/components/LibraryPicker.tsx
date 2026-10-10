@@ -22,14 +22,8 @@ import './States.css';
 import './LibraryPicker.css';
 
 export default function LibraryPicker({ label = 'Library' }: { label?: string }) {
-  const {
-    libraries,
-    libraryId,
-    selectLibrary,
-    toggleLibraryOpen,
-    openLibraryIds,
-    libraryOffline,
-  } = useLibraries();
+  const { libraries, libraryId, selectLibrary, toggleLibraryOpen, openLibraryIds, libraryOffline } =
+    useLibraries();
   const [panelOpen, setPanelOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 

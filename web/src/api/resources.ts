@@ -225,10 +225,7 @@ export function useOpenLibrariesResource<T extends object>(
   enabled = true,
 ): AggregatedLibraryResource<T> {
   const gate = useLibraryGate();
-  const libraryIds = useMemo(
-    () => (gate.kind === 'ready' ? gate.openLibraryIds : []),
-    [gate],
-  );
+  const libraryIds = useMemo(() => (gate.kind === 'ready' ? gate.openLibraryIds : []), [gate]);
   return useLibrariesResource(libraryIds, fn, deps, enabled);
 }
 

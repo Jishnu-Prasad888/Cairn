@@ -212,8 +212,7 @@ function MediaBrowser({
   // it). At the root with no pin and several libraries open, the page merges
   // them all instead — that is the aggregated view.
   const libParam = params.get('lib');
-  const pinId =
-    libParam && openLibraryIds.includes(libParam) ? libParam : undefined;
+  const pinId = libParam && openLibraryIds.includes(libParam) ? libParam : undefined;
   const merged = multiOpen && pinId === undefined && (folderMode ? folder === '' : true);
   // The single library everything routes to when not merging.
   const scopedId = merged ? undefined : (pinId ?? primaryId);
@@ -337,7 +336,10 @@ function MediaBrowser({
   const timelineFiles = folderMode ? timelineListing.files : files;
 
   const favorites = useFavorites(openLibraryIds);
-  const selection = useSelection(files, `${scopedId ?? openLibraryIds.join('+')}|${JSON.stringify(query)}`);
+  const selection = useSelection(
+    files,
+    `${scopedId ?? openLibraryIds.join('+')}|${JSON.stringify(query)}`,
+  );
   const ops = useFileOperations(openLibraryIds, listing.reload);
 
   // New folders, paste, and drag-onto-folder moves all target a folder, which
@@ -423,7 +425,8 @@ function MediaBrowser({
     onShowInFolder: folderMode
       ? undefined
       : (file) => {
-          const lib = multiOpen && file.library_id ? `&lib=${encodeURIComponent(file.library_id)}` : '';
+          const lib =
+            multiOpen && file.library_id ? `&lib=${encodeURIComponent(file.library_id)}` : '';
           navigate(
             file.folder_path
               ? `/files?folder=${encodeURIComponent(file.folder_path)}${lib}`

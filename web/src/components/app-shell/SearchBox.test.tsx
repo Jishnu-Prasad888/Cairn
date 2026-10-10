@@ -134,7 +134,9 @@ describe('SearchBox scoped by page', () => {
     );
     fireEvent.change(screen.getByLabelText('Search memories'), { target: { value: 'camping' } });
     fireEvent.submit(screen.getByRole('search'));
-    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/memories?q=camping'));
+    await waitFor(() =>
+      expect(screen.getByTestId('where')).toHaveTextContent('/memories?q=camping'),
+    );
   });
 
   it('lands a plain albums search on the albums page', async () => {

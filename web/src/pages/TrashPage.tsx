@@ -19,7 +19,13 @@ import { useFileOperations } from '../components/FileOperations';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
 import { useSelection } from '../components/media/useSelection';
-import { EmptyState, ErrorState, LibraryOfflineNotice, NoLibrariesState, PageHeader } from '../components/States';
+import {
+  EmptyState,
+  ErrorState,
+  LibraryOfflineNotice,
+  NoLibrariesState,
+  PageHeader,
+} from '../components/States';
 import { Icon } from '../components/ui/Icon';
 import { Menu, type MenuAnchor } from '../components/ui/Menu';
 import { useToast } from '../components/ui/Toast';

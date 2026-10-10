@@ -1316,10 +1316,8 @@ describe('MediaPage', () => {
       localStorage.setItem('cairn.libraries.open', JSON.stringify(['lib1', 'lib2']));
       return mockApi(
         apiRules([
-          (url) =>
-            url.includes('/api/v1/libraries/lib1/folders') ? json(lib1Folder) : undefined,
-          (url) =>
-            url.includes('/api/v1/libraries/lib2/folders') ? json(lib2Folder) : undefined,
+          (url) => (url.includes('/api/v1/libraries/lib1/folders') ? json(lib1Folder) : undefined),
+          (url) => (url.includes('/api/v1/libraries/lib2/folders') ? json(lib2Folder) : undefined),
           (url) => (url.includes('/api/v1/libraries/lib2/files?') ? json(lib2Page) : undefined),
           (url) =>
             url.includes('/api/v1/libraries/lib2/favorites') ? json({ files: [] }) : undefined,
@@ -1349,8 +1347,8 @@ describe('MediaPage', () => {
       // The grid interleaves the libraries by date instead of showing one
       // library then the next: lib2's newer file leads, then lib1's pair.
       const grid = screen.getByTestId('file-grid');
-      const tileNames = Array.from(grid.querySelectorAll('.media-tile-main')).map(
-        (tile) => tile.getAttribute('aria-label'),
+      const tileNames = Array.from(grid.querySelectorAll('.media-tile-main')).map((tile) =>
+        tile.getAttribute('aria-label'),
       );
       expect(tileNames).toEqual(['holiday.png', 'IMG_0001.png', 'clip.mp4']);
 

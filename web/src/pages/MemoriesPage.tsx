@@ -122,7 +122,9 @@ export default function MemoriesPage() {
   const [filter, setFilter] = useState(() =>
     urlQ ? urlQ : (read(sessionStorage, QUERY_KEY) ?? ''),
   );
-  const [query, setQuery] = useState(() => (urlQ || (read(sessionStorage, QUERY_KEY) ?? '')).trim());
+  const [query, setQuery] = useState(() =>
+    (urlQ || (read(sessionStorage, QUERY_KEY) ?? '')).trim(),
+  );
   const [widthRef, width] = useWidth();
 
   useEffect(() => {

@@ -16,7 +16,13 @@ import { SelectionToolbar } from '../components/media/SelectionToolbar';
 import { useFavorites } from '../components/media/useFavorites';
 import { useMediaActions } from '../components/media/useMediaActions';
 import { useSelection } from '../components/media/useSelection';
-import { EmptyState, ErrorState, LibraryOfflineNotice, PageHeader, NoLibrariesState } from '../components/States';
+import {
+  EmptyState,
+  ErrorState,
+  LibraryOfflineNotice,
+  PageHeader,
+  NoLibrariesState,
+} from '../components/States';
 import { useAuth } from '../auth/authContext';
 import { Menu, type MenuAnchor, type MenuEntry } from '../components/ui/Menu';
 import { ViewerModal } from '../components/ViewerModal';

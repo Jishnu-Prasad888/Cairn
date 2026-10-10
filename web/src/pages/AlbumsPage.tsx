@@ -87,7 +87,15 @@ export default function AlbumsPage() {
       </main>
     );
   }
-  return <Albums library={gate.library} libraries={gate.libraries} primaryId={gate.library.id} openLibraryIds={gate.openLibraryIds} albumId={albumId} />;
+  return (
+    <Albums
+      library={gate.library}
+      libraries={gate.libraries}
+      primaryId={gate.library.id}
+      openLibraryIds={gate.openLibraryIds}
+      albumId={albumId}
+    />
+  );
 }
 
 type GridEditing = { album: Album; kind: 'rename' | 'delete' } | null;

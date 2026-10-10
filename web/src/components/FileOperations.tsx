@@ -165,9 +165,7 @@ export function useFileOperations(
         onConfirm={(name) => {
           if (pending?.kind !== 'rename') return;
           const target = pending.file;
-          void run(() =>
-            renameFile(libFor(libraryIds, target), target.rel_path, target.id, name),
-          );
+          void run(() => renameFile(libFor(libraryIds, target), target.rel_path, target.id, name));
         }}
         testId="rename-dialog"
       />

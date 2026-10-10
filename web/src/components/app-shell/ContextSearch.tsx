@@ -18,11 +18,7 @@ import { SettingsSearch } from './SettingsSearch';
 /** The pages where "search" means "find a setting" — everything else is media. */
 const SETTINGS_PAGES = ['/settings', '/libraries', '/permissions', '/ml', '/backups'];
 
-export function ContextSearch({
-  inputRef,
-}: {
-  inputRef?: RefObject<HTMLInputElement | null>;
-}) {
+export function ContextSearch({ inputRef }: { inputRef?: RefObject<HTMLInputElement | null> }) {
   const { pathname } = useLocation();
   // exactOptionalPropertyTypes: only pass the ref when there is one to pass.
   const refProps = inputRef ? { inputRef } : {};

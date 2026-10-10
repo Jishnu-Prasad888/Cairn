@@ -279,7 +279,10 @@ function compareFor(sort: FileSort, order: SortOrder): (a: FileSummary, b: FileS
     let cmp: number;
     if (sort === 'size') cmp = (a.size_bytes ?? 0) - (b.size_bytes ?? 0);
     else if (sort === 'name') cmp = (a.name ?? '').localeCompare(b.name ?? '');
-    else cmp = `${a.media_type ?? ''}:${a.name ?? ''}`.localeCompare(`${b.media_type ?? ''}:${b.name ?? ''}`);
+    else
+      cmp = `${a.media_type ?? ''}:${a.name ?? ''}`.localeCompare(
+        `${b.media_type ?? ''}:${b.name ?? ''}`,
+      );
     return dir * cmp;
   };
 }
@@ -306,9 +309,7 @@ interface LibraryPage {
   cursor: string | undefined;
 }
 
-type AggregatedLoaded =
-  | { key: string; pages: LibraryPage[]; error: string | null }
-  | null;
+type AggregatedLoaded = { key: string; pages: LibraryPage[]; error: string | null } | null;
 
 /**
  * `useFileListing` over every open library at once.
@@ -333,8 +334,7 @@ export function useAggregatedFileListing(
   const [loadingMore, setLoadingMore] = useState(false);
 
   const idsKey = libraryIds.join(',');
-  const key =
-    enabled && idsKey ? `${idsKey}|${JSON.stringify(query)}|${run}|${refreshKey}` : null;
+  const key = enabled && idsKey ? `${idsKey}|${JSON.stringify(query)}|${run}|${refreshKey}` : null;
   const queryRef = useRef(query);
   useEffect(() => {
     queryRef.current = query;
@@ -383,7 +383,8 @@ export function useAggregatedFileListing(
           anyOk = true;
           pages.push(result.value);
         } else if (firstError === null) {
-          firstError = result.reason instanceof Error ? result.reason.message : String(result.reason);
+          firstError =
+            result.reason instanceof Error ? result.reason.message : String(result.reason);
         }
       }
       setLoaded({ key, pages, error: anyOk ? null : firstError });
@@ -405,27 +406,32 @@ export function useAggregatedFileListing(
       pending.map((p) =>
         fetchPage(p.libraryId, queryRef.current, p.cursor).then((page) => ({
           libraryId: p.libraryId,
-          files: filterType(page.files ?? [], queryRef.current.type).map(
-            (f): FileSummary => ({ ...f, library_id: p.libraryId }),
-          ),
+          files: filterType(page.files ?? [], queryRef.current.type).map((f): FileSummary => ({
+            ...f,
+            library_id: p.libraryId,
+          })),
           cursor: page.next_cursor || undefined,
         })),
       ),
-    ).then((results) => {
-      setLoaded((prev) => {
-        if (!prev || prev.key !== stale) return prev;
-        const pages = prev.pages.map((p) => {
-          const more = results.find((r) => r.status === 'fulfilled' && r.value.libraryId === p.libraryId);
-          if (!more || more.status !== 'fulfilled' || !p.cursor) return p;
-          return {
-            ...p,
-            files: [...p.files, ...more.value.files],
-            cursor: more.value.cursor,
-          };
+    )
+      .then((results) => {
+        setLoaded((prev) => {
+          if (!prev || prev.key !== stale) return prev;
+          const pages = prev.pages.map((p) => {
+            const more = results.find(
+              (r) => r.status === 'fulfilled' && r.value.libraryId === p.libraryId,
+            );
+            if (!more || more.status !== 'fulfilled' || !p.cursor) return p;
+            return {
+              ...p,
+              files: [...p.files, ...more.value.files],
+              cursor: more.value.cursor,
+            };
+          });
+          return { key: prev.key, pages, error: prev.error };
         });
-        return { key: prev.key, pages, error: prev.error };
-      });
-    }).finally(() => setLoadingMore(false));
+      })
+      .finally(() => setLoadingMore(false));
   }, [current, loadingMore]);
 
   const reload = useCallback(() => setRun((n) => n + 1), []);

@@ -496,7 +496,9 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
         <div className="library-row-actions">
           <label
             className={open ? 'button active library-toggle' : 'button library-toggle'}
-            title={open ? 'Hide this library from the merged pages' : 'Show this library on every page'}
+            title={
+              open ? 'Hide this library from the merged pages' : 'Show this library on every page'
+            }
           >
             <input
               type="checkbox"
