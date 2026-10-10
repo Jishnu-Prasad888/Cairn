@@ -317,6 +317,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("PATCH /api/v1/libraries/{id}/memories/{memoryID}/images/{imageID}", s.withAuth(allowAny, s.handlePatchMemoryImage))
 		mux.Handle("DELETE /api/v1/libraries/{id}/memories/{memoryID}/images/{imageID}", s.withAuth(allowAny, s.handleDeleteMemoryImage))
 		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/images/{imageID}/derived", s.withAuth(allowAny, s.handleGetMemoryImageDerived))
+		mux.Handle("GET /api/v1/libraries/{id}/memories/{memoryID}/export", s.withAuth(allowAny, s.handleExportMemory))
 
 		// Public shares read content without a session. The token/password
 		// authenticate the share; capability evaluation still governs access.

@@ -154,6 +154,14 @@ describe('MemoriesPage (notebook)', () => {
     expect(screen.getAllByRole('button', { name: 'Add text' }).length).toBe(3);
   });
 
+  it('offers the memory as a Markdown export download', async () => {
+    setup();
+    renderMemories();
+    const link = await screen.findByTestId('export-memory');
+    expect(link).toHaveAttribute('href', '/api/v1/libraries/lib1/memories/mem1/export');
+    expect(link).toHaveAttribute('download');
+  });
+
   it('shows an empty state and creates a memory', async () => {
     const fn = setup({ list: [] });
     renderMemories('/memories');

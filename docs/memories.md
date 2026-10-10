@@ -295,6 +295,7 @@ All under `/api/v1/libraries/{id}/memories`; see
 | PATCH  | `/memories/{memoryID}/images/{imageID}`          | Caption, edits, replace source            |
 | DELETE | `/memories/{memoryID}/images/{imageID}`          | Remove from memory                        |
 | GET    | `/memories/{memoryID}/images/{imageID}/derived`  | The edited copy (JPEG)                    |
+| GET    | `/memories/{memoryID}/export`                    | Portable Markdown + images (zip)          |
 | GET    | `/memories/{memoryID}/versions`                  | Version list                              |
 | GET    | `/memories/{memoryID}/versions/{version}`        | One version, with its blocks              |
 | GET    | `/memories/{memoryID}/refs`                      | Internal references                       |
@@ -302,6 +303,24 @@ All under `/api/v1/libraries/{id}/memories`; see
 Every mutation returns the whole memory (`{"memory": …, "warnings"?: […]}`)
 with its new `revision`, and accepts an optional `base_revision` (JSON body,
 or query string for `DELETE`).
+
+## Export
+
+`GET /memories/{memoryID}/export` streams a zip holding the memory as a
+portable Markdown document plus every image it references that the caller may
+read. It requires read on the memory; each embedded source file must also be
+readable, so an image the viewer cannot see is never included. Missing or
+unreadable references are described in the Markdown instead of being embedded.
+
+The archive contains `<slug>.md` (the title reduced to a file name) and an
+`images/` directory. The Markdown starts with YAML front matter (title, date,
+description, location, tags, cover, and `cairn_*` ids) and keeps Cairn-specific
+presentation data — block layout, slideshow, captions, crops, rotation, filter
+and adjustments — in `<!-- cairn:image … -->` comments that other renderers
+ignore. Text blocks are written verbatim, so the file reads naturally in
+Obsidian or any other Markdown tool. Edited images are embedded from their
+derived copy when one exists, otherwise the original is embedded and the edits
+stay in the comment.
 
 ## Internal references
 

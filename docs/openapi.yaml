@@ -2573,6 +2573,34 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /libraries/{libraryID}/memories/{memoryID}/export:
+    get:
+      tags: [Memories]
+      operationId: exportMemory
+      summary: Export a memory as portable Markdown with its images
+      description: >
+        Streams a zip archive containing the memory as a Markdown document with
+        YAML front matter plus every referenced image the caller may read.
+        Requires read on the memory and on each embedded source file. Missing or
+        unreadable images are recorded in the Markdown but not embedded.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - $ref: '#/components/parameters/MemoryID'
+      responses:
+        '200':
+          description: A zip archive with the Markdown document and its images
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /libraries/{libraryID}/permissions:
     get:
       tags: [Authorization]

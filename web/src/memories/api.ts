@@ -3,7 +3,7 @@
  * maps to one documented route in docs/openapi.yaml.
  */
 
-import { apiGet, apiPatch, apiPost, apiPut, apiRequest } from '../api/client';
+import { API_BASE, apiGet, apiPatch, apiPost, apiPut, apiRequest } from '../api/client';
 import type {
   ImageBlock,
   MemoryBlock,
@@ -15,6 +15,10 @@ import type {
 
 const base = (libraryId: string, memoryId: string) =>
   `/libraries/${libraryId}/memories/${memoryId}`;
+
+/** The zip download for a memory: portable Markdown plus embedded images. */
+export const memoryExportUrl = (libraryId: string, memoryId: string) =>
+  `${API_BASE}${base(libraryId, memoryId)}/export`;
 
 export const getMemoryDocument = (libraryId: string, memoryId: string) =>
   apiGet<MemoryResponse>(base(libraryId, memoryId));

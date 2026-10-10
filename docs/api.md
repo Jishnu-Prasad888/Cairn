@@ -282,6 +282,7 @@ file already in the album, else 404). It requires the `edit` capability.
 | PATCH  | `/libraries/{libraryID}/memories/{memoryID}/images/{imageID}` | Caption / edits / replace      | session |
 | DELETE | `/libraries/{libraryID}/memories/{memoryID}/images/{imageID}` | Remove from memory (file kept) | session |
 | GET    | `/libraries/{libraryID}/memories/{memoryID}/images/{imageID}/derived` | Edited copy (JPEG)    | session |
+| GET    | `/libraries/{libraryID}/memories/{memoryID}/export`         | Portable Markdown + images (zip) | session |
 | DELETE | `/libraries/{libraryID}/memories/{memoryID}`                | Soft delete                      | session |
 | POST   | `/libraries/{libraryID}/memories/{memoryID}/restore`        | Restore                          | session |
 | GET    | `/libraries/{libraryID}/memories/{memoryID}/versions`       | Revision list                    | session |

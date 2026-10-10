@@ -28,6 +28,7 @@ import {
   ChevronDown,
   ChevronUp,
   Code2,
+  Download,
   Ellipsis,
   Eye,
   GripVertical,
@@ -71,6 +72,7 @@ import { memoryKey } from '../api/resourceKeys';
 import { ShareDialog } from '../components/sharing/ShareDialog';
 import { formatMemoryDate } from './format';
 import { MemoryReader } from './MemoryReader';
+import { memoryExportUrl } from './api';
 import {
   type PickedMedia,
   addImages,
@@ -555,6 +557,16 @@ export function MemoryEditor({
           <Share2 size={15} aria-hidden="true" />
           Share
         </button>
+        <a
+          className="button"
+          href={memoryExportUrl(libraryId, memoryId)}
+          download
+          data-testid="export-memory"
+          title="Download this memory as Markdown with its images"
+        >
+          <Download size={15} aria-hidden="true" />
+          Export
+        </a>
         <button
           type="button"
           className="button"
