@@ -2226,6 +2226,30 @@
   flex-wrap: wrap;
 }
 
+.details-bg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.details-bg-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background-color: var(--surface);
+  cursor: pointer;
+}
+
+.details-bg-swatch:hover {
+  border-color: var(--primary);
+}
+
+.details-bg-swatch.active {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
 .details-hint {
   margin: var(--space-2) 0 0;
   font-size: 13px;
@@ -2348,4 +2372,157 @@
   color: var(--danger);
   font-weight: 600;
   text-align: center;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Export as PDF: the browser's print dialog, showing only a plain sheet.    */
+/* `exporting-memory` is set on <body> from Export → PDF… until the dialog   */
+/* closes; it hides the whole app and reveals the portal'd print sheet.      */
+/* ------------------------------------------------------------------------ */
+.print-sheet {
+  display: none;
+}
+
+@media print {
+  /* Browsers only draw their URL/date/page-number header & footer when there
+     is room in the page margin — 8mm keeps them out; 9–10mm brings them back.
+     Inner sheet padding below restores the visual margin. */
+  @page {
+    size: auto;
+    margin: 8mm;
+  }
+
+  body.exporting-memory {
+    background: #fff;
+  }
+
+  /* Everything the app draws goes away; the sheet is a direct child of body. */
+  body.exporting-memory .app-shell,
+  body.exporting-memory .lightbox,
+  body.exporting-memory .ctx-menu,
+  body.exporting-memory [role='dialog'],
+  body.exporting-memory .toast {
+    display: none !important;
+  }
+
+  body.exporting-memory .print-sheet {
+    display: block !important;
+    color: #111;
+    font-size: 11pt;
+    line-height: 1.55;
+    padding: 6mm 7mm;
+  }
+
+  .print-head {
+    margin-bottom: 10pt;
+  }
+
+  .print-title {
+    margin: 0 0 2pt;
+    font-size: 21pt;
+    line-height: 1.2;
+  }
+
+  .print-dateline {
+    margin: 0;
+    color: #555;
+    font-size: 10pt;
+  }
+
+  .print-description {
+    margin: 6pt 0 0;
+    font-style: italic;
+  }
+
+  .print-text {
+    margin: 0 0 10pt;
+  }
+
+  .print-text h1,
+  .print-text h2,
+  .print-text h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .print-text img {
+    max-width: 100%;
+  }
+
+  /* The Markdown renderer borrows theme colours; on paper they must be ink. */
+  body.exporting-memory .print-sheet .md-render,
+  body.exporting-memory .print-sheet .md-render * {
+    background-color: transparent;
+    color: #111;
+  }
+
+  body.exporting-memory .print-sheet .md-render a {
+    color: #111;
+    text-decoration: underline;
+  }
+
+  body.exporting-memory .print-sheet .md-render blockquote {
+    color: #444;
+    border-left-color: #bbb;
+  }
+
+  body.exporting-memory .print-sheet .md-render pre,
+  body.exporting-memory .print-sheet .md-render :not(pre) > code {
+    background-color: #f1f1f1;
+  }
+
+  body.exporting-memory .print-sheet .md-render hr,
+  body.exporting-memory .print-sheet .md-render th,
+  body.exporting-memory .print-sheet .md-render td {
+    border-color: #ccc;
+  }
+
+  .print-images {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8pt;
+    margin: 0 0 12pt;
+  }
+
+  .print-images.is-single {
+    grid-template-columns: 1fr;
+  }
+
+  .print-figure {
+    margin: 0;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 235mm;
+    margin: 0 auto;
+    object-fit: contain;
+  }
+
+  .print-figure figcaption {
+    margin-top: 2pt;
+    color: #555;
+    font-size: 9pt;
+  }
+
+  .print-footer {
+    margin-top: 12pt;
+    border-top: 0.5pt solid #ccc;
+    padding-top: 6pt;
+  }
+
+  .print-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4pt 10pt;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: #555;
+    font-size: 9pt;
+  }
 }

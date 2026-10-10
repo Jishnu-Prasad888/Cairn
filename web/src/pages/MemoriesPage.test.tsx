@@ -45,6 +45,7 @@ function memoryDoc(overrides: Partial<MemoryDocument> = {}): MemoryDocument {
     body: 'We left **early**.',
     description: '',
     location: 'Kochi',
+    background: '',
     memory_date: '2026-09-01T00:00:00Z',
     tags: [],
     revision: 4,
@@ -157,9 +158,45 @@ describe('MemoriesPage (notebook)', () => {
   it('offers the memory as a Markdown export download', async () => {
     setup();
     renderMemories();
-    const link = await screen.findByTestId('export-memory');
-    expect(link).toHaveAttribute('href', '/api/v1/libraries/lib1/memories/mem1/export');
-    expect(link).toHaveAttribute('download');
+    const exportButton = await screen.findByTestId('export-memory');
+    expect(exportButton).toHaveAttribute('aria-haspopup', 'menu');
+    fireEvent.click(exportButton);
+
+    const menu = await screen.findByTestId('context-menu');
+    expect(within(menu).getByText('Markdown (.zip)')).toBeInTheDocument();
+    let href = '';
+    const spy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      href = this.getAttribute('href') ?? '';
+    });
+    fireEvent.click(within(menu).getByText('Markdown (.zip)'));
+    expect(href).toBe('/api/v1/libraries/lib1/memories/mem1/export');
+    spy.mockRestore();
+  });
+
+  it('exports the memory as a PDF through the browser print dialog', async () => {
+    setup();
+    renderMemories();
+    let printingBody = '';
+    let printedText = '';
+    let printedAnImage = false;
+    const print = vi.fn(() => {
+      printingBody = document.body.className;
+      const sheet = document.querySelector('[data-testid="memory-print-sheet"]');
+      printedText = sheet?.textContent ?? '';
+      printedAnImage = sheet?.querySelector('img') != null;
+    });
+    Object.defineProperty(window, 'print', { value: print, configurable: true });
+
+    fireEvent.click(await screen.findByTestId('export-memory'));
+    fireEvent.click(within(await screen.findByTestId('context-menu')).getByText('PDF…'));
+
+    await waitFor(() => expect(print).toHaveBeenCalled(), { timeout: 4000 });
+    // A plain print sheet was mounted and flagged as the print target.
+    expect(printingBody).toContain('exporting-memory');
+    expect(printedText).toContain('My Trip to Kerala');
+    expect(printedAnImage).toBe(true);
   });
 
   it('shows an empty state and creates a memory', async () => {
@@ -394,6 +431,30 @@ describe('MemoriesPage (notebook)', () => {
       title: 'Kerala, 2026',
       base_revision: 4,
     });
+  });
+
+  it('paints each card with its own background colour', async () => {
+    setup({ list: [memoryDoc({ background: 'violet' })] });
+    renderMemories('/memories');
+    const title = await screen.findByText('My Trip to Kerala');
+    expect(title.closest('.mem-card')).toHaveClass('mem-bg', 'mem-bg-violet');
+  });
+
+  it('saves a background chosen from Memory details', async () => {
+    const fn = setup();
+    renderMemories();
+    fireEvent.click(await screen.findByRole('button', { name: 'Details' }));
+    const dialog = await screen.findByTestId('memory-details');
+    fireEvent.click(within(dialog).getByTestId('memory-bg-violet'));
+    await waitFor(() => expect(called(fn, 'PATCH', '/memories/mem1')).toBe(true), {
+      timeout: 4000,
+    });
+    expect(bodyOf(fn, 'PATCH', '/memories/mem1')).toEqual({
+      background: 'violet',
+      base_revision: 4,
+    });
+    // The editor surface takes the new colour straight away.
+    expect(screen.getByTestId('memory-editor')).toHaveClass('mem-bg-violet');
   });
 
   it('does not send a blank title', async () => {

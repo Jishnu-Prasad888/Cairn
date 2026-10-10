@@ -27,7 +27,6 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
-  Code2,
   Download,
   Ellipsis,
   Eye,
@@ -71,6 +70,7 @@ import { MemoryDetails } from './MemoryDetails';
 import { memoryKey } from '../api/resourceKeys';
 import { ShareDialog } from '../components/sharing/ShareDialog';
 import { formatMemoryDate } from './format';
+import { MemoryPrintSheet } from './MemoryPrintSheet';
 import { MemoryReader } from './MemoryReader';
 import { memoryExportUrl } from './api';
 import {
@@ -93,6 +93,7 @@ import {
   updateImage,
   wordCount,
 } from './model';
+import { memoryBackgroundClass } from './types';
 import type { ImageBlock, MemoryBlock, MemoryImage, MemorySettings } from './types';
 import { type SaveState, useMemoryDocument } from './useMemoryDocument';
 import { VersionHistory } from './VersionHistory';
@@ -149,7 +150,6 @@ export function MemoryEditor({
   const { blocks, meta, setBlocks } = doc;
 
   const [mode, setMode] = useState<'edit' | 'preview'>(settings.default_mode);
-  const [showSource, setShowSource] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [picker, setPicker] = useState<PickerTarget | null>(null);
@@ -163,6 +163,7 @@ export function MemoryEditor({
   const [history, setHistory] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -419,6 +420,73 @@ export function MemoryEditor({
     ];
   };
 
+  // Export: a portable Markdown zip, or the browser's print-to-PDF for the
+  // memory as a standalone document.
+  const downloadMarkdown = () => {
+    const a = document.createElement('a');
+    a.href = memoryExportUrl(libraryId, memoryId);
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const startPdfExport = () => {
+    setPrinting(true);
+  };
+
+  const exportMenu = (): MenuEntry[] => [
+    {
+      id: 'markdown',
+      label: 'Markdown (.zip)',
+      hint: 'Editable file plus its images',
+      onSelect: downloadMarkdown,
+    },
+    { id: 'pdf', label: 'PDF…', hint: 'Print or save from the dialog', onSelect: startPdfExport },
+  ];
+
+  // Print a purpose-built sheet as a standalone document: wait until it has
+  // rendered and its images have loaded, then call the browser's print dialog.
+  // The `exporting-memory` body class drives the @media print rules that show
+  // only the sheet on paper.
+  useEffect(() => {
+    if (!printing) return;
+    document.body.classList.add('exporting-memory');
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      document.body.classList.remove('exporting-memory');
+      setPrinting(false);
+    };
+    window.addEventListener('afterprint', finish);
+    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+    void (async () => {
+      await frame();
+      await frame();
+      if (settled) return;
+      const root = document.querySelector('[data-testid="memory-print-sheet"]');
+      const images = Array.from(root?.querySelectorAll('img') ?? []).filter((img) => !img.complete);
+      if (images.length > 0) {
+        await new Promise<void>((resolve) => {
+          let left = images.length;
+          const done = () => {
+            if (--left <= 0) resolve();
+          };
+          for (const img of images) {
+            img.addEventListener('load', done, { once: true });
+            img.addEventListener('error', done, { once: true });
+          }
+          setTimeout(resolve, 1500); // never hold the print dialog open
+        });
+      }
+      if (settled) return;
+      window.print();
+      finish();
+    })();
+    return finish;
+  }, [printing]);
+
   const openImageMenu = (image: MemoryImage, e: MouseEvent<HTMLElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -484,7 +552,10 @@ export function MemoryEditor({
   );
 
   return (
-    <div className={`memory-editor mode-${mode}`} data-testid="memory-editor">
+    <div
+      className={`memory-editor mode-${mode} ${memoryBackgroundClass(meta?.background)}`}
+      data-testid="memory-editor"
+    >
       <div className="editor-toolbar" role="toolbar" aria-label="Memory">
         {onBack && (
           <button
@@ -518,27 +589,15 @@ export function MemoryEditor({
           </button>
         </div>
         {mode === 'edit' && (
-          <>
-            <button
-              type="button"
-              className={showSource ? 'button toolbar-toggle active' : 'button toolbar-toggle'}
-              aria-pressed={showSource}
-              title="Show Markdown syntax in every block, not only the one you are writing in"
-              onClick={() => setShowSource((v) => !v)}
-            >
-              <Code2 size={15} aria-hidden="true" />
-              Markdown
-            </button>
-            <button
-              type="button"
-              className={linking ? 'button toolbar-toggle active' : 'button toolbar-toggle'}
-              aria-pressed={linking}
-              onClick={() => setLinking((v) => !v)}
-            >
-              <Link2 size={15} aria-hidden="true" />
-              Link…
-            </button>
-          </>
+          <button
+            type="button"
+            className={linking ? 'button toolbar-toggle active' : 'button toolbar-toggle'}
+            aria-pressed={linking}
+            onClick={() => setLinking((v) => !v)}
+          >
+            <Link2 size={15} aria-hidden="true" />
+            Link…
+          </button>
         )}
         <button type="button" className="button" onClick={() => setDetails(true)}>
           <Info size={15} aria-hidden="true" />
@@ -557,16 +616,19 @@ export function MemoryEditor({
           <Share2 size={15} aria-hidden="true" />
           Share
         </button>
-        <a
+        <button
+          type="button"
           className="button"
-          href={memoryExportUrl(libraryId, memoryId)}
-          download
+          aria-haspopup="menu"
           data-testid="export-memory"
-          title="Download this memory as Markdown with its images"
+          title="Export this memory"
+          onClick={(e) =>
+            setMenu({ position: pointAt(e.currentTarget), entries: exportMenu(), label: 'Export' })
+          }
         >
           <Download size={15} aria-hidden="true" />
           Export
-        </a>
+        </button>
         <button
           type="button"
           className="button"
@@ -782,7 +844,6 @@ export function MemoryEditor({
                       else textRefs.current.delete(block.id);
                     }}
                     value={block.markdown}
-                    showSource={showSource}
                     ariaLabel={`Text block ${i + 1} of ${blocks.length}`}
                     placeholder={
                       i === 0
@@ -947,6 +1008,8 @@ export function MemoryEditor({
           setCaptionFor(null);
         }}
       />
+
+      {printing && <MemoryPrintSheet meta={meta} blocks={blocks} />}
 
       <Lightbox
         images={lightbox?.images ?? []}

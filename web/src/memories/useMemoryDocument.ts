@@ -447,6 +447,7 @@ export function useMemoryDocument(
               title: m.title,
               description: m.description,
               location: m.location,
+              background: m.background,
               memory_date: m.memory_date ?? null,
               cover_file_id: m.cover_file_id ?? null,
               tags: m.tags,
@@ -518,6 +519,7 @@ export function withMeta(m: MemoryMeta, patch: MemoryMetaPatch): MemoryMeta {
   if (patch.title !== undefined) next.title = patch.title;
   if (patch.description !== undefined) next.description = patch.description;
   if (patch.location !== undefined) next.location = patch.location;
+  if (patch.background !== undefined) next.background = patch.background;
   if (patch.tags !== undefined) next.tags = patch.tags;
   if (patch.memory_date === null) delete next.memory_date;
   else if (patch.memory_date !== undefined) next.memory_date = patch.memory_date;

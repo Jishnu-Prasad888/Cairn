@@ -9,7 +9,7 @@ artificial length limit.
 ## The model
 
 ```text
-Memory ── metadata: title, date, description, location, tags, cover
+Memory ── metadata: title, date, description, location, background, tags, cover
    └── blocks[]                     ordered, each with a stable id
          ├── text block   → Markdown (canonical content)
          └── image block  → layout + slideshow
@@ -43,6 +43,16 @@ rejected, never taken over.
 
 Limits exist only to bound abuse: 5 000 blocks per memory, 500 images per
 image block, 2 MiB of Markdown per text block, 2 000 characters per caption.
+
+## Background colour
+
+`background` is the colour a memory's card wears in `/memories`. It is a token
+from a fixed palette — `sand`, `rose`, `amber`, `emerald`, `sky`, `violet` or
+`slate` — or the empty string (the default surface); the server rejects
+anything else, so no free-form CSS is ever stored. Clients map a token to
+their own theme colours, which keeps the same memory legible in light and dark
+mode. It is metadata like `location`: set it with `PATCH /memories/{memoryID}`
+and it comes back on every memory response, list or detail.
 
 ## Text blocks
 
@@ -280,7 +290,7 @@ All under `/api/v1/libraries/{id}/memories`; see
 | GET    | `/memories`                                      | List (keyset paginated, `?q=` search)     |
 | POST   | `/memories`                                      | Create (`body` or `blocks`)               |
 | GET    | `/memories/{memoryID}`                           | Memory with blocks and media views        |
-| PATCH  | `/memories/{memoryID}`                           | Metadata (title, date, location, tags, cover…) |
+| PATCH  | `/memories/{memoryID}`                           | Metadata (title, date, location, tags, cover, background…) |
 | PUT    | `/memories/{memoryID}/document`                  | Replace all blocks (what autosave sends)  |
 | PUT    | `/memories/{memoryID}`                           | Legacy single-body save                   |
 | DELETE | `/memories/{memoryID}`                           | Soft delete                               |
@@ -321,6 +331,13 @@ ignore. Text blocks are written verbatim, so the file reads naturally in
 Obsidian or any other Markdown tool. Edited images are embedded from their
 derived copy when one exists, otherwise the original is embedded and the edits
 stay in the comment.
+
+The toolbar's **Export** control offers both that zip and a **PDF**. The PDF is
+made entirely in the browser: Cairn lays the memory out as a plain document —
+title, date, text and photos in order at their natural shape — hides the rest
+of the app, and opens the browser's print dialog so the reader can print it or
+save it as a PDF. There is no server-side PDF route, so the output follows the
+browser's own pagination and the photos print at screen quality.
 
 ## Internal references
 

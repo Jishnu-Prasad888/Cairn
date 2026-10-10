@@ -75,6 +75,7 @@ type Memory struct {
 	Body        string // Markdown of all text blocks, joined by a blank line
 	Description string
 	Location    string
+	Background  string // card colour token ('' = default surface)
 	CoverFileID string
 	MemoryDate  *time.Time
 	Tags        []string
@@ -120,10 +121,30 @@ type MetaPatch struct {
 	Title       *string
 	Description *string
 	Location    *string
+	Background  *string // card colour token; "" restores the default
 	CoverFileID *string // "" clears the cover
 	MemoryDate  *time.Time
 	ClearDate   bool
 	Tags        *[]string // tag names; missing tags are created
+}
+
+// BackgroundPalette is the fixed set of card background tokens a memory may
+// carry. The value is stored as one of these names (never free-form CSS) so
+// the front end can theme it safely in both light and dark mode.
+var BackgroundPalette = map[string]bool{
+	"sand":    true,
+	"rose":    true,
+	"amber":   true,
+	"emerald": true,
+	"sky":     true,
+	"violet":  true,
+	"slate":   true,
+}
+
+// ValidBackground reports whether tok is a supported background token. The
+// empty string is valid and means the default surface colour.
+func ValidBackground(tok string) bool {
+	return tok == "" || BackgroundPalette[tok]
 }
 
 // MemoryStore is the repository for memories in a per-library database.
@@ -138,8 +159,8 @@ func NewMemoryStore(db *sql.DB) *MemoryStore {
 	return &MemoryStore{db: db, now: func() time.Time { return time.Now().UTC() }}
 }
 
-const memoryColumns = `id, title, body, description, location, cover_file_id, memory_date,
-	revision, deleted, created_at, updated_at`
+const memoryColumns = `id, title, body, description, location, background,
+	cover_file_id, memory_date, revision, deleted, created_at, updated_at`
 
 // Create inserts a new memory and records its first version.
 func (s *MemoryStore) Create(ctx context.Context, p CreateParams) (*Memory, error) {
@@ -307,6 +328,13 @@ func (s *MemoryStore) PatchMeta(ctx context.Context, id string, baseRevision *in
 		}
 		sets = append(sets, "location = ?")
 		args = append(args, *p.Location)
+	}
+	if p.Background != nil {
+		if !ValidBackground(*p.Background) {
+			return nil, &ValidationError{msg: "background is not a supported colour"}
+		}
+		sets = append(sets, "background = ?")
+		args = append(args, *p.Background)
 	}
 	if p.CoverFileID != nil {
 		sets = append(sets, "cover_file_id = ?")
@@ -800,7 +828,7 @@ func scanMemory(row rowScanner) (*Memory, error) {
 		createdStr string
 		updatedStr string
 	)
-	err := row.Scan(&m.ID, &m.Title, &m.Body, &m.Description, &m.Location, &cover, &date,
+	err := row.Scan(&m.ID, &m.Title, &m.Body, &m.Description, &m.Location, &m.Background, &cover, &date,
 		&m.Revision, &deleted, &createdStr, &updatedStr)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound

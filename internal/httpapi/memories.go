@@ -87,6 +87,7 @@ type memoryResponse struct {
 	MemoryDate  *string         `json:"memory_date,omitempty"`
 	Description string          `json:"description"`
 	Location    string          `json:"location"`
+	Background  string          `json:"background"`
 	CoverFileID *string         `json:"cover_file_id,omitempty"`
 	Cover       *mediaView      `json:"cover,omitempty"`
 	Tags        []string        `json:"tags"`
@@ -159,6 +160,7 @@ func baseMemoryResponse(m *memories.Memory) memoryResponse {
 		Body:        m.Body,
 		Description: m.Description,
 		Location:    m.Location,
+		Background:  m.Background,
 		Tags:        m.Tags,
 		Revision:    m.Revision,
 		Deleted:     m.Deleted,
@@ -807,6 +809,7 @@ func (s *Server) handlePatchMemory(w http.ResponseWriter, r *http.Request, u *au
 		Title        *string          `json:"title"`
 		Description  *string          `json:"description"`
 		Location     *string          `json:"location"`
+		Background   *string          `json:"background"`
 		MemoryDate   optional[string] `json:"memory_date"`
 		CoverFileID  optional[string] `json:"cover_file_id"`
 		Tags         *[]string        `json:"tags"`
@@ -815,7 +818,7 @@ func (s *Server) handlePatchMemory(w http.ResponseWriter, r *http.Request, u *au
 		writeDomainError(w, s.logger, requestIDOrEmpty(r), err)
 		return
 	}
-	p := memories.MetaPatch{Title: body.Title, Description: body.Description, Location: body.Location, Tags: body.Tags}
+	p := memories.MetaPatch{Title: body.Title, Description: body.Description, Location: body.Location, Background: body.Background, Tags: body.Tags}
 	if body.MemoryDate.Set {
 		if body.MemoryDate.Null || body.MemoryDate.Value == "" {
 			p.ClearDate = true

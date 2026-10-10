@@ -22,6 +22,15 @@ var memoryColumns = []struct {
 	{"memory_versions", "document", `ALTER TABLE memory_versions ADD COLUMN document TEXT`},
 }
 
+// memoryColumnsV9 are the columns schema v9 adds. background is the token of
+// the memory's card colour (” means the default surface); it is validated
+// against a fixed palette in internal/memories, never free-form CSS.
+var memoryColumnsV9 = []struct {
+	table, column, ddl string
+}{
+	{"memories", "background", `ALTER TABLE memories ADD COLUMN background TEXT NOT NULL DEFAULT ''`},
+}
+
 // ftsMemoryTriggers replace the v7 triggers so the FTS index covers
 // search_text (Markdown of every text block, image captions, description,
 // location and tags) rather than the legacy single body.
@@ -37,6 +46,26 @@ CREATE TRIGGER fts_memories_update AFTER UPDATE OF title, body, deleted, search_
 END;
 `
 
+// ensureColumns adds each column that a table does not already have. SQLite
+// has no ADD COLUMN IF NOT EXISTS, so existence is checked first; the whole
+// call is idempotent and cheap once every column is present.
+func ensureColumns(db *sql.DB, cols []struct {
+	table, column, ddl string
+}) error {
+	for _, c := range cols {
+		has, err := columnExists(db, c.table, c.column)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(c.ddl); err != nil {
+				return fmt.Errorf("add %s.%s: %w", c.table, c.column, err)
+			}
+		}
+	}
+	return nil
+}
+
 // upgradeMemories brings a library database to the block-based memory model
 // (schema v8). It runs on every open, so each step is guarded and cheap once
 // applied:
@@ -49,16 +78,11 @@ END;
 // body column keeps its content, timestamps are untouched, and [[type:id]]
 // links stay in the Markdown exactly as written.
 func upgradeMemories(db *sql.DB) error {
-	for _, c := range memoryColumns {
-		has, err := columnExists(db, c.table, c.column)
-		if err != nil {
-			return err
-		}
-		if !has {
-			if _, err := db.Exec(c.ddl); err != nil {
-				return fmt.Errorf("add %s.%s: %w", c.table, c.column, err)
-			}
-		}
+	if err := ensureColumns(db, memoryColumns); err != nil {
+		return err
+	}
+	if err := ensureColumns(db, memoryColumnsV9); err != nil {
+		return err
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS memories_unmigrated_idx
 		ON memories (id) WHERE blocks_migrated = 0`); err != nil {

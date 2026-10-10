@@ -316,6 +316,7 @@ describe('large memories', () => {
           body: '',
           description: '',
           location: '',
+          background: '',
           tags: [],
           revision: 1,
           deleted: false,

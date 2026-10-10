@@ -13,6 +13,7 @@ import { Dialog } from '../components/Dialog';
 import { MediaPicker } from './MediaPicker';
 import { MemoryImageView } from './MemoryImageView';
 import type { MemoryMeta } from './useMemoryDocument';
+import { MEMORY_BACKGROUNDS } from './types';
 import type { MemoryBlock, MemoryMetaPatch } from './types';
 
 interface Props {
@@ -89,6 +90,29 @@ export function MemoryDetails({ open, libraryId, meta, blocks, onChange, onClose
                 onChange={(e) => onChange({ location: e.target.value })}
               />
             </label>
+          </div>
+
+          <div className="details-field">
+            <span id="details-bg">Background</span>
+            <div className="details-bg" role="radiogroup" aria-labelledby="details-bg">
+              {MEMORY_BACKGROUNDS.map((b) => (
+                <button
+                  key={b.id || 'default'}
+                  type="button"
+                  role="radio"
+                  aria-checked={meta.background === b.id}
+                  aria-label={b.label}
+                  title={b.label}
+                  data-testid={`memory-bg-${b.id || 'default'}`}
+                  className={
+                    'details-bg-swatch' +
+                    (meta.background === b.id ? ' active' : '') +
+                    (b.id ? ` mem-bg-${b.id}` : '')
+                  }
+                  onClick={() => onChange({ background: b.id })}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="details-field">

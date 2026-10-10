@@ -99,6 +99,7 @@ export interface MemoryDocument {
   memory_date?: string;
   description: string;
   location: string;
+  background: string;
   cover_file_id?: string;
   cover?: MediaView;
   tags: string[];
@@ -138,9 +139,32 @@ export interface MemoryMetaPatch {
   title?: string;
   description?: string;
   location?: string;
+  background?: string;
   memory_date?: string | null;
   cover_file_id?: string | null;
   tags?: string[];
+}
+
+/**
+ * The card background palette, mirroring memories.BackgroundPalette on the
+ * server. The empty id is the default surface colour.
+ */
+export const MEMORY_BACKGROUNDS = [
+  { id: '', label: 'Default' },
+  { id: 'sand', label: 'Sand' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'amber', label: 'Amber' },
+  { id: 'emerald', label: 'Emerald' },
+  { id: 'sky', label: 'Sky' },
+  { id: 'violet', label: 'Violet' },
+  { id: 'slate', label: 'Slate' },
+] as const;
+
+export type MemoryBackground = (typeof MEMORY_BACKGROUNDS)[number]['id'];
+
+/** The CSS class that paints a memory's card in its chosen background. */
+export function memoryBackgroundClass(background: string | undefined): string {
+  return background ? `mem-bg mem-bg-${background}` : '';
 }
 
 /** One saved revision, with its blocks, for previewing and restoring. */

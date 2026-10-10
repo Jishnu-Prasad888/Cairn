@@ -113,6 +113,73 @@ func TestHandleMemories_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestHandlePatchMemory_Background(t *testing.T) {
+	_, client, libID, _ := newSearchTestServer(t)
+
+	rec := client.do(t, http.MethodPost, "/api/v1/libraries/"+libID+"/memories",
+		map[string]string{"title": "Sunset", "body": "Warm light over the bay."})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Memory memoryResponse
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
+	memID := created.Memory.ID
+	if created.Memory.Background != "" {
+		t.Fatalf("default background = %q, want empty", created.Memory.Background)
+	}
+
+	// A palette token round-trips and lands in the database.
+	rec = client.do(t, http.MethodPatch, "/api/v1/libraries/"+libID+"/memories/"+memID,
+		map[string]any{"background": "rose"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var patched struct {
+		Memory memoryResponse
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("unmarshal patch: %v", err)
+	}
+	if patched.Memory.Background != "rose" {
+		t.Fatalf("background = %q, want rose", patched.Memory.Background)
+	}
+
+	rec = client.do(t, http.MethodGet, "/api/v1/libraries/"+libID+"/memories/"+memID, nil)
+	var got struct {
+		Memory memoryResponse
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal get: %v", err)
+	}
+	if got.Memory.Background != "rose" {
+		t.Errorf("persisted background = %q, want rose", got.Memory.Background)
+	}
+
+	// Anything outside the palette is rejected, not stored.
+	rec = client.do(t, http.MethodPatch, "/api/v1/libraries/"+libID+"/memories/"+memID,
+		map[string]any{"background": "kaleidoscope"})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid background status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+
+	// An empty string restores the default surface.
+	rec = client.do(t, http.MethodPatch, "/api/v1/libraries/"+libID+"/memories/"+memID,
+		map[string]any{"background": ""})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("unmarshal clear: %v", err)
+	}
+	if patched.Memory.Background != "" {
+		t.Errorf("cleared background = %q, want empty", patched.Memory.Background)
+	}
+}
+
 func TestHandleListMemories_Search(t *testing.T) {
 	_, client, libID, _ := newSearchTestServer(t)
 

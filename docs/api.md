@@ -269,7 +269,7 @@ file already in the album, else 404). It requires the `edit` capability.
 | GET    | `/libraries/{libraryID}/memories`                           | List / search memories           | session |
 | POST   | `/libraries/{libraryID}/memories`                           | Create a memory                  | session |
 | GET    | `/libraries/{libraryID}/memories/{memoryID}`                | Memory with ordered blocks       | session |
-| PATCH  | `/libraries/{libraryID}/memories/{memoryID}`                | Metadata (title, date, tags, cover…) | session |
+| PATCH  | `/libraries/{libraryID}/memories/{memoryID}`                | Metadata (title, date, tags, cover, background…) | session |
 | PUT    | `/libraries/{libraryID}/memories/{memoryID}/document`       | Save all blocks (revision-checked) | session |
 | PUT    | `/libraries/{libraryID}/memories/{memoryID}`                | Legacy single-body save          | session |
 | POST   | `/libraries/{libraryID}/memories/{memoryID}/blocks`         | Insert a block                   | session |
@@ -291,6 +291,12 @@ file already in the album, else 404). It requires the `edit` capability.
 
 Memory writes accept `base_revision`; a stale one returns `409 CONFLICT`
 with `details.current_revision`. See [memories.md](memories.md).
+
+`PATCH /memories/{memoryID}` also takes `background`, the card colour for the
+memories list: the empty string restores the default surface, otherwise one of
+`sand`, `rose`, `amber`, `emerald`, `sky`, `violet` or `slate`. It is stored as
+that token (never raw CSS), so light and dark mode both stay legible; an
+unknown token is rejected with `400`.
 
 ### Settings
 

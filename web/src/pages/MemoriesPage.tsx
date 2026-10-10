@@ -34,6 +34,7 @@ import { MemoryThumbnail } from '../memories/MemoryThumbnail';
 import { newId } from '../memories/model';
 import {
   DEFAULT_MEMORY_SETTINGS,
+  memoryBackgroundClass,
   type MemorySettings,
   type MemorySummary,
 } from '../memories/types';
@@ -251,7 +252,12 @@ export default function MemoriesPage() {
   );
 
   const card = (m: MemorySummary) => (
-    <button key={m.id} type="button" className="mem-card" onClick={() => open(m.id)}>
+    <button
+      key={m.id}
+      type="button"
+      className={`mem-card ${memoryBackgroundClass(m.background)}`}
+      onClick={() => open(m.id)}
+    >
       <span className="mem-card-cover">
         <MemoryThumbnail
           libraryId={gate.libraryId}
@@ -268,7 +274,12 @@ export default function MemoriesPage() {
   );
 
   const row = (m: MemorySummary) => (
-    <button key={m.id} type="button" className="mem-row" onClick={() => open(m.id)}>
+    <button
+      key={m.id}
+      type="button"
+      className={`mem-row ${memoryBackgroundClass(m.background)}`}
+      onClick={() => open(m.id)}
+    >
       <span className="mem-row-title">{m.title || 'Untitled memory'}</span>
       <span className="mem-row-meta">
         {m.location && <span>{m.location}</span>}

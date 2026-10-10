@@ -32,7 +32,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 8
+	SchemaVersion = 9
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.

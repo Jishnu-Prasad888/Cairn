@@ -439,3 +439,44 @@
   background: linear-gradient(to bottom, transparent, var(--surface));
   pointer-events: none;
 }
+
+/* ------------------------- per-memory background -------------------------
+ * One of memories.BackgroundPalette, tinted from theme tokens so light and
+ * dark mode both stay legible. 'mem-bg' alone is the default surface.
+ */
+.mem-bg {
+  background-color: var(--surface);
+}
+
+.mem-bg-sand {
+  background-color: color-mix(in srgb, var(--color-yellow) 16%, var(--color-surface));
+}
+
+.mem-bg-rose {
+  background-color: color-mix(in srgb, var(--color-pink) 16%, var(--color-surface));
+}
+
+.mem-bg-amber {
+  background-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-surface));
+}
+
+.mem-bg-emerald {
+  background-color: color-mix(in srgb, var(--color-green) 16%, var(--color-surface));
+}
+
+.mem-bg-sky {
+  background-color: color-mix(in srgb, var(--color-blue) 16%, var(--color-surface));
+}
+
+.mem-bg-violet {
+  background-color: color-mix(
+    in srgb,
+    var(--color-blue) 10%,
+    var(--color-pink) 10%,
+    var(--color-surface)
+  );
+}
+
+.mem-bg-slate {
+  background-color: color-mix(in srgb, var(--color-text-secondary) 10%, var(--color-surface));
+}

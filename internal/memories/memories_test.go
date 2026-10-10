@@ -281,3 +281,53 @@ func TestSearchFiltersDeleted(t *testing.T) {
 		t.Errorf("expected deleted memory to be excluded from search, got %d", len(results))
 	}
 }
+
+func TestPatchBackground(t *testing.T) {
+	store := newTestStore(t)
+	m, err := store.Create(ctx(t), memories.CreateParams{Title: "Garden", Body: "Tomatoes ripen."})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if m.Background != "" {
+		t.Fatalf("default Background = %q, want empty", m.Background)
+	}
+
+	bg := "emerald"
+	if _, err := store.PatchMeta(ctx(t), m.ID, nil, memories.MetaPatch{Background: &bg}); err != nil {
+		t.Fatalf("PatchMeta background: %v", err)
+	}
+	got, err := store.Get(ctx(t), m.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Background != "emerald" {
+		t.Errorf("Background = %q, want emerald", got.Background)
+	}
+
+	list, _, err := store.List(ctx(t), "", 50)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Background != "emerald" {
+		t.Errorf("List background = %+v, want emerald", list)
+	}
+
+	bad := "chartreuse"
+	_, err = store.PatchMeta(ctx(t), m.ID, nil, memories.MetaPatch{Background: &bad})
+	var ve *memories.ValidationError
+	if !errors.As(err, &ve) {
+		t.Errorf("invalid background error = %v, want ValidationError", err)
+	}
+
+	empty := ""
+	if _, err := store.PatchMeta(ctx(t), m.ID, nil, memories.MetaPatch{Background: &empty}); err != nil {
+		t.Fatalf("clear background: %v", err)
+	}
+	got, err = store.Get(ctx(t), m.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Background != "" {
+		t.Errorf("cleared Background = %q, want empty", got.Background)
+	}
+}

@@ -2002,9 +2002,9 @@ paths:
       operationId: patchMemory
       summary: Update memory metadata
       description: >
-        Updates title, description, location, memory_date (null clears),
-        cover_file_id (a library file reference; null clears) and tags (names;
-        missing tags are created).
+        Updates title, description, location, background, memory_date (null
+        clears), cover_file_id (a library file reference; null clears) and tags
+        (names; missing tags are created).
       parameters:
         - $ref: '#/components/parameters/LibraryID'
         - $ref: '#/components/parameters/MemoryID'
@@ -3900,9 +3900,17 @@ components:
           type: string
           description: os/arch the binary was built for.
           example: linux/amd64
+    MemoryBackground:
+      type: string
+      description: >
+        Card background colour token. The empty string is the default surface;
+        the rest are the fixed palette names, kept as tokens (never raw CSS) so
+        the front end can theme them for light and dark mode alike.
+      enum: ['', sand, rose, amber, emerald, sky, violet, slate]
+      default: ''
     Memory:
       type: object
-      required: [id, title, body, description, location, tags, revision, deleted, created_at, updated_at]
+      required: [id, title, body, description, location, background, tags, revision, deleted, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3925,6 +3933,8 @@ components:
           type: string
         location:
           type: string
+        background:
+          $ref: '#/components/schemas/MemoryBackground'
         cover_file_id:
           type: string
           description: Library file used as the cover (a reference, not a copy).
@@ -4133,6 +4143,8 @@ components:
         title: {type: string, minLength: 1, maxLength: 500}
         description: {type: string}
         location: {type: string}
+        background:
+          $ref: '#/components/schemas/MemoryBackground'
         memory_date:
           type: string
           format: date-time
