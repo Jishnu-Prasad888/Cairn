@@ -7,6 +7,7 @@ import {
   bodyOf,
   called,
   json,
+  libraryFixture,
   mockApi,
   noContent,
   originalFetch,
@@ -471,5 +472,68 @@ describe('MemoriesPage (notebook)', () => {
       await new Promise((r) => setTimeout(r, 900));
     });
     expect(called(fn, 'PATCH', '/memories/mem1')).toBe(false);
+  });
+});
+
+describe('MemoriesPage across multiple libraries', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function setupOpen(open: string[]) {
+    localStorage.setItem('cairn.library', 'lib1');
+    localStorage.setItem('cairn.libraries.open', JSON.stringify(open));
+    const lib1Mem = memoryDoc({ id: 'mem1', title: 'Primary memory' });
+    const lib2Mem = memoryDoc({ id: 'mem2', title: 'Archive memory' });
+    return mockApi(
+      [
+        (url) =>
+          url.endsWith('/api/v1/settings/memories')
+            ? json({
+                settings: {
+                  slideshow_interval: 15,
+                  edited_copies: false,
+                  default_layout: 'grid',
+                  default_mode: 'edit',
+                  autosave: true,
+                },
+              })
+            : undefined,
+        (url) =>
+          /\/libraries\/lib1\/memories(\?.*)?$/.test(url)
+            ? json({ memories: [lib1Mem] })
+            : undefined,
+        (url) =>
+          /\/libraries\/lib2\/memories(\?.*)?$/.test(url)
+            ? json({ memories: [lib2Mem] })
+            : undefined,
+        (url) =>
+          /\/libraries\/lib2\/memories\/mem2$/.test(url) ? json({ memory: lib2Mem }) : undefined,
+      ],
+      { libraries: [libraryFixture(), libraryFixture({ id: 'lib2', name: 'Archive' })] },
+    );
+  }
+
+  it('hides memories from a library that has been turned off', async () => {
+    // lib2 is readable but not open (toggled Off), so it must not contribute.
+    const fn = setupOpen(['lib1']);
+    renderMemories('/memories');
+    expect(await screen.findByText('Primary memory')).toBeInTheDocument();
+    expect(screen.queryByText('Archive memory')).toBeNull();
+    expect(called(fn, 'GET', '/libraries/lib2/memories')).toBe(false);
+  });
+
+  it('opens a memory from a non-primary open library in its own library', async () => {
+    const fn = setupOpen(['lib1', 'lib2']);
+    renderMemories('/memories');
+    fireEvent.click(await screen.findByText('Archive memory'));
+    expect(await screen.findByTestId('memory-editor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Memory title')).toHaveValue('Archive memory');
+    expect(called(fn, 'GET', '/libraries/lib2/memories/mem2')).toBe(true);
+    expect(called(fn, 'GET', '/libraries/lib1/memories/mem2')).toBe(false);
   });
 });

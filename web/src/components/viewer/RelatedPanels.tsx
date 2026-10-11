@@ -182,7 +182,15 @@ export function MemoriesPanel({ libraryId, file }: { libraryId: string; file: Fi
     <ul className="viewer-memory-list" data-testid="viewer-memories">
       {linked.map((m) => (
         <li key={m.id}>
-          <Link to={`/memories/${m.id}`}>{m.title || 'Untitled memory'}</Link>
+          <Link
+            to={
+              libraryId
+                ? `/memories/${m.id}?lib=${encodeURIComponent(libraryId)}`
+                : `/memories/${m.id}`
+            }
+          >
+            {m.title || 'Untitled memory'}
+          </Link>
           {m.memory_date && <span className="muted"> · {m.memory_date}</span>}
         </li>
       ))}

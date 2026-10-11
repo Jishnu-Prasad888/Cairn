@@ -17,7 +17,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
-import { useAllLibrariesResource } from '../api/resources';
+import { useOpenLibrariesResource } from '../api/resources';
 import { LibraryTag } from '../components/LibraryTag';
 import { listMemories } from '../api/queries';
 import {
@@ -116,6 +116,10 @@ export default function MemoriesPage() {
   // The page-aware top-bar search drives this page through `?q=`.
   const [params] = useSearchParams();
   const urlQ = params.get('q') ?? '';
+  // `?lib=` pins the memory being opened to the library it belongs to, so a
+  // memory from any open library loads from its own library rather than the
+  // primary one (which would 404). It mirrors the files page's `lib` param.
+  const libParam = params.get('lib');
 
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -153,7 +157,7 @@ export default function MemoriesPage() {
     write(sessionStorage, QUERY_KEY, urlQ);
   }, [urlQ]);
 
-  const memories = useAllLibrariesResource<MemorySummary>(
+  const memories = useOpenLibrariesResource<MemorySummary>(
     useCallback(
       async (libraryId: string) =>
         ((await listMemories(libraryId, query ? { q: query } : {})).memories ??
@@ -172,9 +176,19 @@ export default function MemoriesPage() {
     write(sessionStorage, QUERY_KEY, value);
   };
 
-  const open = (id: string) => {
+  // Keep the URL pointing at the memory's own library whenever it is not the
+  // primary one, so the editor fetches the right library instead of 404ing.
+  const memoryPath = (libraryId: string, id: string) => {
+    const primary = gate.kind === 'ready' ? gate.libraryId : '';
+    return libraryId && libraryId !== primary
+      ? `/memories/${id}?lib=${encodeURIComponent(libraryId)}`
+      : `/memories/${id}`;
+  };
+
+  const open = (memory: MemorySummary) => {
     write(sessionStorage, SCROLL_KEY, String(window.scrollY));
-    navigate(`/memories/${id}`);
+    const primary = gate.kind === 'ready' ? gate.libraryId : '';
+    navigate(memoryPath(memory.library_id || primary, memory.id));
   };
 
   // Coming back from a memory: put the landing page where it was.
@@ -204,7 +218,7 @@ export default function MemoriesPage() {
         setSaving(false);
         setCreating(false);
         memories.reload();
-        navigate(`/memories/${resp.memory.id}`);
+        navigate(memoryPath(libraryId, resp.memory.id));
       })
       .catch((e: unknown) => {
         setCreateError(e instanceof Error ? e.message : String(e));
@@ -244,12 +258,18 @@ export default function MemoriesPage() {
 
   // A memory is open: nothing else on the page.
   if (memoryId) {
+    // Open the memory in the library the URL pins when it is one the user can
+    // read (a memory may live in a library that is not currently open, e.g. one
+    // just created in the New memory dialog); otherwise fall back to the
+    // primary library.
+    const editorLibraryId =
+      libParam && gate.libraries.some((lib) => lib.id === libParam) ? libParam : gate.libraryId;
     return (
       <main className="memories-page memory-open">
         {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
         <MemoryEditor
-          key={`${gate.libraryId}/${memoryId}`}
-          libraryId={gate.libraryId}
+          key={`${editorLibraryId}/${memoryId}`}
+          libraryId={editorLibraryId}
           memoryId={memoryId}
           settings={settings}
           onBack={() => navigate('/memories')}
@@ -294,7 +314,7 @@ export default function MemoriesPage() {
       key={`${m.library_id || gate.libraryId}/${m.id}`}
       type="button"
       className={`mem-card ${memoryBackgroundClass(m.background)}`}
-      onClick={() => open(m.id)}
+      onClick={() => open(m)}
     >
       <span className="mem-card-cover">
         <MemoryThumbnail
@@ -318,7 +338,7 @@ export default function MemoriesPage() {
       key={`${m.library_id || gate.libraryId}/${m.id}`}
       type="button"
       className={`mem-row ${memoryBackgroundClass(m.background)}`}
-      onClick={() => open(m.id)}
+      onClick={() => open(m)}
     >
       <span className="mem-row-title">{m.title || 'Untitled memory'}</span>
       <span className="mem-row-meta">
