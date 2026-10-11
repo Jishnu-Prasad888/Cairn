@@ -17,7 +17,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
-import { useLibraryResource } from '../api/resources';
+import { useAllLibrariesResource } from '../api/resources';
+import { LibraryTag } from '../components/LibraryTag';
 import { listMemories } from '../api/queries';
 import {
   EmptyState,
@@ -27,11 +28,13 @@ import {
   NoLibrariesState,
   PageHeader,
 } from '../components/States';
+import { PromptDialog } from '../components/Dialog';
 import { createMemoryDocument, getMemorySettings } from '../memories/api';
 import { formatMemoryDate } from '../memories/format';
 import { MemoryEditor } from '../memories/MemoryEditor';
 import { MemoryThumbnail } from '../memories/MemoryThumbnail';
 import { newId } from '../memories/model';
+import type { Library } from '../api/types';
 import {
   DEFAULT_MEMORY_SETTINGS,
   memoryBackgroundClass,
@@ -115,6 +118,8 @@ export default function MemoriesPage() {
   const urlQ = params.get('q') ?? '';
 
   const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [createLibraryId, setCreateLibraryId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(() =>
     read(localStorage, VIEW_KEY) === 'list' ? 'list' : 'grid',
@@ -148,7 +153,7 @@ export default function MemoriesPage() {
     write(sessionStorage, QUERY_KEY, urlQ);
   }, [urlQ]);
 
-  const memories = useLibraryResource<MemorySummary[]>(
+  const memories = useAllLibrariesResource<MemorySummary>(
     useCallback(
       async (libraryId: string) =>
         ((await listMemories(libraryId, query ? { q: query } : {})).memories ??
@@ -181,20 +186,30 @@ export default function MemoriesPage() {
     write(sessionStorage, SCROLL_KEY, '0');
   }, [listReady]);
 
-  const create = () => {
+  const startCreate = () => {
     if (gate.kind !== 'ready') return;
+    setCreateLibraryId(gate.primaryId || gate.libraryId);
     setCreating(true);
     setCreateError(null);
-    createMemoryDocument(gate.libraryId, {
-      title: 'Untitled memory',
+  };
+
+  const create = (libraryId: string, title = 'Untitled memory') => {
+    setSaving(true);
+    setCreateError(null);
+    createMemoryDocument(libraryId, {
+      title,
       blocks: [{ id: newId(), type: 'text', markdown: '' }],
     })
       .then((resp) => {
+        setSaving(false);
+        setCreating(false);
         memories.reload();
         navigate(`/memories/${resp.memory.id}`);
       })
-      .catch((e: unknown) => setCreateError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setCreating(false));
+      .catch((e: unknown) => {
+        setCreateError(e instanceof Error ? e.message : String(e));
+        setSaving(false);
+      });
   };
 
   if (gate.kind === 'loading') {
@@ -263,20 +278,20 @@ export default function MemoriesPage() {
     <button
       type="button"
       className={view === 'grid' ? 'mem-card mem-new' : 'mem-row mem-new'}
-      onClick={create}
+      onClick={startCreate}
       disabled={creating}
       data-testid="new-memory"
     >
       <span className="mem-new-plus" aria-hidden="true">
         <Plus size={view === 'grid' ? 36 : 20} />
       </span>
-      <span className="mem-new-label">{creating ? 'Creating…' : 'New memory'}</span>
+      <span className="mem-new-label">New memory</span>
     </button>
   );
 
   const card = (m: MemorySummary) => (
     <button
-      key={m.id}
+      key={`${m.library_id || gate.libraryId}/${m.id}`}
       type="button"
       className={`mem-card ${memoryBackgroundClass(m.background)}`}
       onClick={() => open(m.id)}
@@ -284,10 +299,12 @@ export default function MemoriesPage() {
       <span className="mem-card-cover">
         <MemoryThumbnail
           libraryId={gate.libraryId}
+          itemLibraryId={m.library_id || gate.libraryId}
           memoryId={m.id}
           revision={m.revision}
           fallbackCover={m.cover?.available ? m.cover.thumbnail_url : undefined}
         />
+        <LibraryTag libraryId={m.library_id} corner />
       </span>
       <span className="mem-card-text">
         <span className="mem-card-title">{m.title || 'Untitled memory'}</span>
@@ -298,13 +315,14 @@ export default function MemoriesPage() {
 
   const row = (m: MemorySummary) => (
     <button
-      key={m.id}
+      key={`${m.library_id || gate.libraryId}/${m.id}`}
       type="button"
       className={`mem-row ${memoryBackgroundClass(m.background)}`}
       onClick={() => open(m.id)}
     >
       <span className="mem-row-title">{m.title || 'Untitled memory'}</span>
       <span className="mem-row-meta">
+        <LibraryTag libraryId={m.library_id} />
         {m.location && <span>{m.location}</span>}
         {m.tags.length > 0 && <span>{m.tags.map((t) => `#${t}`).join(' ')}</span>}
       </span>
@@ -319,7 +337,7 @@ export default function MemoriesPage() {
 
       {gate.library.status === 'offline' && <LibraryOfflineNotice library={gate.library} />}
       {memories.error && <ErrorState message={memories.error} onRetry={memories.reload} />}
-      {createError && (
+      {createError && !creating && (
         <p className="error-text" role="alert">
           {createError}
         </p>
@@ -404,7 +422,88 @@ export default function MemoriesPage() {
           )}
         </div>
       )}
+
+      <PromptDialog
+        open={creating}
+        title="New memory"
+        label="Memory title"
+        placeholder="Untitled memory"
+        busy={saving}
+        error={createError}
+        onCancel={() => {
+          setCreating(false);
+          setCreateError(null);
+        }}
+        control={({ value, setValue }) => (
+          <NewMemoryFields
+            name={value}
+            onNameChange={setValue}
+            libraries={gate.kind === 'ready' ? gate.libraries : []}
+            libraryId={createLibraryId ?? (gate.kind === 'ready' ? gate.primaryId : '')}
+            onLibraryChange={setCreateLibraryId}
+          />
+        )}
+        onConfirm={(name) => {
+          if (!createLibraryId && gate.kind === 'ready') {
+            setCreateLibraryId(gate.primaryId);
+          }
+          const lib = createLibraryId ?? (gate.kind === 'ready' ? gate.primaryId : '');
+          if (!lib) return;
+          create(lib, name || 'Untitled memory');
+        }}
+      />
     </main>
+  );
+}
+
+function NewMemoryFields({
+  name,
+  onNameChange,
+  libraries,
+  libraryId,
+  onLibraryChange,
+}: {
+  name: string;
+  onNameChange: (name: string) => void;
+  libraries: Library[];
+  libraryId: string;
+  onLibraryChange: (id: string | null) => void;
+}) {
+  return (
+    <>
+      <label className="dialog-label" htmlFor="new-memory-title">
+        Memory title
+      </label>
+      <input
+        id="new-memory-title"
+        className="dialog-input"
+        type="text"
+        placeholder="Untitled memory"
+        value={name}
+        onChange={(event) => onNameChange(event.target.value)}
+      />
+      {libraries.length > 1 && (
+        <>
+          <label className="dialog-label" htmlFor="new-memory-library">
+            Library
+          </label>
+          <select
+            id="new-memory-library"
+            className="dialog-input"
+            value={libraryId}
+            onChange={(event) => onLibraryChange(event.target.value)}
+            data-testid="new-memory-library"
+          >
+            {libraries.map((lib) => (
+              <option key={lib.id} value={lib.id} disabled={lib.status === 'offline'}>
+                {lib.name}
+                {lib.status === 'offline' ? ' · offline' : ''}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+    </>
   );
 }
 

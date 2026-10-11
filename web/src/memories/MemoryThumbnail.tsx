@@ -103,14 +103,23 @@ interface Props {
   revision: number;
   /** Shown until the page has loaded (and if it never does). */
   fallbackCover?: string | undefined;
+  /** Optional library id for multi-library contexts (when using aggregated data) */
+  itemLibraryId?: string;
 }
 
-export function MemoryThumbnail({ libraryId, memoryId, revision, fallbackCover }: Props) {
+export function MemoryThumbnail({
+  libraryId,
+  memoryId,
+  revision,
+  fallbackCover,
+  itemLibraryId,
+}: Props) {
+  const docLibraryId = itemLibraryId ?? libraryId;
   const [box, setBox] = useState<HTMLElement | null>(null);
   const [width, setWidth] = useState(0);
   // Without IntersectionObserver (old browsers, jsdom) every card just loads.
   const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined');
-  const key = `${libraryId}/${memoryId}@${revision}`;
+  const key = `${docLibraryId}/${memoryId}@${revision}`;
   const [fetched, setFetched] = useState<{ key: string; doc: MemoryDocument | null } | null>(null);
   const doc = cache.get(key) ?? (fetched?.key === key ? fetched.doc : null);
 
@@ -144,13 +153,13 @@ export function MemoryThumbnail({ libraryId, memoryId, revision, fallbackCover }
   useEffect(() => {
     if (!visible || cache.has(key)) return;
     let cancelled = false;
-    void load(libraryId, memoryId, revision).then((d) => {
+    void load(docLibraryId, memoryId, revision).then((d) => {
       if (!cancelled) setFetched({ key, doc: d });
     });
     return () => {
       cancelled = true;
     };
-  }, [visible, key, libraryId, memoryId, revision]);
+  }, [visible, key, docLibraryId, memoryId, revision]);
 
   const scale = width > 0 ? width / PAGE_WIDTH : 0;
 
@@ -162,7 +171,7 @@ export function MemoryThumbnail({ libraryId, memoryId, revision, fallbackCover }
           style={{ width: PAGE_WIDTH, transform: `scale(${scale})` }}
           data-testid="memory-thumbnail"
         >
-          <Page doc={doc} libraryId={libraryId} />
+          <Page doc={doc} libraryId={docLibraryId} />
         </span>
       ) : fallbackCover ? (
         <img className="mm-fallback" src={fallbackCover} alt="" loading="lazy" />

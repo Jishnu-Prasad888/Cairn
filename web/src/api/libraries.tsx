@@ -329,6 +329,7 @@ export type LibraryGate =
       kind: 'ready';
       library: Library;
       libraryId: string;
+      primaryId: string;
       libraries: Library[];
       /** Every library the user has opened; content pages aggregate these. */
       openLibraries: Library[];
@@ -349,6 +350,7 @@ export function useLibraryGate(): LibraryGate {
     openLibraryIds,
     selectLibrary,
   } = state;
+  const primaryId = state.library?.id ?? libraryId ?? '';
 
   return useMemo<LibraryGate>(() => {
     if (loading) return { kind: 'loading' };
@@ -358,6 +360,7 @@ export function useLibraryGate(): LibraryGate {
       kind: 'ready',
       library,
       libraryId,
+      primaryId: primaryId || libraryId,
       libraries,
       openLibraries,
       openLibraryIds,
@@ -369,6 +372,7 @@ export function useLibraryGate(): LibraryGate {
     isEmpty,
     library,
     libraryId,
+    primaryId,
     libraries,
     openLibraries,
     openLibraryIds,

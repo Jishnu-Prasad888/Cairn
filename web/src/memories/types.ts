@@ -111,7 +111,10 @@ export interface MemoryDocument {
 }
 
 /** A list entry: a memory without its blocks. */
-export type MemorySummary = Omit<MemoryDocument, 'blocks'> & { blocks?: MemoryBlock[] };
+export type MemorySummary = Omit<MemoryDocument, 'blocks'> & {
+  blocks?: MemoryBlock[];
+  library_id?: string;
+};
 
 export interface MemoryResponse {
   memory: MemoryDocument;

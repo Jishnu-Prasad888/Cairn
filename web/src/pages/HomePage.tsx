@@ -16,8 +16,9 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { mlWorthAsking } from '../api/mlSwitch';
-import { notifyLibraryChanged } from '../api/libraryEvents';
+import { notifyLibraryChanged, useLibrariesChangeTick } from '../api/libraryEvents';
 import { useLibraryResource } from '../api/resources';
+import { useLibraries } from '../api/libraries';
 import { faceImageUrl, listAlbums, listFiles, listMemories, listPeople } from '../api/queries';
 import type { Album, FileSummary, Library, Memory, Person } from '../api/types';
 import { AlbumCard } from '../components/albums/AlbumCard';
@@ -114,6 +115,8 @@ function Home({ library }: { library: Library }) {
   const navigate = useNavigate();
   const libraryId = library.id;
   const offline = library.status === 'offline';
+  const { libraries } = useLibraries();
+  const librariesTick = useLibrariesChangeTick(libraries.map((l) => l.id));
 
   const home = useLibraryResource<HomeData>(
     useCallback(async (id: string) => {
@@ -195,7 +198,7 @@ function Home({ library }: { library: Library }) {
       empty ? HOME_EMPTY_REFRESH_MS : HOME_REFRESH_MS,
     );
     return () => clearInterval(timer);
-  }, [hasLoaded, empty, libraryId]);
+  }, [hasLoaded, empty, libraryId, librariesTick]);
 
   const [recentRef, recentWidth] = useWidth();
   const [memoriesRef, memoriesWidth] = useWidth();

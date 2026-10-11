@@ -141,6 +141,7 @@ export interface Memory {
   deleted: boolean;
   created_at: string;
   updated_at: string;
+  library_id?: string;
 }
 
 export interface MemoryListResponse {

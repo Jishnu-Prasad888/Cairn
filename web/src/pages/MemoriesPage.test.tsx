@@ -204,6 +204,10 @@ describe('MemoriesPage (notebook)', () => {
     renderMemories('/memories');
     expect(await screen.findByTestId('memories-empty')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('new-memory'));
+    fireEvent.change(await screen.findByLabelText('Memory title'), {
+      target: { value: 'Trip notes' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(called(fn, 'POST', '/api/v1/libraries/lib1/memories')).toBe(true));
     const body = bodyOf(fn, 'POST', '/api/v1/libraries/lib1/memories') as {
       blocks: Array<{ type: string }>;
