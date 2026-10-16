@@ -1,5 +1,7 @@
 /**
- * Tags — the library's tag vocabulary and the files that carry each tag.
+ * Tags — the tag vocabulary of every open library and the files that carry
+ * each tag. Tags are stored per library (in its `.cairn` folder) but shown
+ * merged by name, so one "family" tag spans all open libraries.
  *
  * Tags are a flat, colourable vocabulary; the interesting part is the second
  * screen, where you see everything carrying a tag and can strip it from
@@ -11,9 +13,17 @@ import { useCallback, useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
-import { useLibraryResource } from '../api/resources';
-import { createTag, deleteTag, listTags, removeFileTag, searchFiles } from '../api/queries';
-import type { FileSummary, Tag } from '../api/types';
+import { useResource } from '../api/resources';
+import { ApiError } from '../api/client';
+import { createTag, deleteTag, removeFileTag, searchFiles } from '../api/queries';
+import {
+  type SharedTag,
+  notifyTagsChanged,
+  tagKey,
+  useTagsChangedTick,
+  useTagVocabulary,
+} from '../api/tagVocabulary';
+import type { FileSummary } from '../api/types';
 import { ConfirmDialog, PromptDialog } from '../components/Dialog';
 import { MediaGrid } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
@@ -28,6 +38,7 @@ import {
   NoLibrariesState,
   PageHeader,
 } from '../components/States';
+import { Menu, type MenuAnchor, type MenuEntry } from '../components/ui/Menu';
 import { ViewerModal } from '../components/ViewerModal';
 import './TagsPage.css';
 
@@ -35,38 +46,62 @@ export default function TagsPage() {
   const gate = useLibraryGate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [activeTag, setActiveTag] = useState<Tag | null>(null);
+  const [activeName, setActiveName] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [deleting, setDeleting] = useState<Tag | null>(null);
+  const [deleting, setDeleting] = useState<SharedTag | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [promptError, setPromptError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
 
-  const tags = useLibraryResource(
-    useCallback(async (libraryId: string) => (await listTags(libraryId)).tags ?? [], []),
-  );
+  const libraryIds = gate.kind === 'ready' ? gate.openLibraryIds : NO_IDS;
+  const vocabulary = useTagVocabulary(libraryIds, gate.kind === 'ready');
+  const tags = {
+    data: vocabulary.loading ? null : vocabulary.tags,
+    loading: vocabulary.loading,
+    error: vocabulary.error,
+    reload: vocabulary.reload,
+  };
+  const activeTag =
+    activeName === null
+      ? null
+      : (vocabulary.tags.find((t) => tagKey(t.name) === tagKey(activeName)) ?? null);
+  const changed = useTagsChangedTick();
 
-  const files = useLibraryResource(
-    useCallback(
-      (libraryId) =>
-        searchFiles(libraryId, { tag: activeTag?.name, limit: 200 }).then((r) => r.files ?? []),
-      [activeTag?.name],
-    ),
-    [activeTag?.name],
+  // Files carrying the tag, from every library that has it.
+  const files = useResource(
+    useCallback(async () => {
+      if (!activeTag) return [];
+      const ids = Object.keys(activeTag.byLibrary);
+      const results = await Promise.allSettled(
+        ids.map((id) => searchFiles(id, { tag: activeTag.name, limit: 200 })),
+      );
+      const ok = results.flatMap((r) => (r.status === 'fulfilled' ? (r.value.files ?? []) : []));
+      const failed = results.find((r) => r.status === 'rejected');
+      if (ok.length === 0 && failed?.status === 'rejected') throw failed.reason;
+      return ok.sort((a, b) => b.mod_time.localeCompare(a.mod_time));
+    }, [activeTag]),
+    [activeTag?.name, Object.keys(activeTag?.byLibrary ?? {}).join('+'), changed],
     activeTag !== null,
   );
 
-  const ops = useFileOperations([gate.kind === 'ready' ? gate.libraryId : ''], () => {
+  const ops = useFileOperations(libraryIds, () => {
     files.reload();
     tags.reload();
   });
   const tagFiles = files.data ?? NO_FILES;
-  const selection = useSelection(tagFiles, activeTag?.id ?? '');
+  const selection = useSelection(tagFiles, activeTag ? tagKey(activeTag.name) : '');
   const libraryIdOrEmpty = gate.kind === 'ready' ? gate.libraryId : '';
   const untag = async (targets: FileSummary[]) => {
     if (!activeTag) return;
     await run(() =>
-      Promise.all(targets.map((f) => removeFileTag(libraryIdOrEmpty, f.id, activeTag.id))),
+      Promise.all(
+        targets.map((f) => {
+          const lib = f.library_id || libraryIdOrEmpty;
+          const tag = activeTag.byLibrary[lib];
+          return tag ? removeFileTag(lib, f.id, tag.id) : Promise.resolve();
+        }),
+      ),
     );
     selection.clear();
   };
@@ -88,23 +123,19 @@ export default function TagsPage() {
       : [],
   });
 
-  const run = useCallback(
-    async (action: () => Promise<unknown>, after?: () => void) => {
-      setBusy(true);
-      setActionError(null);
-      try {
-        await action();
-        after?.();
-        tags.reload();
-        files.reload();
-      } catch (e: unknown) {
-        setActionError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [files, tags],
-  );
+  const run = useCallback(async (action: () => Promise<unknown>, after?: () => void) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await action();
+      after?.();
+      notifyTagsChanged();
+    } catch (e: unknown) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   if (gate.kind === 'loading') {
     return (
@@ -174,7 +205,7 @@ export default function TagsPage() {
       {activeTag ? (
         <section className="tag-detail" data-testid="tag-detail">
           <div className="tag-detail-header">
-            <button type="button" className="button" onClick={() => setActiveTag(null)}>
+            <button type="button" className="button" onClick={() => setActiveName(null)}>
               ← Tags
             </button>
             <h2>
@@ -204,6 +235,9 @@ export default function TagsPage() {
               files={files.data}
               onOpen={ops.openViewer}
               selection={selection}
+              onContextMenu={(file, x, y) =>
+                setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
+              }
               label={`Tagged ${activeTag.name}`}
               testId="file-grid"
             />
@@ -211,16 +245,21 @@ export default function TagsPage() {
 
           {ops.viewer && (
             <ViewerModal
-              libraryId={gate.libraryId}
+              libraryId={ops.viewerLibraryId}
               file={ops.viewer}
               siblings={files.data ?? []}
               onNavigate={ops.openViewer}
-              onChanged={() => {
-                files.reload();
-                tags.reload();
-              }}
+              onChanged={notifyTagsChanged}
               onRequestAction={ops.requestAction}
               onClose={ops.closeViewer}
+            />
+          )}
+          {menu && (
+            <Menu
+              anchor={menu.anchor}
+              items={menu.items}
+              onClose={() => setMenu(null)}
+              label="Photo actions"
             />
           )}
           {ops.dialogs}
@@ -250,8 +289,12 @@ export default function TagsPage() {
           {tags.data !== null && tags.data.length > 0 && (
             <ul className="tag-grid" data-testid="tags-grid" aria-label="Tags">
               {tags.data.map((tag) => (
-                <li key={tag.id}>
-                  <button type="button" className="tag-card" onClick={() => setActiveTag(tag)}>
+                <li key={tagKey(tag.name)}>
+                  <button
+                    type="button"
+                    className="tag-card"
+                    onClick={() => setActiveName(tag.name)}
+                  >
                     <span
                       className="tag-chip"
                       style={tag.color ? { background: tag.color } : undefined}
@@ -260,6 +303,8 @@ export default function TagsPage() {
                     </span>
                     <span className="tag-date">
                       Created {new Date(tag.created_at).toLocaleDateString()}
+                      {libraryIds.length > 1 &&
+                        ` · in ${Object.keys(tag.byLibrary).length} of ${libraryIds.length} libraries`}
                     </span>
                   </button>
                 </li>
@@ -274,19 +319,31 @@ export default function TagsPage() {
         title="New tag"
         label="Tag name"
         placeholder="family"
-        hint="Tags are per-library. Typing an existing name in the viewer reuses it."
+        hint="The tag is added to every open library. Typing an existing name in the viewer reuses it."
         busy={busy}
         error={promptError}
         onCancel={() => setCreating(false)}
         onConfirm={(name) => {
           setBusy(true);
           setPromptError(null);
-          createTag(gate.libraryId, name)
-            .then(() => {
-              setCreating(false);
-              tags.reload();
+          // Each library stores its own tags, so the new tag is created in every
+          // open one; a library that already has it is fine.
+          void Promise.allSettled(libraryIds.map((id) => createTag(id, name.trim())))
+            .then((results) => {
+              // Created in at least one library: done. Otherwise every
+              // library refused it — already there, or offline — so say why.
+              if (results.some((r) => r.status === 'fulfilled')) {
+                setCreating(false);
+                notifyTagsChanged();
+                return;
+              }
+              const reasons = results.map((r) => (r.status === 'rejected' ? r.reason : null));
+              const reason: unknown =
+                reasons.find((e) => !(e instanceof ApiError && e.status === 409)) ?? reasons[0];
+              setPromptError(
+                reason instanceof Error ? reason.message : 'Could not create the tag.',
+              );
             })
-            .catch((e: unknown) => setPromptError(e instanceof Error ? e.message : String(e)))
             .finally(() => setBusy(false));
         }}
         testId="new-tag-dialog"
@@ -310,8 +367,14 @@ export default function TagsPage() {
           if (!deleting) return;
           const target = deleting;
           void run(
-            () => deleteTag(gate.libraryId, target.id),
-            () => setActiveTag(null),
+            () =>
+              Promise.all(
+                Object.entries(target.byLibrary).map(([lib, tag]) => deleteTag(lib, tag.id)),
+              ),
+            () => {
+              setActiveName(null);
+              setDeleting(null);
+            },
           );
         }}
         testId="delete-tag-dialog"
@@ -321,3 +384,4 @@ export default function TagsPage() {
 }
 
 const NO_FILES: FileSummary[] = [];
+const NO_IDS: string[] = [];

@@ -380,6 +380,32 @@ select option {
   background: var(--color-fill-hover);
 }
 
+/* Existing tags offered for one-click adding (viewer, tag picker). */
+.viewer-tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-chip.tag-chip-suggestion {
+  padding: 2px var(--space-3) 2px var(--space-2);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  cursor: pointer;
+}
+
+.tag-chip.tag-chip-suggestion:hover,
+.tag-chip.tag-chip-suggestion:focus-visible {
+  color: var(--color-text-primary);
+  background: var(--color-fill-hover);
+}
+
 /* ------------------------------- badges ------------------------------- */
 
 .status-badge {

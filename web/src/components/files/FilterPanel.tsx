@@ -1,19 +1,26 @@
 /**
- * Narrowing a listing by when it was modified and how big it is. Opens under
- * the toolbar when asked for; clearing re-queries rather than only emptying
- * the fields.
+ * Narrowing a listing by when it was modified, how big it is, and its tags.
+ * Opens under the toolbar when asked for; clearing re-queries rather than only
+ * emptying the fields.
+ *
+ * Selected tags match files carrying any of them; the "match all" toggle
+ * narrows that to files carrying every one.
  */
 
 import './Files.css';
 
 import { EMPTY_RANGE, hasRangeFilters, type RangeFilters } from './filters';
+import { TagFilter } from './TagFilter';
 
 export function FilterPanel({
   value,
   onChange,
+  tagOptions = [],
 }: {
   value: RangeFilters;
   onChange: (next: RangeFilters) => void;
+  /** Tag names that can be picked. */
+  tagOptions?: string[];
 }) {
   const set = (patch: Partial<RangeFilters>) => onChange({ ...value, ...patch });
   return (
@@ -51,6 +58,15 @@ export function FilterPanel({
           onChange={(e) => set({ maxSizeMb: e.target.value })}
         />
       </label>
+      {tagOptions.length > 0 && (
+        <TagFilter
+          options={tagOptions}
+          selected={value.tags}
+          matchAll={value.tagsAll}
+          onChange={(tags) => set({ tags })}
+          onMatchAllChange={(tagsAll) => set({ tagsAll })}
+        />
+      )}
       {hasRangeFilters(value) && (
         <button type="button" className="button ghost-button" onClick={() => onChange(EMPTY_RANGE)}>
           Clear filters

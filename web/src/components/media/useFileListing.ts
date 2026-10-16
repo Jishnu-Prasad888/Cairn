@@ -40,6 +40,9 @@ export interface ListingQuery {
   person?: string | undefined;
   album?: string | undefined;
   tag?: string | undefined;
+  /** Tag names to filter by: any of them, or all with `tagsAll`. */
+  tags?: string[] | undefined;
+  tagsAll?: boolean | undefined;
   /** Load the sub-folders of `folder` alongside the files. */
   withFolders?: boolean | undefined;
 }
@@ -65,6 +68,7 @@ export function usesSearch(query: ListingQuery): boolean {
     query.person ||
     query.album ||
     query.tag ||
+    query.tags?.length ||
     query.minSizeMb ||
     query.maxSizeMb ||
     query.from ||
@@ -91,6 +95,8 @@ function fetchPage(
       person: query.person,
       album: query.album,
       tag: query.tag,
+      tags: query.tags?.length ? query.tags : undefined,
+      tags_match: query.tags && query.tags.length > 1 && query.tagsAll ? 'all' : undefined,
       min_size: toBytes(query.minSizeMb),
       max_size: toBytes(query.maxSizeMb),
       from: query.from ? new Date(query.from).toISOString() : undefined,

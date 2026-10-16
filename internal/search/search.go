@@ -43,6 +43,11 @@ type SearchQuery struct {
 	// insensitive). Empty means all.
 	Tag string
 
+	// Tags restricts results to files carrying the named tags (case-
+	// insensitive): any one of them, or every one of them when TagsAll is set.
+	Tags    []string
+	TagsAll bool
+
 	// AlbumID restricts results to files in this album. Empty means all.
 	AlbumID string
 
@@ -230,6 +235,24 @@ func buildExtraFilters(q SearchQuery) ([]string, []any) {
 			WHERE tg.name = ? COLLATE NOCASE)`)
 		args = append(args, q.Tag)
 	}
+	if names := uniqueTagNames(q.Tags); len(names) > 0 {
+		marks := strings.TrimSuffix(strings.Repeat("?, ", len(names)), ", ")
+		cond := `f.id IN (
+			SELECT ft.file_id FROM file_tags ft
+			JOIN tags tg ON tg.id = ft.tag_id
+			WHERE tg.name COLLATE NOCASE IN (` + marks + `)`
+		if q.TagsAll && len(names) > 1 {
+			cond += `
+			GROUP BY ft.file_id HAVING COUNT(DISTINCT lower(tg.name)) = ?`
+		}
+		conditions = append(conditions, cond+")")
+		for _, n := range names {
+			args = append(args, n)
+		}
+		if q.TagsAll && len(names) > 1 {
+			args = append(args, len(names))
+		}
+	}
 	if q.AlbumID != "" {
 		conditions = append(conditions, "f.id IN (SELECT file_id FROM album_files WHERE album_id = ?)")
 		args = append(args, q.AlbumID)
@@ -386,4 +409,21 @@ func parseTime(s string, out *time.Time) error {
 	}
 	*out = t
 	return nil
+}
+
+// uniqueTagNames trims the names and drops blanks and case-insensitive
+// repeats, so "all of these tags" counts each tag once.
+func uniqueTagNames(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		key := strings.ToLower(n)
+		if n == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, n)
+	}
+	return out
 }

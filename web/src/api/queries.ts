@@ -261,6 +261,9 @@ export interface SearchParams {
   type?: MediaFilter | undefined;
   folder?: string | undefined;
   tag?: string | undefined;
+  /** Several tag names: files with any of them, or all with `tags_match: 'all'`. */
+  tags?: string[] | undefined;
+  tags_match?: 'all' | undefined;
   album?: string | undefined;
   person?: string | undefined;
   min_size?: number | undefined;

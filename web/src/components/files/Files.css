@@ -331,6 +331,122 @@
   width: 160px;
 }
 
+/* Tag filter: one button, chosen tags as chips, and a popover checklist. */
+.tag-filter {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.tag-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tag-filter-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tag-filter-button.active {
+  background: var(--color-selection);
+}
+
+.tag-filter-all-mark {
+  display: inline-flex;
+}
+
+.tag-filter-chosen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  max-width: 28rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-filter-popover {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(18rem, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+}
+
+.filter-panel .tag-filter-search {
+  width: 100%;
+}
+
+.filter-match-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.filter-match-all.active {
+  color: var(--color-text-primary);
+  background: var(--color-selection);
+}
+
+.filter-panel .filter-match-all input,
+.filter-panel .tag-filter-option input {
+  width: auto;
+  margin: 0;
+}
+
+.tag-filter-list {
+  max-height: 15rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.tag-filter-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-md);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.tag-filter-option:hover {
+  background: var(--color-fill-hover);
+}
+
+.tag-filter-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-filter-empty {
+  padding: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
 @keyframes panel-in {
   from {
     opacity: 0;

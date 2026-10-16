@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react';
 
-import { addFileTag, createTag, listFileTags, listTags, removeFileTag } from '../../api/queries';
+import { useLibraries } from '../../api/libraries';
+import { addFileTag, listFileTags, listTags, removeFileTag } from '../../api/queries';
+import { ensureTag, notifyTagsChanged, tagKey, useTagVocabulary } from '../../api/tagVocabulary';
 import type { FileSummary, Tag } from '../../api/types';
 import { Icon } from '../ui/Icon';
 
@@ -20,6 +22,12 @@ export function TagsPanel({
   // Bumping this re-runs the load; it is the only thing that makes the fetch
   // effect run again, so a reload does not need its own state plumbing.
   const [reloadKey, setReloadKey] = useState(0);
+  // Suggestions come from every open library, so a tag made anywhere (the
+  // Tags page, another library's file) is offered here too.
+  const { openLibraryIds } = useLibraries();
+  const vocabulary = useTagVocabulary(
+    openLibraryIds.includes(libraryId) ? openLibraryIds : [...openLibraryIds, libraryId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +47,8 @@ export function TagsPanel({
 
   const libraryTags = loaded?.library ?? [];
   const fileTags = loaded?.file ?? [];
+  const onFile = new Set(fileTags.map((t) => tagKey(t.name)));
+  const suggestions = vocabulary.tags.filter((t) => !onFile.has(tagKey(t.name)));
 
   const attachTag = async (raw: string) => {
     const name = raw.trim();
@@ -46,16 +56,12 @@ export function TagsPanel({
     setBusy(true);
     setError(null);
     try {
-      // Typing a new name creates the tag; an existing one is reused. Cairn has
-      // no "find-or-create" endpoint, so the lookup is client-side.
-      const existing = libraryTags.find((t) => t.name.toLowerCase() === name.toLowerCase());
-      let tagId = existing?.id;
-      if (!tagId) {
-        const created = await createTag(libraryId, name);
-        tagId = created.tag.id;
-      }
-      await addFileTag(libraryId, file.id, tagId);
+      // Typing a new name creates the tag in this file's library; an existing
+      // one is reused.
+      const tag = await ensureTag(libraryId, name, libraryTags);
+      await addFileTag(libraryId, file.id, tag.id);
       setReloadKey((k) => k + 1);
+      notifyTagsChanged();
       setTagInput('');
       onChanged();
     } catch (e: unknown) {
@@ -71,6 +77,7 @@ export function TagsPanel({
     try {
       await removeFileTag(libraryId, file.id, tag.id);
       setReloadKey((k) => k + 1);
+      notifyTagsChanged();
       onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -121,14 +128,37 @@ export function TagsPanel({
           disabled={busy}
         />
         <datalist id={`viewer-tag-suggestions-${file.id}`}>
-          {libraryTags.map((t) => (
-            <option key={t.id} value={t.name} />
+          {suggestions.map((t) => (
+            <option key={tagKey(t.name)} value={t.name} />
           ))}
         </datalist>
         <button type="submit" className="button" disabled={busy || tagInput.trim() === ''}>
           Add
         </button>
       </form>
+
+      {suggestions.length > 0 && (
+        <ul
+          className="viewer-tag-suggestions"
+          aria-label="Existing tags"
+          data-testid="tag-suggestions"
+        >
+          {suggestions.map((t) => (
+            <li key={tagKey(t.name)}>
+              <button
+                type="button"
+                className="tag-chip tag-chip-suggestion"
+                onClick={() => void attachTag(t.name)}
+                disabled={busy}
+                title={`Add tag ${t.name}`}
+              >
+                <Icon name="plus" size={12} />
+                {t.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {error && (
         <p className="error-text" role="alert">

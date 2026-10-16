@@ -106,6 +106,8 @@ func parseSearchQuery(r *http.Request) search.SearchQuery {
 		Type:       media.MediaType(q.Get("type")),
 		FolderPath: q.Get("folder"),
 		Tag:        q.Get("tag"),
+		Tags:       q["tags"],
+		TagsAll:    q.Get("tags_match") == "all",
 		Cursor:     q.Get("cursor"),
 	}
 	if alb := q.Get("album"); alb != "" {

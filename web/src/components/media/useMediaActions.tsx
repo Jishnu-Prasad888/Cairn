@@ -17,6 +17,7 @@ import { softDeleteFile } from '../../api/queries';
 import type { FileSummary } from '../../api/types';
 import { AlbumPickerDialog } from '../albums/AlbumPickerDialog';
 import { ConfirmDialog } from '../Dialog';
+import { TagPickerDialog } from '../TagPickerDialog';
 import type { FileOperations } from '../FileOperations';
 import { downloadUrl } from '../media';
 import type { MenuEntry, MenuItem } from '../ui/Menu';
@@ -35,7 +36,7 @@ export interface MediaActionOptions {
   /** Something changed on the server; reload the listing. */
   onChanged: () => void;
   /** Which of the standard actions this page offers. Defaults to all. */
-  allow?: Partial<Record<'download' | 'album' | 'favorite' | 'trash' | 'edit', boolean>>;
+  allow?: Partial<Record<'download' | 'album' | 'tag' | 'favorite' | 'trash' | 'edit', boolean>>;
   /** Page-specific selection actions, shown before the standard ones. */
   extra?: SelectionAction[];
   /** Page-specific items for a single file's menu. */
@@ -86,12 +87,14 @@ export function useMediaActions({
   const toast = useToast();
   const [trashing, setTrashing] = useState<FileSummary[] | null>(null);
   const [albumTargets, setAlbumTargets] = useState<FileSummary[] | null>(null);
+  const [tagTargets, setTagTargets] = useState<FileSummary[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const can = {
     download: allow.download ?? true,
     album: allow.album ?? true,
+    tag: allow.tag ?? true,
     favorite: (allow.favorite ?? true) && favorites !== undefined,
     trash: allow.trash ?? true,
     edit: (allow.edit ?? true) && ops !== undefined,
@@ -193,6 +196,17 @@ export function useMediaActions({
           },
         ]
       : []),
+    ...(can.tag
+      ? [
+          {
+            id: 'tag',
+            label: 'Add tag',
+            icon: 'tag' as const,
+            onClick: () => setTagTargets(files),
+            testId: 'selection-tag',
+          },
+        ]
+      : []),
     ...(can.favorite
       ? [
           {
@@ -242,6 +256,14 @@ export function useMediaActions({
         label: 'Add to album',
         icon: 'album',
         onSelect: () => setAlbumTargets([file]),
+      });
+    }
+    if (can.tag) {
+      items.push({
+        id: 'tag',
+        label: 'Add tag…',
+        icon: 'tag',
+        onSelect: () => setTagTargets([file]),
       });
     }
     if (can.favorite) {
@@ -321,6 +343,27 @@ export function useMediaActions({
         }}
         onConfirm={() => void confirmTrash()}
         testId="trash-many-dialog"
+      />
+      <TagPickerDialog
+        open={tagTargets !== null}
+        files={tagTargets ?? []}
+        onClose={() => setTagTargets(null)}
+        onDone={({ name, added, failed }) => {
+          setTagTargets(null);
+          if (failed) {
+            toast({
+              message: `Tagged ${added} with “${name}”; ${failed} couldn't be tagged`,
+              tone: 'error',
+            });
+          } else {
+            toast({
+              message: added === 1 ? `Tagged “${name}”` : `${added} tagged “${name}”`,
+              tone: 'success',
+            });
+            selection.clear();
+          }
+          onChanged();
+        }}
       />
       <AlbumPickerDialog
         open={albumTargets !== null}

@@ -127,13 +127,18 @@ export const apiPut = <T>(path: string, body?: unknown) =>
 export const apiDelete = <T>(path: string, body?: unknown) =>
   apiRequest<T>(path, withJsonBody('DELETE', body));
 
-/** Build a query string from defined values, skipping empties. */
+/** Build a query string from defined values, skipping empties. An array
+ * repeats its key once per value. */
 export function query(
-  params: Record<string, string | number | boolean | undefined | null>,
+  params: Record<string, string | number | boolean | string[] | undefined | null>,
 ): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;
+    if (Array.isArray(value)) {
+      for (const v of value) search.append(key, v);
+      continue;
+    }
     search.set(key, String(value));
   }
   const encoded = search.toString();

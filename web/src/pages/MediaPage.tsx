@@ -21,6 +21,7 @@ import { useLibraryGate } from '../api/libraries';
 import { copyFile, createFolder, moveFile } from '../api/queries';
 import type { FileSort, MediaFilter, SortOrder } from '../api/queries';
 import { folderKey } from '../api/resourceKeys';
+import { useTagsChangedTick, useTagVocabulary } from '../api/tagVocabulary';
 import type { FileSummary, Folder, Library } from '../api/types';
 import { PromptDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
@@ -221,6 +222,12 @@ function MediaBrowser({
   const [sort, order] = sortValue.split(':') as [FileSort, SortOrder];
   const [range, setRange] = useState<RangeFilters>(EMPTY_RANGE);
   const [showFilters, setShowFilters] = useState(false);
+  // Tags offered by the filter: every open library's, merged by name. Loaded
+  // only once the panel has been opened.
+  const tagVocabulary = useTagVocabulary(openLibraryIds, showFilters);
+  // While filtering by tag, tagging or untagging a file changes what matches.
+  const tagsTick = useTagsChangedTick();
+  const tagRefresh = range.tags.length > 0 ? tagsTick : 0;
   const [view, setViewState] = useState<'grid' | 'list'>(() => (folderMode ? readView() : 'grid'));
   const [timelineOpen, setTimelineOpenState] = useState(readTimelineOpen);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -302,11 +309,11 @@ function MediaBrowser({
   // only) library is. The unused variant is disabled, so only one fetch runs.
   const mergedListing = useAggregatedFileListing(openLibraryIds, query, {
     enabled: merged, // offline libraries are skipped one at a time inside
-    refreshKey: uploads.completed,
+    refreshKey: uploads.completed + tagRefresh,
   });
   const singleListing = useFileListing(scopedId ?? '', query, {
     enabled: !merged && !offline,
-    refreshKey: uploads.completed,
+    refreshKey: uploads.completed + tagRefresh,
   });
   const listing = merged ? mergedListing : singleListing;
   const { files, folders, total } = listing;
@@ -743,7 +750,13 @@ function MediaBrowser({
         </div>
       )}
 
-      {showFilters && !offline && <FilterPanel value={range} onChange={setRange} />}
+      {showFilters && !offline && (
+        <FilterPanel
+          value={range}
+          onChange={setRange}
+          tagOptions={tagVocabulary.tags.map((t) => t.name)}
+        />
+      )}
 
       {listing.error && (
         <ErrorState

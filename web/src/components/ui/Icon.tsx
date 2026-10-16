@@ -187,6 +187,14 @@ const ICONS = {
       <circle cx="8" cy="8" r="1.3" />
     </>
   ),
+  /** Two overlapping rings with the overlap filled: "has all of these". */
+  'match-all': (
+    <>
+      <circle cx="9" cy="12" r="5.5" />
+      <circle cx="15" cy="12" r="5.5" />
+      <path d="M12 7.4a5.5 5.5 0 0 1 0 9.2 5.5 5.5 0 0 1 0-9.2z" fill="currentColor" />
+    </>
+  ),
   lock: (
     <>
       <rect x="5" y="10.5" width="14" height="10" rx="2" />

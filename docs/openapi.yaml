@@ -633,6 +633,25 @@ paths:
           description: Tag name filter (case-insensitive).
           schema:
             type: string
+        - name: tags
+          in: query
+          required: false
+          description: >
+            Several tag names (repeat the parameter). Files carrying any of
+            them match, or every one of them with tags_match=all.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: tags_match
+          in: query
+          required: false
+          description: "\"all\" to require every tag in `tags`; anything else means any."
+          schema:
+            type: string
+            enum: [any, all]
         - name: album
           in: query
           required: false

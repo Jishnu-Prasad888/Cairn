@@ -508,3 +508,59 @@ func TestSearchPunctuationOnlyQuery(t *testing.T) {
 		t.Errorf("punctuation-only query returned %d results, want 0", len(page.Results))
 	}
 }
+
+func TestSearchTagsAnyAndAll(t *testing.T) {
+	ss, fs, db := newTestStoreWithMediaStore(t)
+	ctx := context.Background()
+	tagStore := tags.NewTagStore(db)
+
+	tagIDs := map[string]string{}
+	for _, name := range []string{"Family", "Beach"} {
+		tg, err := tagStore.Create(ctx, name, "")
+		if err != nil {
+			t.Fatalf("create tag: %v", err)
+		}
+		tagIDs[name] = tg.ID
+	}
+	// both.jpg carries both tags; the others carry one each; none.jpg none.
+	attach := map[string][]string{
+		"both.jpg":   {"Family", "Beach"},
+		"family.jpg": {"Family"},
+		"beach.jpg":  {"Beach"},
+		"none.jpg":   nil,
+	}
+	for path, names := range attach {
+		seedFile(t, fs, path)
+		f, err := fs.GetByRelPath(ctx, path)
+		if err != nil {
+			t.Fatalf("GetByRelPath: %v", err)
+		}
+		for _, n := range names {
+			if err := tagStore.Attach(ctx, f.ID, tagIDs[n]); err != nil {
+				t.Fatalf("attach: %v", err)
+			}
+		}
+	}
+
+	names := func(q search.SearchQuery) map[string]bool {
+		t.Helper()
+		page, err := ss.Search(ctx, q)
+		if err != nil {
+			t.Fatalf("Search: %v", err)
+		}
+		out := map[string]bool{}
+		for _, r := range page.Results {
+			out[r.File.Name] = true
+		}
+		return out
+	}
+
+	anyOf := names(search.SearchQuery{Tags: []string{"family", "BEACH"}})
+	if len(anyOf) != 3 || anyOf["none.jpg"] {
+		t.Errorf("any-of returned %v, want both/family/beach", anyOf)
+	}
+	allOf := names(search.SearchQuery{Tags: []string{"family", "beach", "Family"}, TagsAll: true})
+	if len(allOf) != 1 || !allOf["both.jpg"] {
+		t.Errorf("all-of returned %v, want only both.jpg", allOf)
+	}
+}
