@@ -290,6 +290,8 @@ func (s *Server) Handler() http.Handler {
 		if s.backups != nil {
 			mux.Handle("POST /api/v1/backups", s.withAuth(allowAdmin, s.handleRunBackup))
 			mux.Handle("GET /api/v1/backups", s.withAuth(allowAdmin, s.handleListBackups))
+			mux.Handle("GET /api/v1/backups/settings", s.withAuth(allowAdmin, s.handleGetBackupSettings))
+			mux.Handle("PUT /api/v1/backups/settings", s.withAuth(allowAdmin, s.handlePutBackupSettings))
 			mux.Handle("GET /api/v1/backups/{id}", s.withAuth(allowAdmin, s.handleGetBackup))
 			mux.Handle("POST /api/v1/backups/{id}/verify", s.withAuth(allowAdmin, s.handleVerifyBackup))
 			mux.Handle("POST /api/v1/backups/{id}/restore", s.withAuth(allowAdmin, s.handleRestoreBackup))

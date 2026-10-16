@@ -640,3 +640,44 @@ func TestBackupJobFailure(t *testing.T) {
 		t.Fatalf("status = %s, want completed", good.Status)
 	}
 }
+
+func TestSetDirPersistsAndEnablesBackups(t *testing.T) {
+	pool, serverPath := tempServerDB(t)
+
+	m := newManager(t, pool, serverPath, "", "", 4)
+	if _, err := m.Run(context.Background()); err == nil {
+		t.Fatal("expected a run without a directory to fail")
+	}
+	if err := m.SetDir(context.Background(), "relative/backups"); err == nil {
+		t.Fatal("expected a relative directory to be rejected")
+	}
+	libRoot := filepath.Join(t.TempDir(), "alpha")
+	registerLibrary(t, library.NewManager(pool, testLogger(), audit.New(pool, testLogger()), crypto.NewKeys("")), libRoot)
+	if err := m.SetDir(context.Background(), filepath.Join(libRoot, "backups")); err == nil {
+		t.Fatal("expected a directory inside a library to be rejected")
+	}
+
+	dir := filepath.Join(t.TempDir(), "nested", "backups")
+	if err := m.SetDir(context.Background(), dir); err != nil {
+		t.Fatalf("set dir: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("directory not created: %v", err)
+	}
+	rec, err := m.Run(context.Background())
+	if err != nil {
+		t.Fatalf("backup run: %v", err)
+	}
+	if rec.Status != StatusCompleted || !strings.HasPrefix(rec.Destination, dir) {
+		t.Fatalf("unexpected record: status=%s dest=%s", rec.Status, rec.Destination)
+	}
+
+	// A fresh manager picks the stored directory over its env default.
+	again := newManager(t, pool, serverPath, "/env/default", "", 4)
+	if err := again.Load(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := again.Dir(); got != dir {
+		t.Fatalf("Dir() = %q, want %q", got, dir)
+	}
+}

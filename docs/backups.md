@@ -126,6 +126,8 @@ All endpoints are admin-only:
 | ------ | ----------------------------------- | ------------------------------- |
 | POST   | `/api/v1/backups`                   | Run a backup now (synchronously)|
 | GET    | `/api/v1/backups`                   | List recent records             |
+| GET    | `/api/v1/backups/settings`          | Read the backup policy          |
+| PUT    | `/api/v1/backups/settings`          | Set the backup directory        |
 | GET    | `/api/v1/backups/{id}`              | Get one record                  |
 | POST   | `/api/v1/backups/{id}/verify`       | Re-verify a completed backup    |
 | POST   | `/api/v1/backups/{id}/restore`      | Restore into a destination      |
@@ -133,6 +135,11 @@ All endpoints are admin-only:
 A run that is already in progress is refused rather than queued.
 
 ## Configuration
+
+The backup directory can be set by an administrator on the Backups page (or
+`PUT /api/v1/backups/settings`). That choice is stored in the server database
+and wins over `CAIRN_BACKUP_DIR`, which only provides the starting value. The
+path must be absolute and outside every library; it is created if missing.
 
 | Variable                        | Default | Meaning                                   |
 | ------------------------------- | ------- | ----------------------------------------- |

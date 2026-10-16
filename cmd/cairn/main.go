@@ -262,14 +262,17 @@ func run() error {
 	}
 
 	// Backups: one-shot, scheduled, and restore operations over the server
-	// database and every registered library. The scheduler is a no-op when no
-	// backup directory is configured.
+	// database and every registered library. The directory comes from
+	// CAIRN_BACKUP_DIR unless an administrator set one on the Backups page.
 	backupMgr := backups.NewManager(pool, logger, libraries, backups.Config{
 		Dir:        cfg.BackupDir,
 		Keep:       cfg.BackupKeep,
 		Passphrase: cfg.BackupPassphrase,
 		Interval:   time.Duration(cfg.BackupIntervalMinutes) * time.Minute,
 	}, cfg.DatabasePath())
+	if err := backupMgr.Load(ctx); err != nil {
+		return err
+	}
 	backupMgr.Start(ctx)
 
 	// Frontend: the embedded build by default, an on-disk build in development.

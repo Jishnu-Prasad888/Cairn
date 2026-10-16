@@ -25,6 +25,7 @@ import type {
   Album,
   AlbumListResponse,
   BackupRecord,
+  BackupSettings,
   DuplicatesResponse,
   FaceStatus,
   FaceSummary,
@@ -515,6 +516,11 @@ export const verifyBackup = (id: string) => apiPost<BackupRecord>(`/backups/${id
 
 export const restoreBackup = (id: string, destination: string) =>
   apiPost<BackupRecord>(`/backups/${id}/restore`, { destination });
+
+export const getBackupSettings = () => apiGet<BackupSettings>('/backups/settings');
+
+/** The directory is created if missing; an empty value disables backups. */
+export const setBackupDir = (dir: string) => apiPut<BackupSettings>('/backups/settings', { dir });
 
 /* ------------------------------- users ----------------------------- */
 

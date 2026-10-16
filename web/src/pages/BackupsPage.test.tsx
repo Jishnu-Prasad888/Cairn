@@ -46,10 +46,13 @@ const failedBackup = {
 // GET /backups answers with a bare array, not an envelope.
 const backups = [okBackup, failedBackup];
 
+const settings = { dir: '/mnt/backup', keep: 4, encrypted: true, interval_minutes: 0 };
+
 function setup(overrides: RouteHandler[] = [], options = {}) {
   const fn = mockApi(
     [
       ...overrides,
+      (url) => (url.endsWith('/api/v1/backups/settings') ? json(settings) : undefined),
       (url) => (url.endsWith('/api/v1/backups/b1') ? json(okBackup) : undefined),
       (url) => (url.endsWith('/api/v1/backups') ? json(backups) : undefined),
     ],
@@ -267,5 +270,28 @@ describe('BackupsPage', () => {
 
     expect(await screen.findByTestId('backups-table')).toBeInTheDocument();
     expect(called(fetchMock, 'GET', '/api/v1/backups')).toBe(true);
+  });
+
+  it('asks for a backup folder before a backup can run, and saves one', async () => {
+    const fn = setup([
+      (url, init) =>
+        url.endsWith('/api/v1/backups/settings') && init?.method === 'PUT'
+          ? json({ ...settings, dir: '/srv/backups' })
+          : undefined,
+      (url) =>
+        url.endsWith('/api/v1/backups/settings') ? json({ ...settings, dir: '' }) : undefined,
+    ]);
+
+    expect(await screen.findByTestId('backup-folder-missing')).toBeInTheDocument();
+    expect(screen.getByTestId('run-backup')).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('backup-folder-input'), {
+      target: { value: '/srv/backups' },
+    });
+    fireEvent.click(screen.getByTestId('backup-folder-save'));
+
+    await waitFor(() => expect(screen.getByTestId('run-backup')).toBeEnabled());
+    expect(screen.queryByTestId('backup-folder-missing')).not.toBeInTheDocument();
+    expect(bodyOf(fn, 'PUT', '/api/v1/backups/settings')).toEqual({ dir: '/srv/backups' });
   });
 });

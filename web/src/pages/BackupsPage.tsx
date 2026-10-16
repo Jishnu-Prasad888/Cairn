@@ -12,14 +12,23 @@
  * machine.
  */
 
-import { useCallback, useState } from 'react';
+import { type FormEvent, useCallback, useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
 import { useResource } from '../api/resources';
-import { getBackup, listBackups, restoreBackup, runBackup, verifyBackup } from '../api/queries';
-import type { BackupRecord } from '../api/types';
+import {
+  getBackup,
+  getBackupSettings,
+  listBackups,
+  restoreBackup,
+  runBackup,
+  setBackupDir,
+  verifyBackup,
+} from '../api/queries';
+import type { BackupRecord, BackupSettings } from '../api/types';
 import { formatBytes } from '../api/types';
 import { ConfirmDialog, Dialog, PromptDialog } from '../components/Dialog';
+import ServerFolderBrowser, { FolderOpenIcon } from '../components/ServerFolderBrowser';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import './BackupsPage.css';
 
@@ -204,6 +213,122 @@ function BackupDetailDialog({
   );
 }
 
+/**
+ * Where backups go. The folder lives on the server, so this is a path on the
+ * server's disk; the server creates it and checks it is writable on save.
+ */
+function BackupFolderSection({
+  settings,
+  onSaved,
+}: {
+  settings: BackupSettings;
+  onSaved: (next: BackupSettings) => void;
+}) {
+  const [dir, setDir] = useState(settings.dir);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+
+  const saveDir = (target: string) => {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    setBackupDir(target)
+      .then((next) => {
+        // The server cleans the path; show what it actually stored.
+        setDir(next.dir);
+        onSaved(next);
+        setSaved(true);
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setBusy(false));
+  };
+
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    saveDir(dir.trim());
+  };
+
+  return (
+    <section className="backup-folder" aria-labelledby="backup-folder-title">
+      <h2 id="backup-folder-title">Backup folder</h2>
+      {!settings.dir && (
+        <p className="muted backups-warning" data-testid="backup-folder-missing">
+          No backup folder is set, so backups cannot run. Choose a folder on the server — ideally on
+          a different disk from your libraries.
+        </p>
+      )}
+      <form className="backup-folder-form" onSubmit={save}>
+        <label className="field">
+          <span className="field-label">Folder on the server</span>
+          <input
+            type="text"
+            value={dir}
+            placeholder="/mnt/backup-disk/cairn"
+            onChange={(e) => {
+              setDir(e.target.value);
+              setSaved(false);
+            }}
+            disabled={busy}
+            data-testid="backup-folder-input"
+          />
+        </label>
+        <button
+          type="button"
+          className="button backup-folder-browse"
+          onClick={() => setBrowsing((open) => !open)}
+          aria-expanded={browsing}
+          disabled={busy}
+          title="Browse folders on the server"
+          data-testid="backup-folder-browse"
+        >
+          <FolderOpenIcon />
+          <span>Browse</span>
+        </button>
+        <button
+          type="submit"
+          className="button"
+          disabled={busy || dir.trim() === settings.dir}
+          data-testid="backup-folder-save"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </form>
+      {browsing && (
+        <ServerFolderBrowser
+          start={dir.trim().startsWith('/') ? dir.trim() : ''}
+          onChoose={(chosen) => {
+            // Choosing a folder is the whole intent, so save it straight away.
+            setDir(chosen);
+            setBrowsing(false);
+            saveDir(chosen);
+          }}
+          onCancel={() => setBrowsing(false)}
+        />
+      )}
+      <p className="muted backup-folder-hint">
+        An absolute path. It is created if missing and must not be inside a library. Keeps the{' '}
+        {settings.keep} most recent backups
+        {settings.interval_minutes > 0
+          ? `, runs every ${settings.interval_minutes} minutes`
+          : ', runs only when you click Back up now'}
+        {settings.encrypted ? ', encrypted' : ''}.
+      </p>
+      {saved && (
+        <p className="muted" role="status">
+          {settings.dir ? 'Backup folder saved.' : 'Backups disabled.'}
+        </p>
+      )}
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function BackupsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -215,6 +340,13 @@ export default function BackupsPage() {
     [],
     isAdmin,
   );
+  const settings = useResource(
+    useCallback(() => getBackupSettings(), []),
+    [],
+    isAdmin,
+  );
+  const [savedSettings, setSavedSettings] = useState<BackupSettings | null>(null);
+  const currentSettings = savedSettings ?? settings.data;
   const [detailId, setDetailId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [confirmRun, setConfirmRun] = useState(false);
@@ -283,7 +415,7 @@ export default function BackupsPage() {
               setRunning(true);
               setConfirmRun(true);
             }}
-            disabled={running}
+            disabled={running || currentSettings?.dir === ''}
             data-testid="run-backup"
           >
             Back up now
@@ -302,6 +434,10 @@ export default function BackupsPage() {
         <p className="muted" role="status" data-testid="backup-notice">
           {notice}
         </p>
+      )}
+
+      {currentSettings && (
+        <BackupFolderSection settings={currentSettings} onSaved={setSavedSettings} />
       )}
 
       {latest?.same_device && (

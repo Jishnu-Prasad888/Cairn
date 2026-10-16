@@ -1,0 +1,65 @@
+/* The server folder browser shared by Libraries and Backups. */
+
+.folder-browser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.folder-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.folder-browser-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.folder-browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.folder-browser-list li {
+  padding: var(--space-1) 0;
+}
+
+.folder-browser-item {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  text-align: left;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.folder-browser-item:hover,
+.folder-browser-item:focus-visible {
+  background: var(--color-selection);
+}
+
+.folder-browser-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}

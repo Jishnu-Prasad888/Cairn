@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,6 +51,9 @@ type Manager struct {
 	store  *Store
 	cfg    Config
 	server string // absolute path of the server-level cairn.db
+
+	// dirMu guards cfg.Dir, which an administrator can change at runtime.
+	dirMu sync.RWMutex
 
 	busy    atomic.Bool
 	skipped atomic.Int64
@@ -87,7 +91,86 @@ func (m *Manager) Get(ctx context.Context, id string) (Record, error) {
 }
 
 // BackupConfig exposes the effective configuration (for the API response).
-func (m *Manager) BackupConfig() Config { return m.cfg }
+func (m *Manager) BackupConfig() Config {
+	c := m.cfg
+	c.Dir = m.Dir()
+	return c
+}
+
+// dirKey is the server_settings row holding the administrator's backup
+// directory. When present it wins over CAIRN_BACKUP_DIR.
+const dirKey = "backup.dir"
+
+// Dir reports the directory backups are currently written to ("" = disabled).
+func (m *Manager) Dir() string {
+	m.dirMu.RLock()
+	defer m.dirMu.RUnlock()
+	return m.cfg.Dir
+}
+
+// Load applies the stored backup directory, if an administrator set one.
+func (m *Manager) Load(ctx context.Context) error {
+	var raw string
+	err := m.db.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = ?`, dirKey).Scan(&raw)
+	switch {
+	case err == nil:
+		var dir string
+		if json.Unmarshal([]byte(raw), &dir) == nil {
+			m.dirMu.Lock()
+			m.cfg.Dir = dir
+			m.dirMu.Unlock()
+		}
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return err
+	}
+	return nil
+}
+
+// SetDir validates, stores and applies a new backup directory. An empty dir
+// disables backups. The directory is created if missing and must be writable
+// and outside every library root, so the indexer never picks backups up as
+// media.
+func (m *Manager) SetDir(ctx context.Context, dir string) error {
+	dir = strings.TrimSpace(dir)
+	if dir != "" {
+		if !filepath.IsAbs(dir) {
+			return errors.New("backup directory must be an absolute path")
+		}
+		dir = filepath.Clean(dir)
+		libs, err := m.libs.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, l := range libs {
+			root := filepath.Clean(l.Root)
+			if dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
+				return fmt.Errorf("backup directory must not be inside the library %q", l.Name)
+			}
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create backup directory: %w", err)
+		}
+		probe, err := os.CreateTemp(dir, ".cairn-write-test-*")
+		if err != nil {
+			return fmt.Errorf("backup directory is not writable: %w", err)
+		}
+		_ = probe.Close()
+		_ = os.Remove(probe.Name())
+	}
+	raw, _ := json.Marshal(dir)
+	if _, err := m.db.ExecContext(ctx, `
+		INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		dirKey, string(raw), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	m.dirMu.Lock()
+	m.cfg.Dir = dir
+	m.dirMu.Unlock()
+	m.logger.Info("backup directory changed", "dir", dir)
+	return nil
+}
 
 // Trigger requests a backup run from the scheduler (non-blocking).
 func (m *Manager) Trigger() {
@@ -98,11 +181,12 @@ func (m *Manager) Trigger() {
 	}
 }
 
-// Start launches the scheduler goroutine. Call it exactly once.
+// Start launches the scheduler goroutine. Call it exactly once. It runs even
+// without a directory, since an administrator can set one at runtime; each
+// run checks the directory when it starts.
 func (m *Manager) Start(ctx context.Context) {
-	if m.cfg.Dir == "" {
-		m.logger.Info("backups disabled: no backup directory configured")
-		return
+	if m.Dir() == "" {
+		m.logger.Info("backups disabled until a backup directory is configured")
 	}
 	go func() {
 		var tick <-chan time.Time
@@ -112,7 +196,7 @@ func (m *Manager) Start(ctx context.Context) {
 			tick = t.C
 			m.logger.Info("backup scheduler started",
 				"interval", m.cfg.Interval.String(),
-				"dir", m.cfg.Dir, "keep", m.cfg.Keep,
+				"dir", m.Dir(), "keep", m.cfg.Keep,
 				"encrypted", m.cfg.Passphrase != "")
 		}
 		for {
@@ -201,8 +285,9 @@ func (m *Manager) Verify(ctx context.Context, id string) (*Record, error) {
 // RunBackup performs one full backup synchronously. Callers should normally
 // use Run; this is exposed for tests.
 func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
-	if m.cfg.Dir == "" {
-		return nil, errors.New("backup directory not configured")
+	dir := m.Dir()
+	if dir == "" {
+		return nil, errors.New("backup directory not configured; set one on the Backups page")
 	}
 	now := time.Now().UTC()
 	m.skipped.Store(0)
@@ -218,7 +303,7 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 	}
 	m.logger.Info("backup starting", "backup_id", rec.ID)
 
-	destBase := filepath.Join(m.cfg.Dir, "cairn-backup-"+now.Format("20060102-150405"))
+	destBase := filepath.Join(dir, "cairn-backup-"+now.Format("20060102-150405"))
 	dest := destBase
 	for i := 1; ; i++ {
 		if _, err := os.Stat(dest); os.IsNotExist(err) {
@@ -650,11 +735,12 @@ func (m *Manager) prune(ctx context.Context, current *Record) {
 		return recs[i].CreatedAt.After(recs[j].CreatedAt)
 	})
 	kept := 0
+	dir := m.Dir()
 	for _, r := range recs {
 		if r.ID == current.ID || r.Status != StatusCompleted || r.Destination == "" {
 			continue
 		}
-		if !strings.HasPrefix(r.Destination, m.cfg.Dir+string(filepath.Separator)) {
+		if !strings.HasPrefix(r.Destination, dir+string(filepath.Separator)) {
 			continue
 		}
 		kept++

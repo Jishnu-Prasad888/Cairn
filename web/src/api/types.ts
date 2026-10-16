@@ -479,6 +479,15 @@ export interface BackupRecord {
   created_at: string;
 }
 
+export interface BackupSettings {
+  /** Where backups are written; empty means backups are disabled. */
+  dir: string;
+  keep: number;
+  encrypted: boolean;
+  /** Scheduled cadence in minutes; 0 means manual only. */
+  interval_minutes: number;
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];

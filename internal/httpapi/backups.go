@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -137,4 +138,45 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request, u *
 		return
 	}
 	writeJSON(w, s.logger, http.StatusOK, toBackupResponse(rec))
+}
+
+// backupSettings is the administrator-editable backup policy.
+type backupSettings struct {
+	// Dir is where backups are written; empty means backups are disabled.
+	Dir       string `json:"dir"`
+	Keep      int    `json:"keep"`
+	Encrypted bool   `json:"encrypted"`
+	// IntervalMinutes is the scheduled cadence (0 = manual only).
+	IntervalMinutes int `json:"interval_minutes"`
+}
+
+func (s *Server) currentBackupSettings() backupSettings {
+	c := s.backups.BackupConfig()
+	return backupSettings{Dir: c.Dir, Keep: c.Keep, Encrypted: c.Passphrase != "",
+		IntervalMinutes: int(c.Interval / time.Minute)}
+}
+
+// handleGetBackupSettings — GET /api/v1/backups/settings
+func (s *Server) handleGetBackupSettings(w http.ResponseWriter, _ *http.Request, _ *auth.User) {
+	writeJSON(w, s.logger, http.StatusOK, s.currentBackupSettings())
+}
+
+// handlePutBackupSettings — PUT /api/v1/backups/settings
+// Sets the backup directory. It is created if missing and must be writable;
+// an empty value disables backups.
+func (s *Server) handlePutBackupSettings(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	var in struct {
+		Dir *string `json:"dir"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil || in.Dir == nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+			CodeBadRequest, "Body must contain \"dir\".")
+		return
+	}
+	if err := s.backups.SetDir(r.Context(), *in.Dir); err != nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest, CodeBadRequest,
+			"Could not use that backup directory: "+err.Error())
+		return
+	}
+	writeJSON(w, s.logger, http.StatusOK, s.currentBackupSettings())
 }

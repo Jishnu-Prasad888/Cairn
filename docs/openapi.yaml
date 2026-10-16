@@ -2903,8 +2903,9 @@ paths:
       summary: Run a backup now
       description: >
         Admin only. Runs a full backup synchronously and returns the resulting
-        record. Arguments are server-side (CAIRN_BACKUP_DIR, passphrase,
-        retention); no per-call override is accepted. A run that is already in
+        record. Arguments are server-side (the backup directory from
+        /backups/settings or CAIRN_BACKUP_DIR, passphrase, retention); no
+        per-call override is accepted. A run that is already in
         progress is refused with 409 Conflict.
       responses:
         '200':
@@ -2945,6 +2946,60 @@ paths:
           $ref: '#/components/responses/Forbidden'
       security:
         - cookieAuth: []
+
+  /backups/settings:
+    get:
+      tags: [Backups]
+      operationId: getBackupSettings
+      summary: Get the backup policy
+      description: Admin only. The effective backup directory, retention, schedule and encryption.
+      responses:
+        '200':
+          description: The backup settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags: [Backups]
+      operationId: setBackupSettings
+      summary: Set the backup directory
+      description: >
+        Admin only. Stores the backup directory in the server database, where it
+        wins over CAIRN_BACKUP_DIR. The path must be absolute and outside every
+        library; it is created if missing and must be writable. An empty value
+        disables backups.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dir]
+              properties:
+                dir:
+                  type: string
+      responses:
+        '200':
+          description: The updated settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupSettings'
+        '400':
+          description: The directory is not usable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /backups/{id}:
     get:
@@ -3695,6 +3750,20 @@ components:
       schema:
         type: string
   schemas:
+    BackupSettings:
+      type: object
+      required: [dir, keep, encrypted, interval_minutes]
+      properties:
+        dir:
+          type: string
+          description: Where backups are written; empty means disabled
+        keep:
+          type: integer
+        encrypted:
+          type: boolean
+        interval_minutes:
+          type: integer
+          description: Scheduled cadence; 0 means manual only
     BackupRecord:
       type: object
       required: [id, status, destination, started_at, libraries, files, bytes, stored_bytes, created_at]
