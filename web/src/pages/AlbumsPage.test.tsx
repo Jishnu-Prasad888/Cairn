@@ -7,6 +7,7 @@ import {
   called,
   fileFixture,
   json,
+  libraryFixture,
   member,
   mockApi,
   noContent,
@@ -181,6 +182,44 @@ describe('AlbumsPage', () => {
     fireEvent.click(screen.getByTestId('toggle-timeline'));
 
     expect(await screen.findByTestId('timeline')).toBeInTheDocument();
+  });
+
+  it("lists an album's files from the album's own library, not the primary one", async () => {
+    const libraries = [
+      libraryFixture(),
+      libraryFixture({ id: 'lib2', name: 'Videos', root: '/srv/videos' }),
+    ];
+    mockApi(
+      [
+        (url) =>
+          url.endsWith('/api/v1/libraries/lib2/albums')
+            ? json({
+                albums: [
+                  {
+                    id: 'b1',
+                    name: 'Trip',
+                    description: '',
+                    library_id: 'lib2',
+                    created_at: '2026-01-02T00:00:00Z',
+                    updated_at: '2026-01-05T00:00:00Z',
+                  },
+                ],
+              })
+            : undefined,
+        (url) =>
+          url.endsWith('/api/v1/libraries/lib2/albums/b1/files')
+            ? json({ files: [fileFixture({ id: 'g1', library_id: 'lib2', name: 'trip.jpg' })] })
+            : undefined,
+        (url) => (url.endsWith('/api/v1/libraries/lib1/albums') ? json({ albums: [] }) : undefined),
+        (url) => (url.includes('/favorites') ? json({ files: [] }) : undefined),
+      ],
+      { libraries },
+    );
+    renderPage(<AlbumsPage />, { libraries });
+
+    fireEvent.click((await screen.findAllByRole('button', { name: /Trip/ }))[0]!);
+
+    expect(await screen.findByText('trip.jpg')).toBeInTheDocument();
   });
 
   it('returns to the album list from the detail view', async () => {

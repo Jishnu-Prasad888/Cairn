@@ -12,7 +12,7 @@ import { matchPath, useLocation, useNavigate, useSearchParams } from 'react-rout
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
-import { useAllLibrariesResource, useLibraryResource } from '../api/resources';
+import { useAllLibrariesResource, useResource } from '../api/resources';
 import {
   createAlbum,
   deleteAlbum,
@@ -410,12 +410,14 @@ function AlbumDetail({
     storeTimelineOpen(open);
   };
 
-  const files = useLibraryResource(
+  // The album's files live in the album's library, which is not necessarily
+  // the primary one when several libraries are open.
+  const files = useResource(
     useCallback(
-      (id: string) => listAlbumFiles(id, album.id).then((r) => r.files ?? []),
-      [album.id],
+      () => listAlbumFiles(libraryId, album.id).then((r) => r.files ?? []),
+      [libraryId, album.id],
     ),
-    [album.id],
+    [libraryId, album.id],
   );
   const list = files.data ?? EMPTY;
 
