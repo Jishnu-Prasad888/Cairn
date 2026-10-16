@@ -25,9 +25,13 @@ import { AlbumCard } from '../components/albums/AlbumCard';
 import { useFileOperations } from '../components/FileOperations';
 import { LibraryGatePage } from '../components/LibraryGatePage';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
+import { useFavorites } from '../components/media/useFavorites';
+import { useMediaActions } from '../components/media/useMediaActions';
+import { useSelection } from '../components/media/useSelection';
 import { gridMetrics } from '../components/media/layout';
 import { EmptyState, ErrorState, LibraryOfflineNotice } from '../components/States';
 import { Icon } from '../components/ui/Icon';
+import { Menu, type MenuAnchor, type MenuEntry } from '../components/ui/Menu';
 import { ViewerModal } from '../components/ViewerModal';
 import { formatDate, greeting } from '../lib/dates';
 import { extractExcerpt } from '../lib/markdown';
@@ -213,6 +217,20 @@ function Home({ library }: { library: Library }) {
     : [];
   const name = user?.username;
 
+  // Right-click on a recent photo opens the same menu as everywhere else. The
+  // grid itself stays read-only (no selection circles), so the selection only
+  // exists to satisfy the shared actions.
+  const favorites = useFavorites([libraryId]);
+  const selection = useSelection(recent, 'home');
+  const actions = useMediaActions({
+    libraryId,
+    selection,
+    favorites,
+    ops,
+    onChanged: home.reload,
+  });
+  const [menu, setMenu] = useState<{ anchor: MenuAnchor; items: MenuEntry[] } | null>(null);
+
   const nothingYet =
     data !== null &&
     !scanning &&
@@ -280,6 +298,10 @@ function Home({ library }: { library: Library }) {
               libraryId={libraryId}
               files={recent}
               onOpen={ops.openViewer}
+              favorites={favorites.ids}
+              onContextMenu={(file, x, y) =>
+                setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
+              }
               label="Recently added photos"
               testId="home-recent-grid"
             />
@@ -405,7 +427,16 @@ function Home({ library }: { library: Library }) {
           onClose={ops.closeViewer}
         />
       )}
+      {menu && (
+        <Menu
+          anchor={menu.anchor}
+          items={menu.items}
+          onClose={() => setMenu(null)}
+          label="Photo actions"
+        />
+      )}
       {ops.dialogs}
+      {actions.dialogs}
     </main>
   );
 }

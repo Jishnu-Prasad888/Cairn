@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { apiError, fileFixture, json, mockApi, originalFetch, renderPage } from '../test/harness';
@@ -100,6 +100,17 @@ describe('HomePage', () => {
     const albums = await screen.findByTestId('home-albums');
     expect(within(albums).getByText('Vacation')).toBeInTheDocument();
     expect(within(albums).getByText('3 items')).toBeInTheDocument();
+  });
+
+  it('opens the app menu, not the browser one, on a right-click of a recent photo', async () => {
+    setup();
+
+    const recent = await screen.findByTestId('home-recent');
+    const tile = (await within(recent).findAllByTestId('media-tile'))[0]!;
+    fireEvent.contextMenu(within(tile).getAllByRole('button')[0]!);
+
+    expect(await screen.findByRole('menuitem', { name: 'Add tag…' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Add to album' })).toBeInTheDocument();
   });
 
   it('shows named people', async () => {

@@ -31,13 +31,18 @@ export function useFavorites(libraryIds: readonly string[], refreshKey = 0): Fav
   const [state, setState] = useState<{ key: string; ids: ReadonlySet<string> } | null>(null);
   const key = libraryIds.join(',');
 
+  // Keyed on the ids' value, not the array: callers often pass a fresh
+  // `[libraryId]` each render, and depending on that identity re-fetched in a
+  // tight loop (every response re-rendered, which fetched again).
   useEffect(() => {
     if (!key) return;
     let cancelled = false;
     Promise.allSettled(
-      libraryIds.map((libraryId) =>
-        listFavorites(libraryId).then((resp) => (resp.files ?? []).map((f) => f.id)),
-      ),
+      key
+        .split(',')
+        .map((libraryId) =>
+          listFavorites(libraryId).then((resp) => (resp.files ?? []).map((f) => f.id)),
+        ),
     ).then((results) => {
       if (cancelled) return;
       const ids = new Set<string>();
@@ -51,7 +56,7 @@ export function useFavorites(libraryIds: readonly string[], refreshKey = 0): Fav
     return () => {
       cancelled = true;
     };
-  }, [key, refreshKey, libraryIds]);
+  }, [key, refreshKey]);
 
   const ids = state && state.key === key ? state.ids : EMPTY;
 
@@ -66,7 +71,7 @@ export function useFavorites(libraryIds: readonly string[], refreshKey = 0): Fav
       });
       const results = await Promise.allSettled(
         targets.map((t) => {
-          const libraryId = t.libraryId || libraryIds[0] || '';
+          const libraryId = t.libraryId || key.split(',')[0] || '';
           return value ? addFavorite(libraryId, t.id) : removeFavorite(libraryId, t.id);
         }),
       );
@@ -80,7 +85,7 @@ export function useFavorites(libraryIds: readonly string[], refreshKey = 0): Fav
       }
       return failed.length;
     },
-    [key, libraryIds],
+    [key],
   );
 
   const has = useCallback((id: string) => ids.has(id), [ids]);
