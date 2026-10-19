@@ -103,6 +103,16 @@ func writeThumb(img image.Image, cairnDir, fileID string, keys *crypto.Keys) err
 	return nil
 }
 
+// ThumbModTime returns when fileID's thumbnail was last written. A missing
+// thumbnail returns an os.ErrNotExist-wrapped error.
+func ThumbModTime(cairnDir, fileID string) (time.Time, error) {
+	info, err := os.Stat(ThumbPath(cairnDir, fileID))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("stat thumbnail: %w", err)
+	}
+	return info.ModTime(), nil
+}
+
 // ReadThumb reads and decrypts the thumbnail for fileID, returning the JPEG
 // bytes and the file's modification time. A missing thumbnail returns an
 // os.ErrNotExist-wrapped error; legacy plaintext thumbnails are returned

@@ -8,13 +8,17 @@ package webui
 
 import (
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,7 +39,7 @@ func Handler(distDir string) (http.Handler, error) {
 		if err := requireFile(root, "index.html"); err != nil {
 			return nil, fmt.Errorf("embedded frontend is incomplete: %w", err)
 		}
-		return &spaHandler{fsys: root}, nil
+		return &spaHandler{fsys: root, immutable: true}, nil
 	}
 
 	info, err := os.Stat(distDir)
@@ -60,6 +64,62 @@ func requireFile(fsys fs.FS, name string) error {
 // spaHandler serves files from an fs.FS with single-page-app fallback.
 type spaHandler struct {
 	fsys fs.FS
+
+	// immutable is set for the embedded build, whose files cannot change
+	// while the process runs, so each file's gzip form and ETag are worked
+	// out once and kept. An on-disk dev build is read fresh every time.
+	immutable bool
+	cache     sync.Map // name -> *asset
+}
+
+// asset is one prepared response body.
+type asset struct {
+	data []byte
+	gz   []byte // nil when compression does not pay off
+	etag string
+}
+
+// compressible lists the text types worth gzipping; fonts and images are
+// already compressed.
+var compressible = map[string]bool{
+	".html": true, ".js": true, ".css": true, ".svg": true, ".json": true,
+	".txt": true, ".map": true, ".webmanifest": true,
+}
+
+func prepare(name string, data []byte) *asset {
+	sum := sha256.Sum256(data)
+	a := &asset{data: data, etag: `"` + hex.EncodeToString(sum[:12]) + `"`}
+	if compressible[path.Ext(name)] && len(data) > 1024 {
+		var buf bytes.Buffer
+		zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		_, _ = zw.Write(data)
+		if zw.Close() == nil && buf.Len() < len(data)*9/10 {
+			a.gz = buf.Bytes()
+		}
+	}
+	return a
+}
+
+func (h *spaHandler) load(cleaned string) (*asset, string, error) {
+	if h.immutable {
+		if v, ok := h.cache.Load(cleaned); ok {
+			return v.(*asset), cleaned, nil
+		}
+	}
+	data, name, err := h.readOrFallback(cleaned)
+	if err != nil {
+		return nil, "", err
+	}
+	if !h.immutable {
+		return &asset{data: data}, name, nil
+	}
+	// Unknown paths all fall back to index.html; cache them under that name
+	// so arbitrary client routes cannot grow the cache.
+	if v, ok := h.cache.Load(name); ok {
+		return v.(*asset), name, nil
+	}
+	v, _ := h.cache.LoadOrStore(name, prepare(name, data))
+	return v.(*asset), name, nil
 }
 
 func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +138,7 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cleaned = "index.html"
 	}
 
-	data, name, err := h.readOrFallback(cleaned)
+	a, name, err := h.load(cleaned)
 	if err != nil {
 		http.Error(w, "frontend not available", http.StatusInternalServerError)
 		return
@@ -89,8 +149,57 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
+	if a.etag != "" {
+		w.Header().Set("ETag", a.etag)
+	}
 
-	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
+	body := a.data
+	if a.gz != nil {
+		w.Header().Add("Vary", "Accept-Encoding")
+		if acceptsGzip(r) && r.Header.Get("Range") == "" {
+			// ServeContent would sniff the type from the compressed bytes.
+			if ct := mimeType(name); ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			w.Header().Set("Content-Encoding", "gzip")
+			body = a.gz
+		}
+	}
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
+}
+
+// acceptsGzip reports whether the client listed gzip in Accept-Encoding with
+// a non-zero quality.
+func acceptsGzip(r *http.Request) bool {
+	for part := range strings.SplitSeq(r.Header.Get("Accept-Encoding"), ",") {
+		coding, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(coding), "gzip") {
+			continue
+		}
+		q := strings.ReplaceAll(strings.TrimSpace(params), " ", "")
+		return q != "q=0" && q != "q=0.0" && q != "q=0.00" && q != "q=0.000"
+	}
+	return false
+}
+
+func mimeType(name string) string {
+	switch path.Ext(name) {
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".js":
+		return "text/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".json", ".map":
+		return "application/json"
+	case ".webmanifest":
+		return "application/manifest+json"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	}
+	return ""
 }
 
 // readOrFallback reads the requested file; if it does not exist it returns

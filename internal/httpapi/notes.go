@@ -25,14 +25,14 @@ func (s *Server) openNoteStore(
 		return nil, nil, false
 	}
 	cairnDir := lib.Root + "/.cairn"
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		s.logger.Error("open library db for notes", "library_id", lib.ID, "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open library database.")
 		return nil, nil, false
 	}
-	return notes.NewNoteStore(db, lib.ID), func() { _ = db.Close() }, true
+	return notes.NewNoteStore(db, lib.ID), release, true
 }
 
 // handleGetFileNote — GET /api/v1/libraries/{id}/files/{fileID}/note

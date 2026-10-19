@@ -455,7 +455,7 @@ describe('MediaPage', () => {
     await waitFor(() => {
       expect(within(dialog).getByRole('img')).toHaveAttribute(
         'src',
-        '/api/v1/libraries/lib1/files/f1/thumbnail',
+        expect.stringMatching(/^\/api\/v1\/libraries\/lib1\/files\/f1\/thumbnail(\?v=|$)/),
       );
     });
   });

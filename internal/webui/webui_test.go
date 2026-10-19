@@ -1,12 +1,15 @@
 package webui
 
 import (
+	"compress/gzip"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 // buildTestDist writes a minimal real-world-like build output to a temp
@@ -197,5 +200,54 @@ func TestEmbeddedHandler(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "Cairn") {
 		t.Errorf("embedded placeholder does not reference Cairn")
+	}
+}
+
+func TestServesGzipWhenAccepted(t *testing.T) {
+	big := strings.Repeat("console.log('cairn');\n", 400)
+	h := &spaHandler{fsys: fstest.MapFS{
+		"index.html":    {Data: []byte("<!doctype html>")},
+		"assets/app.js": {Data: []byte(big)},
+	}, immutable: true}
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/javascript") {
+		t.Errorf("Content-Type = %q", got)
+	}
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := io.ReadAll(zr)
+	if err != nil || string(plain) != big {
+		t.Fatalf("decompressed body mismatch (err %v)", err)
+	}
+
+	// No Accept-Encoding: the plain bytes.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != big {
+		t.Fatal("plain request got an encoded body")
+	}
+
+	// The ETag answers a revalidation of index.html with 304.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("index.html has no ETag")
+	}
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("If-None-Match", etag)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("revalidation status = %d, want 304", rec.Code)
 	}
 }

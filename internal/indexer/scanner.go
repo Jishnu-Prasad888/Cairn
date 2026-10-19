@@ -23,6 +23,7 @@ const cairnDirName = ".cairn"
 type Scanner struct {
 	store  *StateStore
 	logger *slog.Logger
+	buf    []byte // hashing buffer, reused across files
 }
 
 // NewScanner constructs a Scanner backed by the given per-library StateStore.
@@ -60,6 +61,16 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 	// can mark unvisited records as missing afterwards.
 	seenIDs := make(map[string]struct{})
 
+	// Writes are batched; see WriteBatch. A cancelled scan still keeps what
+	// it found, as it did when every file was committed on its own.
+	batch := sc.store.NewBatch()
+	flush := func() {
+		for _, err := range batch.Flush(context.WithoutCancel(ctx)) {
+			sc.logger.Warn("index write error", "error", err)
+			result.Errors++
+		}
+	}
+
 	walkErr := filepath.WalkDir(root, func(absPath string, d os.DirEntry, walkInErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err // propagate cancellation
@@ -94,7 +105,7 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 			return nil
 		}
 
-		change, err := sc.reconcileFile(ctx, relPath, absPath, info, now,
+		change, err := sc.reconcileFile(batch, relPath, absPath, info, now,
 			existingByPath, existingByHash, seenIDs)
 		if err != nil {
 			sc.logger.Warn("reconcile error", "path", relPath, "error", err)
@@ -102,7 +113,11 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 			return nil
 		}
 		result.TotalFiles++
-		result.Changes = append(result.Changes, change)
+		// Unchanged files are only counted: on a rescan they are nearly every
+		// file, and nothing downstream acts on them.
+		if change.Kind != ChangeUnchanged {
+			result.Changes = append(result.Changes, change)
+		}
 		switch change.Kind {
 		case ChangeNew:
 			result.NewFiles++
@@ -113,8 +128,12 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 		case ChangeUnchanged:
 			result.Unchanged++
 		}
+		if batch.Due() {
+			flush()
+		}
 		return nil
 	})
+	flush()
 
 	if walkErr != nil && !isContextErr(walkErr) {
 		return result, fmt.Errorf("walk %s: %w", root, walkErr)
@@ -143,7 +162,7 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 
 // reconcileFile determines what happened to one file and persists the update.
 func (sc *Scanner) reconcileFile(
-	ctx context.Context,
+	batch *WriteBatch,
 	relPath, absPath string,
 	info os.FileInfo,
 	now time.Time,
@@ -158,15 +177,16 @@ func (sc *Scanner) reconcileFile(
 		seenIDs[existing.ID] = struct{}{}
 		existing.LastSeenAt = now
 		existing.Status = StatusPresent
-		if err := sc.store.Upsert(ctx, existing); err != nil {
-			return FileChange{}, err
-		}
+		batch.Upsert(existing)
 		return FileChange{Kind: ChangeUnchanged, File: existing}, nil
 	}
 
 	// Stage 2: size or mtime changed — compute the content hash to distinguish
 	// a genuine modification from a metadata-only change (e.g. touch).
-	hash, err := hashFile(absPath)
+	if sc.buf == nil {
+		sc.buf = make([]byte, hashBufSize)
+	}
+	hash, err := hashFile(absPath, sc.buf)
 	if err != nil {
 		return FileChange{}, fmt.Errorf("hash %s: %w", absPath, err)
 	}
@@ -180,9 +200,7 @@ func (sc *Scanner) reconcileFile(
 		existing.LastSeenAt = now
 		existing.IndexedAt = now
 		seenIDs[existing.ID] = struct{}{}
-		if err := sc.store.Upsert(ctx, existing); err != nil {
-			return FileChange{}, err
-		}
+		batch.Upsert(existing)
 		return FileChange{Kind: ChangeModified, File: existing}, nil
 	}
 
@@ -199,9 +217,7 @@ func (sc *Scanner) reconcileFile(
 			if candidate.Status == StatusPresent || candidate.Status == StatusMissing {
 				// This looks like a move: same content, old entry not yet seen.
 				oldPath := candidate.RelPath
-				if err := sc.store.UpdatePath(ctx, candidate.ID, relPath, now); err != nil {
-					return FileChange{}, err
-				}
+				batch.UpdatePath(candidate.ID, relPath, now)
 				candidate.RelPath = relPath
 				candidate.SizeBytes = info.Size()
 				candidate.ModTime = info.ModTime().UTC()
@@ -231,9 +247,7 @@ func (sc *Scanner) reconcileFile(
 		IndexedAt:   now,
 	}
 	seenIDs[f.ID] = struct{}{}
-	if err := sc.store.Upsert(ctx, f); err != nil {
-		return FileChange{}, err
-	}
+	batch.Upsert(f)
 	existingByPath[relPath] = f
 	existingByHash[hash] = append(existingByHash[hash], f)
 	return FileChange{Kind: ChangeNew, File: f}, nil
@@ -252,10 +266,14 @@ func (sc *Scanner) loadExisting(ctx context.Context) (map[string]*IndexedFile, e
 	return m, nil
 }
 
-// hashFile computes the SHA-256 of a file without loading it into memory.
-// It reads in 32 KiB chunks, keeping peak memory constant regardless of file
-// size. This is safe to call on large video files.
-func hashFile(path string) (string, error) {
+// hashBufSize is the read size for hashing. Larger reads mean fewer system
+// calls on big videos; the buffer is allocated once per scan.
+const hashBufSize = 256 * 1024
+
+// hashFile computes the SHA-256 of a file without loading it into memory,
+// reading through buf, so peak memory is constant regardless of file size.
+// This is safe to call on large video files.
+func hashFile(path string, buf []byte) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open for hashing: %w", err)
@@ -263,7 +281,6 @@ func hashFile(path string) (string, error) {
 	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
-	buf := make([]byte, 32*1024)
 	if _, err := io.CopyBuffer(h, f, buf); err != nil {
 		return "", fmt.Errorf("hash read: %w", err)
 	}

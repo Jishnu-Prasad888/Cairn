@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
+	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 	"github.com/Jishnu-Prasad888/Cairn/internal/ml"
 	_ "modernc.org/sqlite"
 )
@@ -360,8 +361,8 @@ func seedFiles(t *testing.T, root string, files []imgSeed) {
 			n = now
 		}
 		if _, err := db.DB().ExecContext(ctx, `
-			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, status, first_seen_at, last_seen_at, indexed_at)
-			VALUES (?, ?, 1, ?, 'present', ?, ?, ?)`, f.id, rel, n, n, n, n); err != nil {
+			INSERT INTO indexed_files (id, rel_path, size_bytes, mod_time, media_type, status, first_seen_at, last_seen_at, indexed_at)
+			VALUES (?, ?, 1, ?, ?, 'present', ?, ?, ?)`, f.id, rel, n, media.DetectMediaType(rel), n, n, n); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.DB().ExecContext(ctx, `

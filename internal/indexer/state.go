@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/Jishnu-Prasad888/Cairn/internal/media"
 )
 
 // StateStore persists and queries indexed file records in the per-library
@@ -18,31 +20,150 @@ func NewStateStore(db *sql.DB) *StateStore {
 	return &StateStore{db: db}
 }
 
+// upsertQuery inserts or refreshes one indexed file. media_type is derived
+// from the path here so a file is classified the moment it is indexed.
+const upsertQuery = `
+	INSERT INTO indexed_files
+		(id, rel_path, size_bytes, mod_time, content_hash, media_type, status,
+		 first_seen_at, last_seen_at, indexed_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(rel_path) DO UPDATE SET
+		size_bytes    = excluded.size_bytes,
+		mod_time      = excluded.mod_time,
+		content_hash  = excluded.content_hash,
+		media_type    = excluded.media_type,
+		status        = excluded.status,
+		last_seen_at  = excluded.last_seen_at,
+		indexed_at    = excluded.indexed_at`
+
+// updatePathQuery moves an existing record to a new path; the extension may
+// have changed, so media_type is re-derived.
+const updatePathQuery = `
+	UPDATE indexed_files SET rel_path = ?, media_type = ?, last_seen_at = ?, indexed_at = ?,
+	                         status = 'present'
+	WHERE id = ?`
+
+func upsertArgs(f *IndexedFile) []any {
+	return []any{
+		f.ID, f.RelPath, f.SizeBytes, rfc3339(f.ModTime),
+		nullString(f.ContentHash), string(media.DetectMediaType(f.RelPath)), string(f.Status),
+		rfc3339(f.FirstSeenAt), rfc3339(f.LastSeenAt), rfc3339(f.IndexedAt),
+	}
+}
+
+func updatePathArgs(id, newRelPath string, now time.Time) []any {
+	return []any{newRelPath, string(media.DetectMediaType(newRelPath)), rfc3339(now), rfc3339(now), id}
+}
+
 // Upsert inserts or updates an indexed file record. It uses INSERT OR REPLACE
 // so that a re-scan that finds the same file simply refreshes last_seen_at and
 // status without changing first_seen_at.
 func (s *StateStore) Upsert(ctx context.Context, f *IndexedFile) error {
-	const query = `
-		INSERT INTO indexed_files
-			(id, rel_path, size_bytes, mod_time, content_hash, status,
-			 first_seen_at, last_seen_at, indexed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(rel_path) DO UPDATE SET
-			size_bytes    = excluded.size_bytes,
-			mod_time      = excluded.mod_time,
-			content_hash  = excluded.content_hash,
-			status        = excluded.status,
-			last_seen_at  = excluded.last_seen_at,
-			indexed_at    = excluded.indexed_at`
-	_, err := s.db.ExecContext(ctx, query,
-		f.ID, f.RelPath, f.SizeBytes, rfc3339(f.ModTime),
-		nullString(f.ContentHash), string(f.Status),
-		rfc3339(f.FirstSeenAt), rfc3339(f.LastSeenAt), rfc3339(f.IndexedAt),
-	)
-	if err != nil {
+	if _, err := s.db.ExecContext(ctx, upsertQuery, upsertArgs(f)...); err != nil {
 		return fmt.Errorf("upsert indexed file %q: %w", f.RelPath, err)
 	}
 	return nil
+}
+
+// Batch limits: a batch is written once it holds batchMaxOps writes or its
+// oldest write has waited batchMaxAge, whichever comes first. The age bound
+// keeps a slow walk (hashing large files) from holding writes back for long.
+const (
+	batchMaxOps = 500
+	batchMaxAge = 250 * time.Millisecond
+)
+
+// WriteBatch buffers index writes and applies them in one transaction.
+//
+// A scan used to commit every file on its own, so a rescan of 100k unchanged
+// files was 100k transactions. Writes are buffered rather than run inside an
+// open transaction so the database is only locked while a batch is written,
+// never while the scanner is walking or hashing.
+type WriteBatch struct {
+	store *StateStore
+	ops   []batchOp
+	since time.Time
+}
+
+type batchOp struct {
+	query string
+	args  []any
+	desc  string
+}
+
+// NewBatch returns an empty WriteBatch for this store.
+func (s *StateStore) NewBatch() *WriteBatch {
+	return &WriteBatch{store: s}
+}
+
+func (b *WriteBatch) add(op batchOp) {
+	if len(b.ops) == 0 {
+		b.since = time.Now()
+	}
+	b.ops = append(b.ops, op)
+}
+
+// Upsert queues an Upsert of f as it is now.
+func (b *WriteBatch) Upsert(f *IndexedFile) {
+	b.add(batchOp{query: upsertQuery, args: upsertArgs(f), desc: "upsert indexed file " + f.RelPath})
+}
+
+// UpdatePath queues an UpdatePath.
+func (b *WriteBatch) UpdatePath(id, newRelPath string, now time.Time) {
+	b.add(batchOp{query: updatePathQuery, args: updatePathArgs(id, newRelPath, now), desc: "update path for " + id})
+}
+
+// Due reports whether the batch should be flushed now.
+func (b *WriteBatch) Due() bool {
+	return len(b.ops) >= batchMaxOps || (len(b.ops) > 0 && time.Since(b.since) >= batchMaxAge)
+}
+
+// Flush writes every queued operation and empties the batch. They go in one
+// transaction; if that fails, each is retried on its own so one bad write
+// (say, a move onto a path a deleted record still holds) costs that one file
+// rather than the batch. The errors of writes that still failed are returned.
+func (b *WriteBatch) Flush(ctx context.Context) []error {
+	if len(b.ops) == 0 {
+		return nil
+	}
+	defer func() { b.ops = b.ops[:0] }()
+	if b.flushTx(ctx) == nil {
+		return nil
+	}
+	var errs []error
+	for _, op := range b.ops {
+		if _, err := b.store.db.ExecContext(ctx, op.query, op.args...); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", op.desc, err))
+		}
+	}
+	return errs
+}
+
+func (b *WriteBatch) flushTx(ctx context.Context) error {
+	tx, err := b.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmts := map[string]*sql.Stmt{}
+	defer func() {
+		for _, st := range stmts {
+			_ = st.Close()
+		}
+	}()
+	for _, op := range b.ops {
+		st, ok := stmts[op.query]
+		if !ok {
+			if st, err = tx.PrepareContext(ctx, op.query); err != nil {
+				return err
+			}
+			stmts[op.query] = st
+		}
+		if _, err := st.ExecContext(ctx, op.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // GetByPath returns the indexed file record for the given relative path, or
@@ -92,6 +213,7 @@ func (s *StateStore) MarkMissing(ctx context.Context, seenIDs map[string]struct{
 	if err != nil {
 		return 0, err
 	}
+	batch := s.NewBatch()
 	var count int
 	for _, f := range files {
 		if _, seen := seenIDs[f.ID]; seen {
@@ -103,10 +225,16 @@ func (s *StateStore) MarkMissing(ctx context.Context, seenIDs map[string]struct{
 		f.Status = StatusMissing
 		f.LastSeenAt = now
 		f.IndexedAt = now
-		if err := s.Upsert(ctx, f); err != nil {
-			return count, err
-		}
+		batch.Upsert(f)
 		count++
+		if len(batch.ops) >= batchMaxOps {
+			if errs := batch.Flush(ctx); len(errs) > 0 {
+				return 0, errs[0]
+			}
+		}
+	}
+	if errs := batch.Flush(ctx); len(errs) > 0 {
+		return 0, errs[0]
 	}
 	return count, nil
 }
@@ -114,12 +242,7 @@ func (s *StateStore) MarkMissing(ctx context.Context, seenIDs map[string]struct{
 // UpdatePath updates the relative path of an existing record. Used when a
 // move is detected: the old entry's path is replaced with the new location.
 func (s *StateStore) UpdatePath(ctx context.Context, id, newRelPath string, now time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE indexed_files SET rel_path = ?, last_seen_at = ?, indexed_at = ?,
-		                          status = 'present'
-		 WHERE id = ?`,
-		newRelPath, rfc3339(now), rfc3339(now), id)
-	if err != nil {
+	if _, err := s.db.ExecContext(ctx, updatePathQuery, updatePathArgs(id, newRelPath, now)...); err != nil {
 		return fmt.Errorf("update path for %s: %w", id, err)
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
@@ -22,14 +23,14 @@ func (s *Server) handleGetFileMetadata(w http.ResponseWriter, r *http.Request, u
 	}
 
 	cairnDir := filepath.Join(lib.Root, ".cairn")
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		s.logger.Error("open library db", "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open library database.")
 		return
 	}
-	defer func() { _ = db.Close() }()
+	defer release()
 
 	store := media.NewFileStore(db, lib.ID)
 	f, err := store.GetByID(r.Context(), r.PathValue("fileID"))
@@ -135,13 +136,13 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 
 	// Resolve the file so the capability check runs on its resource key even
 	// when the thumbnail already exists on disk.
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open library database.")
 		return
 	}
-	defer func() { _ = db.Close() }()
+	defer release()
 
 	store := media.NewFileStore(db, lib.ID)
 	f, err := store.GetByID(r.Context(), fileID)
@@ -153,32 +154,84 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 		return
 	}
 
-	// Serve an existing thumbnail (decrypted when at-rest encryption is on).
-	data, modTime, err := metadata.ReadThumb(cairnDir, fileID, s.keys)
-	if err == nil {
-		w.Header().Set("Content-Type", "image/jpeg")
-		http.ServeContent(w, r, fileID+".jpg", modTime, bytes.NewReader(data))
-		return
+	s.serveThumbnail(w, r, lib.Root, f)
+}
+
+// serveThumbnail answers a thumbnail request for f in the library at root:
+// the stored thumbnail when it is current, otherwise one generated now.
+//
+// A request carrying a version (?v=, the file's mod time and size as the
+// client knows them) is cached by the browser for good: a changed file is a
+// new version, so a grid scrolled back into view or revisited never asks
+// again. Without a version the browser revalidates, which the If-Modified-Since
+// check below answers without reading the thumbnail.
+func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, root string, f *media.File) {
+	cairnDir := filepath.Join(root, ".cairn")
+	modTime, err := metadata.ThumbModTime(cairnDir, f.ID)
+	have := err == nil
+	// A thumbnail older than its file was made from earlier content (an
+	// edit, or a path reused by a new file). A file dated in the future is
+	// left alone, or it would be regenerated on every request.
+	stale := have && modTime.Before(f.ModTime) && !f.ModTime.After(time.Now())
+	if !have || stale {
+		absPath := filepath.Join(root, filepath.FromSlash(f.RelPath))
+		generated, genErr := metadata.GenerateThumbnail(absPath, cairnDir, f.ID, s.keys)
+		switch {
+		case genErr == nil && generated:
+			if modTime, err = metadata.ThumbModTime(cairnDir, f.ID); err != nil {
+				writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+					CodeInternal, "Failed to open generated thumbnail.")
+				return
+			}
+			stale = false
+		case !have:
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
+				CodeNotFound, "Thumbnail not available for this file.")
+			return
+		}
+		// Otherwise serve the old thumbnail rather than none.
 	}
 
-	// Thumbnail not found — try on-demand generation.
-	absPath := filepath.Join(lib.Root, filepath.FromSlash(f.RelPath))
-	generated, err := metadata.GenerateThumbnail(absPath, cairnDir, fileID, s.keys)
-	if err != nil || !generated {
-		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
-			CodeNotFound, "Thumbnail not available for this file.")
+	if r.URL.Query().Get("v") != "" && !stale {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "private, no-cache")
+	}
+	if notModifiedSince(r, modTime) {
+		w.Header().Set("Last-Modified", modTime.UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-
-	// Serve the freshly generated thumbnail.
-	data, modTime, err = metadata.ReadThumb(cairnDir, fileID, s.keys)
+	data, modTime, err := metadata.ReadThumb(cairnDir, f.ID, s.keys)
 	if err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
-			CodeInternal, "Failed to open generated thumbnail.")
+			CodeInternal, "Failed to open thumbnail.")
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
-	http.ServeContent(w, r, fileID+".jpg", modTime, bytes.NewReader(data))
+	http.ServeContent(w, r, f.ID+".jpg", modTime, bytes.NewReader(data))
+}
+
+// notModifiedSince reports whether r is a plain If-Modified-Since revalidation
+// that modTime satisfies, so a 304 can be sent without reading (and, with
+// at-rest encryption, decrypting) the body. Anything else is left to
+// http.ServeContent.
+func notModifiedSince(r *http.Request, modTime time.Time) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.Header.Get("If-None-Match") != "" || r.Header.Get("Range") != "" {
+		return false
+	}
+	ims := r.Header.Get("If-Modified-Since")
+	if ims == "" || modTime.IsZero() {
+		return false
+	}
+	t, err := http.ParseTime(ims)
+	if err != nil {
+		return false
+	}
+	return !modTime.Truncate(time.Second).After(t)
 }
 
 // --- nullable scan helpers ---
@@ -260,13 +313,13 @@ func (s *Server) handlePutThumbnail(w http.ResponseWriter, r *http.Request, u *a
 
 	cairnDir := filepath.Join(lib.Root, ".cairn")
 	fileID := r.PathValue("fileID")
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open library database.")
 		return
 	}
-	defer func() { _ = db.Close() }()
+	defer release()
 
 	store := media.NewFileStore(db, lib.ID)
 	f, err := store.GetByID(r.Context(), fileID)

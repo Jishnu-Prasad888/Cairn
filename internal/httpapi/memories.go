@@ -34,14 +34,14 @@ func (s *Server) openMemoryStore(
 		return nil, nil, false
 	}
 	cairnDir := lib.Root + "/.cairn"
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		s.logger.Error("open library db for memories", "library_id", lib.ID, "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open library database.")
 		return nil, nil, false
 	}
-	return memories.NewMemoryStore(db), func() { _ = db.Close() }, true
+	return memories.NewMemoryStore(db), release, true
 }
 
 func (s *Server) deriverFor(lib *library.Library) *memories.Deriver {

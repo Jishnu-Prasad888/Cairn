@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -92,6 +93,12 @@ type Config struct {
 	// consulted when MLEnabled is true.
 	MLSimilarity bool
 
+	// MediaWorkers caps how many files each library's background worker
+	// processes at once (metadata extraction and thumbnails). The default
+	// is half the CPUs, between 1 and 4, which leaves room to serve requests
+	// and keeps a Raspberry Pi to two full-size image decodes at a time.
+	MediaWorkers int
+
 	// MLWorkers caps concurrent files processed per similarity pass.
 	MLWorkers int
 
@@ -157,6 +164,7 @@ func Load() Config {
 		EncryptionPassphrase:  os.Getenv(EnvPrefix + "_ENCRYPTION_PASSPHRASE"),
 		MLEnabled:             envOrDefaultBool("ML_ENABLED", false),
 		MLSimilarity:          envOrDefaultBool("ML_SIMILARITY", true),
+		MediaWorkers:          envOrDefaultInt("MEDIA_WORKERS", defaultMediaWorkers()),
 		MLWorkers:             envOrDefaultInt("ML_WORKERS", 2),
 		MLDistanceThreshold:   envOrDefaultInt("ML_DISTANCE_THRESHOLD", 10),
 		MLFaces:               envOrDefaultBool("ML_FACES", false),
@@ -169,6 +177,11 @@ func Load() Config {
 		MLFaceDetectorModel:   envOrDefault("ML_FACE_DETECTOR_MODEL", ""),
 		MLFaceDetectorURL:     envOrDefault("ML_FACE_DETECTOR_URL", ""),
 	}
+}
+
+// defaultMediaWorkers is half the CPUs, clamped to 1..4.
+func defaultMediaWorkers() int {
+	return min(max(runtime.NumCPU()/2, 1), 4)
 }
 
 // Validate returns an error if the configuration is not usable.

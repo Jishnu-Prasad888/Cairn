@@ -5,8 +5,11 @@ package indexer
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -40,6 +43,9 @@ type IndexManager struct {
 	// mediaProcessor, when set, handles process_media jobs (metadata
 	// extraction and thumbnail generation) on every library worker.
 	mediaProcessor *metadata.Processor
+
+	// mediaWorkers is how many jobs each library worker runs at once.
+	mediaWorkers int
 
 	// baseCtx is the server-lifetime context (signal context from main) that
 	// library workers live under. Request-scoped contexts must never parent a
@@ -78,6 +84,12 @@ func (m *IndexManager) SetMediaProcessor(p *metadata.Processor) {
 	m.mediaProcessor = p
 }
 
+// SetMediaWorkers sets how many jobs each library worker started afterwards
+// runs at once. Values below 1 mean 1.
+func (m *IndexManager) SetMediaWorkers(n int) {
+	m.mediaWorkers = n
+}
+
 // StartLibraryWorker opens the library database for root and starts a
 // background jobs.Worker for its queue, so queued scan and media-processing
 // jobs are executed on their own. It is idempotent per library: a library that
@@ -102,6 +114,7 @@ func (m *IndexManager) StartLibraryWorker(ctx context.Context, libraryID, root s
 	wctx, cancel := context.WithCancel(parent)
 	q := jobs.NewQueue(ldb.DB(), m.logger)
 	w := jobs.NewWorker(q, m.logger)
+	w.SetConcurrency(m.mediaWorkers)
 	w.Register(jobs.KindIndex, m.RunScanJob)
 	if p := m.mediaProcessor; p != nil {
 		db := ldb.DB()
@@ -157,6 +170,12 @@ func (m *IndexManager) openLibraryDB(root string) (*librarydb.DB, error) {
 	return librarydb.OpenDB(cairnDir)
 }
 
+// acquireLibraryDB borrows the shared pool for the library rooted at root;
+// call release when done. For short operations such as status polls.
+func acquireLibraryDB(root string) (*sql.DB, func(), error) {
+	return librarydb.Acquire(filepath.Join(root, ".cairn"))
+}
+
 // TriggerScan opens the library DB, resets any stuck jobs, and enqueues a new
 // index scan job. Returns the job ID. The library's background worker is
 // (re)started first so the job is actually executed: this covers libraries
@@ -169,13 +188,13 @@ func (m *IndexManager) TriggerScan(ctx context.Context, libraryID, root string) 
 		// Fall through: if the library database is genuinely missing the
 		// enqueue below returns the authoritative error.
 	}
-	ldb, err := m.openLibraryDB(root)
+	db, release, err := acquireLibraryDB(root)
 	if err != nil {
 		return "", fmt.Errorf("open library db for %s: %w", libraryID, err)
 	}
-	defer func() { _ = ldb.Close() }()
+	defer release()
 
-	q := jobs.NewQueue(ldb.DB(), m.logger)
+	q := jobs.NewQueue(db, m.logger)
 	if _, err := q.ResetStuck(ctx); err != nil {
 		m.logger.Warn("reset stuck jobs", "library_id", libraryID, "error", err)
 	}
@@ -192,13 +211,13 @@ func (m *IndexManager) TriggerScan(ctx context.Context, libraryID, root string) 
 
 // Status returns the current index status for the library at root.
 func (m *IndexManager) Status(ctx context.Context, libraryID, root string) (*IndexStatus, error) {
-	ldb, err := m.openLibraryDB(root)
+	db, release, err := acquireLibraryDB(root)
 	if err != nil {
 		return nil, fmt.Errorf("open library db for %s: %w", libraryID, err)
 	}
-	defer func() { _ = ldb.Close() }()
+	defer release()
 
-	store := NewStateStore(ldb.DB())
+	store := NewStateStore(db)
 	present, missing, deleted, err := store.Counts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count indexed files for %s: %w", libraryID, err)
@@ -212,15 +231,15 @@ func (m *IndexManager) Status(ctx context.Context, libraryID, root string) (*Ind
 	}
 
 	// Find the most recent active job.
-	q := jobs.NewQueue(ldb.DB(), m.logger)
-	running, err := q.ListByStatus(ctx, jobs.StatusRunning)
-	if err == nil && len(running) > 0 {
-		status.ActiveJob = running[0]
-		status.LastJobID = running[0].ID
+	q := jobs.NewQueue(db, m.logger)
+	running, err := q.FirstByStatus(ctx, jobs.StatusRunning)
+	if err == nil && running != nil {
+		status.ActiveJob = running
+		status.LastJobID = running.ID
 	} else {
-		queued, err := q.ListByStatus(ctx, jobs.StatusQueued)
-		if err == nil && len(queued) > 0 {
-			status.LastJobID = queued[0].ID
+		queued, err := q.FirstByStatus(ctx, jobs.StatusQueued)
+		if err == nil && queued != nil {
+			status.LastJobID = queued.ID
 		}
 	}
 	return status, nil
@@ -260,22 +279,32 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 
 	// Enqueue media-processing jobs for new and modified files.
 	q := jobs.NewQueue(ldb.DB(), m.logger)
-	enqueued := 0
+	var payloads []map[string]any
 	for _, change := range result.Changes {
 		if change.Kind != ChangeNew && change.Kind != ChangeModified {
 			continue
 		}
-		if _, err := q.Enqueue(ctx, jobs.KindProcessMedia, map[string]any{
+		if change.Kind == ChangeModified {
+			// The thumbnail shows the old content. Browsers cache thumbnails
+			// by the file's mod time and size, so one left in place could be
+			// served under the new version for good; the next request (or
+			// the job below) makes a fresh one.
+			if err := os.Remove(metadata.ThumbPath(cairnDir, change.File.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				m.logger.Warn("remove outdated thumbnail", "file_id", change.File.ID, "error", err)
+			}
+		}
+		payloads = append(payloads, map[string]any{
 			"library_id": libraryID,
 			"file_id":    change.File.ID,
 			"rel_path":   change.File.RelPath,
 			"root":       root,
 			"cairn_dir":  cairnDir,
-		}); err != nil {
-			m.logger.Warn("enqueue process_media job", "file_id", change.File.ID, "error", err)
-		} else {
-			enqueued++
-		}
+		})
+	}
+	enqueued, err := q.EnqueueAll(ctx, jobs.KindProcessMedia, payloads)
+	if err != nil {
+		m.logger.Warn("enqueue process_media jobs", "library_id", libraryID,
+			"enqueued", enqueued, "of", len(payloads), "error", err)
 	}
 	if enqueued > 0 {
 		m.logger.Info("enqueued media processing jobs", "library_id", libraryID, "count", enqueued)

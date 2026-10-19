@@ -3,6 +3,7 @@ package media_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -667,5 +668,53 @@ func TestCountsByTypeAndCollections(t *testing.T) {
 	c, err := store.CountCollections(ctx)
 	if err != nil || c != (media.CollectionCounts{}) {
 		t.Fatalf("collections = %+v, %v", c, err)
+	}
+}
+
+// TestListCursorPagesEverySortOrder walks every sort and direction a page at
+// a time and expects each file exactly once, in order. Descending sorts used
+// to jump back to the top on the second page, and files sharing a mod time or
+// size were skipped.
+func TestListCursorPagesEverySortOrder(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Pairs share a mod time and a size, so ties are exercised.
+	for i := 0; i < 7; i++ {
+		if err := store.UpsertFromPath(ctx, fmt.Sprintf("f%d.jpg", i), int64(i/2),
+			base.Add(time.Duration(i/2)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, sort := range []media.SortField{media.SortByModTime, media.SortByName, media.SortBySize} {
+		for _, ord := range []media.SortOrder{media.SortAsc, media.SortDesc} {
+			var got []string
+			cursor := ""
+			for range 10 {
+				p, err := store.List(ctx, media.ListOptions{
+					Sort: sort, Order: ord, Limit: 2, Cursor: cursor, Recursive: true,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, f := range p.Files {
+					got = append(got, f.RelPath)
+				}
+				if cursor = p.NextCursor; cursor == "" {
+					break
+				}
+			}
+			all, err := store.List(ctx, media.ListOptions{Sort: sort, Order: ord, Limit: 50, Recursive: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want []string
+			for _, f := range all.Files {
+				want = append(want, f.RelPath)
+			}
+			if fmt.Sprint(got) != fmt.Sprint(want) || len(want) != 7 {
+				t.Errorf("%s %s: paged %v, want %v", sort, ord, got, want)
+			}
+		}
 	}
 }

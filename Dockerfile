@@ -21,6 +21,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 # Overwrite the committed placeholder with the freshly built frontend.
 COPY --from=web /src/web/dist ./internal/webui/dist
+# Source maps are for debugging the build, not for shipping in the binary.
+RUN find ./internal/webui/dist -name '*.map' -type f -delete
 # Cache mounts persist Go's module and build caches across `docker build`
 # invocations (they otherwise live outside any image layer and are lost the
 # moment a source file changes and invalidates this RUN), so incremental

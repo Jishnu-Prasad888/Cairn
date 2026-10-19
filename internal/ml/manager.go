@@ -405,11 +405,11 @@ func (m *Manager) Purge(ctx context.Context, libraryID, root string) (int, error
 	return n, nil
 }
 
-// openLibraryDB opens (and migrates) the per-library database at root and
-// must be closed by the caller.
+// openLibraryDB borrows the shared pool for the per-library database at root;
+// the caller must Close it to hand it back.
 func openLibraryDB(root string) (*librarydb.DB, error) {
 	cairnDir := filepath.Join(root, ".cairn")
-	return librarydb.OpenDB(cairnDir)
+	return librarydb.AcquireDB(cairnDir)
 }
 
 // ErrDisabled is returned by ML operations when ML is not enabled.

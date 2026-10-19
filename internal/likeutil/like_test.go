@@ -16,3 +16,20 @@ func TestEscape(t *testing.T) {
 		}
 	}
 }
+
+func TestPrefixRange(t *testing.T) {
+	lo, hi := PrefixRange("a/b/")
+	if lo != "a/b/" || hi != "a/b0" {
+		t.Fatalf("PrefixRange = %q, %q", lo, hi)
+	}
+	for _, s := range []string{"a/b/x.jpg", "a/b/c/d.jpg", "a/b/"} {
+		if !(s >= lo && s < hi) {
+			t.Errorf("%q should be in range", s)
+		}
+	}
+	for _, s := range []string{"a/b", "a/b0", "a/bc/x.jpg", "a/b.jpg", "A/b/x.jpg"} {
+		if s >= lo && s < hi {
+			t.Errorf("%q should be out of range", s)
+		}
+	}
+}

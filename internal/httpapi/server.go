@@ -344,7 +344,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 
-	return WithMiddleware(s.logger, metricsRecording(s.metrics, mux))
+	return WithMiddleware(s.logger, metricsRecording(s.metrics, gzipJSON(mux)))
 }
 
 // requireSession wraps a plain http.HandlerFunc with authentication. The

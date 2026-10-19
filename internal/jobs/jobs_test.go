@@ -224,3 +224,86 @@ func TestWorkerPermanentFailure(t *testing.T) {
 		t.Errorf("status = %q, want failed", job.Status)
 	}
 }
+
+// TestWorkerDrainsQueueWithoutPolling guards against working one job per poll
+// tick: a backlog must run back to back.
+func TestWorkerDrainsQueueWithoutPolling(t *testing.T) {
+	q := newTestQueue(t)
+	w := newTestWorker(t, q)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const n = 20
+	payloads := make([]map[string]any, n)
+	if got, err := q.EnqueueAll(ctx, jobs.KindProcessMedia, payloads); err != nil || got != n {
+		t.Fatalf("EnqueueAll = %d, %v", got, err)
+	}
+	var done atomic.Int32
+	w.Register(jobs.KindProcessMedia, func(context.Context, *jobs.Job) error {
+		done.Add(1)
+		return nil
+	})
+	go w.Run(ctx)
+
+	// One poll interval (2s) to start, then the rest without waiting.
+	deadline := time.Now().Add(5 * time.Second)
+	for done.Load() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("ran %d of %d jobs; the worker is waiting between jobs", done.Load(), n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestWorkerConcurrencyKeepsScansExclusive runs media jobs in parallel while
+// never letting two scans of one library overlap.
+func TestWorkerConcurrencyKeepsScansExclusive(t *testing.T) {
+	q := newTestQueue(t)
+	w := newTestWorker(t, q)
+	w.SetConcurrency(3)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for range 3 {
+		if _, err := q.Enqueue(ctx, jobs.KindIndex, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := q.EnqueueAll(ctx, jobs.KindProcessMedia, make([]map[string]any, 6)); err != nil {
+		t.Fatal(err)
+	}
+
+	var scans, maxScans, media, maxMedia, done atomic.Int32
+	track := func(cur, peak *atomic.Int32) func(context.Context, *jobs.Job) error {
+		return func(context.Context, *jobs.Job) error {
+			n := cur.Add(1)
+			for {
+				p := peak.Load()
+				if n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+			cur.Add(-1)
+			done.Add(1)
+			return nil
+		}
+	}
+	w.Register(jobs.KindIndex, track(&scans, &maxScans))
+	w.Register(jobs.KindProcessMedia, track(&media, &maxMedia))
+	go w.Run(ctx)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for done.Load() < 9 {
+		if time.Now().After(deadline) {
+			t.Fatalf("finished %d of 9 jobs", done.Load())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if maxScans.Load() != 1 {
+		t.Errorf("%d scans ran at once; want 1", maxScans.Load())
+	}
+	if maxMedia.Load() < 2 {
+		t.Errorf("media jobs never overlapped (peak %d); concurrency had no effect", maxMedia.Load())
+	}
+}

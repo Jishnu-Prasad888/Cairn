@@ -24,7 +24,7 @@ func (s *Server) openSearchStore(
 		return nil, nil, false
 	}
 	cairnDir := lib.Root + "/.cairn"
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		s.logger.Error("open library db for search", "library_id", lib.ID, "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
@@ -32,7 +32,7 @@ func (s *Server) openSearchStore(
 		return nil, nil, false
 	}
 	store := search.NewSearchStore(db, lib.ID)
-	return store, func() { _ = db.Close() }, true
+	return store, release, true
 }
 
 // handleSearch — GET /api/v1/libraries/{id}/search

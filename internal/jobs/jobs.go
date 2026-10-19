@@ -7,8 +7,8 @@
 //
 // Design goals:
 //   - Restart survival: all state lives in SQLite, never only in memory
-//   - Bounded concurrency: configurable worker count (default 1 for safety on
-//     Raspberry Pi)
+//   - Bounded concurrency: configurable worker count (default 1); scans of a
+//     library never run alongside each other
 //   - Retries with exponential backoff
 //   - Graceful shutdown: workers finish their current job then stop
 package jobs
@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -103,6 +105,59 @@ func (q *Queue) Enqueue(ctx context.Context, kind string, payload map[string]any
 	return id, nil
 }
 
+// EnqueueAll inserts one queued job of kind per payload, committing them in
+// transactions of up to 500 so a large import is a handful of writes rather
+// than one per file. It returns how many were enqueued; on error the jobs of
+// earlier transactions stay queued.
+func (q *Queue) EnqueueAll(ctx context.Context, kind string, payloads []map[string]any) (int, error) {
+	const chunk = 500
+	const query = `
+		INSERT INTO index_jobs
+			(id, kind, status, priority, payload, attempt, max_attempts, created_at, next_run_at)
+		VALUES (?, ?, 'queued', 0, ?, 0, ?, ?, ?)`
+	n := 0
+	for start := 0; start < len(payloads); start += chunk {
+		end := min(start+chunk, len(payloads))
+		err := func() error {
+			tx, err := q.db.BeginTx(ctx, nil)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback() }()
+			stmt, err := tx.PrepareContext(ctx, query)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = stmt.Close() }()
+			for _, payload := range payloads[start:end] {
+				if payload == nil {
+					payload = map[string]any{}
+				}
+				raw, err := json.Marshal(payload)
+				if err != nil {
+					return fmt.Errorf("marshal payload: %w", err)
+				}
+				// created_at orders claims; time.Now per job keeps the
+				// enqueue order even within one transaction.
+				now := rfc3339(time.Now().UTC())
+				if _, err := stmt.ExecContext(ctx, newID(), kind, string(raw),
+					DefaultMaxAttempts, now, now); err != nil {
+					return err
+				}
+			}
+			return tx.Commit()
+		}()
+		if err != nil {
+			return n, fmt.Errorf("enqueue jobs: %w", err)
+		}
+		n += end - start
+	}
+	if n > 0 {
+		q.logger.Info("jobs enqueued", "kind", kind, "count", n)
+	}
+	return n, nil
+}
+
 // Get returns a single job by ID, or (nil, nil) when not found.
 func (q *Queue) Get(ctx context.Context, id string) (*Job, error) {
 	row := q.db.QueryRowContext(ctx,
@@ -110,6 +165,29 @@ func (q *Queue) Get(ctx context.Context, id string) (*Job, error) {
 		        attempt, max_attempts, created_at, started_at, finished_at, next_run_at
 		 FROM index_jobs WHERE id = ?`, id)
 	return scanJob(row)
+}
+
+// FirstByStatus returns the oldest job with the given status, or nil.
+func (q *Queue) FirstByStatus(ctx context.Context, status string) (*Job, error) {
+	return scanJob(q.db.QueryRowContext(ctx,
+		`SELECT id, kind, status, priority, payload, result, error_msg,
+		        attempt, max_attempts, created_at, started_at, finished_at, next_run_at
+		 FROM index_jobs WHERE status = ? ORDER BY created_at LIMIT 1`, status))
+}
+
+// HasActive reports whether a job of kind is queued or running.
+func (q *Queue) HasActive(ctx context.Context, kind string) (bool, error) {
+	var one int
+	err := q.db.QueryRowContext(ctx,
+		`SELECT 1 FROM index_jobs WHERE kind = ? AND status IN ('queued', 'running') LIMIT 1`,
+		kind).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check active jobs: %w", err)
+	}
+	return true, nil
 }
 
 // ListByStatus returns all jobs with the given status, ordered by created_at.
@@ -159,6 +237,13 @@ type Worker struct {
 	handlers     map[string]Handler
 	logger       *slog.Logger
 	pollInterval time.Duration
+	concurrency  int
+
+	// claimMu serializes claims so the exclusive-kind check and the claim
+	// itself happen as one step across this worker's goroutines.
+	claimMu   sync.Mutex
+	exclusive map[string]bool // kinds that never run alongside themselves
+	running   map[string]int  // jobs of each kind running right now
 }
 
 // NewWorker constructs a Worker for the given queue.
@@ -168,7 +253,19 @@ func NewWorker(queue *Queue, logger *slog.Logger) *Worker {
 		handlers:     make(map[string]Handler),
 		logger:       logger,
 		pollInterval: 2 * time.Second,
+		concurrency:  1,
+		exclusive:    map[string]bool{KindIndex: true},
+		running:      make(map[string]int),
 	}
+}
+
+// SetConcurrency sets how many jobs Run executes at once (minimum 1). Jobs of
+// an exclusive kind (a library scan) still run one at a time. Call before Run.
+func (w *Worker) SetConcurrency(n int) {
+	if n < 1 {
+		n = 1
+	}
+	w.concurrency = n
 }
 
 // Register registers a handler for a job kind.
@@ -177,18 +274,44 @@ func (w *Worker) Register(kind string, h Handler) {
 }
 
 // Run starts the worker loop. It blocks until ctx is cancelled.
+//
+// Queued jobs are worked through back to back; the poll interval is only
+// slept when the queue has nothing runnable, so a large import is limited by
+// the work itself rather than by one job per tick.
 func (w *Worker) Run(ctx context.Context) {
-	w.logger.Info("job worker started")
+	w.logger.Info("job worker started", "concurrency", w.concurrency)
+	var wg sync.WaitGroup
+	for i := 0; i < w.concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.loop(ctx)
+		}()
+	}
+	wg.Wait()
+	w.logger.Info("job worker stopped")
+}
+
+func (w *Worker) loop(ctx context.Context) {
+	timer := time.NewTimer(w.pollInterval)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			w.logger.Info("job worker stopped")
 			return
-		case <-time.After(w.pollInterval):
-			if err := w.processOne(ctx); err != nil && !errors.Is(err, errNoJob) {
+		case <-timer.C:
+		}
+		for ctx.Err() == nil {
+			err := w.processOne(ctx)
+			if errors.Is(err, errNoJob) {
+				break
+			}
+			if err != nil {
 				w.logger.Error("job worker error", "error", err)
+				break
 			}
 		}
+		timer.Reset(w.pollInterval)
 	}
 }
 
@@ -207,13 +330,14 @@ var errNoJob = errors.New("no job available")
 // processOne claims and executes exactly one queued job. Returns errNoJob
 // when the queue is empty.
 func (w *Worker) processOne(ctx context.Context) error {
-	job, err := w.claimNext(ctx)
+	job, err := w.claim(ctx)
 	if err != nil {
 		return err
 	}
 	if job == nil {
 		return errNoJob
 	}
+	defer w.finished(job.Kind)
 
 	handler, ok := w.handlers[job.Kind]
 	if !ok {
@@ -229,8 +353,34 @@ func (w *Worker) processOne(ctx context.Context) error {
 	return w.completeJob(ctx, job)
 }
 
-// claimNext atomically picks the next runnable job and marks it running.
-func (w *Worker) claimNext(ctx context.Context) (*Job, error) {
+// claim picks the next runnable job, skipping exclusive kinds that already
+// have a job running in this worker, and records it as running.
+func (w *Worker) claim(ctx context.Context) (*Job, error) {
+	w.claimMu.Lock()
+	defer w.claimMu.Unlock()
+	var busy []string
+	for kind := range w.exclusive {
+		if w.running[kind] > 0 {
+			busy = append(busy, kind)
+		}
+	}
+	job, err := w.claimNext(ctx, busy)
+	if err != nil || job == nil {
+		return nil, err
+	}
+	w.running[job.Kind]++
+	return job, nil
+}
+
+func (w *Worker) finished(kind string) {
+	w.claimMu.Lock()
+	w.running[kind]--
+	w.claimMu.Unlock()
+}
+
+// claimNext atomically picks the next runnable job whose kind is not in skip
+// and marks it running.
+func (w *Worker) claimNext(ctx context.Context, skip []string) (*Job, error) {
 	tx, err := w.queue.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin claim tx: %w", err)
@@ -238,13 +388,23 @@ func (w *Worker) claimNext(ctx context.Context) (*Job, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC()
+	args := []any{rfc3339(now)}
+	skipClause := ""
+	if len(skip) > 0 {
+		skipClause = " AND kind NOT IN (?" + strings.Repeat(", ?", len(skip)-1) + ")"
+		for _, k := range skip {
+			args = append(args, k)
+		}
+	}
+	// Walks index_jobs_claim_idx in claim order, so the next job is found
+	// without sorting every queued row.
 	row := tx.QueryRowContext(ctx,
 		`SELECT id, kind, status, priority, payload, result, error_msg,
 		        attempt, max_attempts, created_at, started_at, finished_at, next_run_at
 		 FROM index_jobs
-		 WHERE status = 'queued' AND next_run_at <= ?
+		 WHERE status = 'queued' AND next_run_at <= ?`+skipClause+`
 		 ORDER BY priority DESC, created_at
-		 LIMIT 1`, rfc3339(now))
+		 LIMIT 1`, args...)
 
 	job, err := scanJob(row)
 	if err != nil {

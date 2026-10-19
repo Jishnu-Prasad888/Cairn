@@ -35,16 +35,34 @@ const (
 	SchemaVersion = 9
 )
 
-// DB wraps a per-library SQLite connection pool. Use OpenDB to construct one.
+// DB wraps a per-library SQLite connection pool. Use OpenDB or AcquireDB to
+// construct one.
 type DB struct {
-	pool *sql.DB
+	pool    *sql.DB
+	release func() // set when pool is shared (AcquireDB)
 }
 
 // DB returns the underlying *sql.DB connection pool.
 func (d *DB) DB() *sql.DB { return d.pool }
 
-// Close closes the underlying connection pool.
-func (d *DB) Close() error { return d.pool.Close() }
+// Close closes the underlying connection pool, or for a shared pool hands it
+// back.
+func (d *DB) Close() error {
+	if d.release != nil {
+		d.release()
+		return nil
+	}
+	return d.pool.Close()
+}
+
+// AcquireDB is Acquire wrapped as a DB whose Close releases the shared pool.
+func AcquireDB(cairnDir string) (*DB, error) {
+	pool, release, err := Acquire(cairnDir)
+	if err != nil {
+		return nil, err
+	}
+	return &DB{pool: pool, release: release}, nil
+}
 
 // OpenDB opens (creating if necessary) the per-library SQLite database at
 // <cairnDir>/library.db and applies any pending schema migrations.
@@ -89,15 +107,62 @@ func Open(cairnDir string) (*sql.DB, error) {
 		_ = pool.Close()
 		return nil, fmt.Errorf("ping library database: %w", err)
 	}
-	if _, err := pool.Exec(`PRAGMA journal_mode = WAL`); err != nil {
-		_ = pool.Close()
-		return nil, fmt.Errorf("enable WAL: %w", err)
+	// The schema (DDL) only has to be brought forward once per process. The
+	// stamp in user_version is re-read on every open, so a database file that
+	// was swapped out underneath (a restore, a re-created .cairn) is migrated
+	// again rather than trusted on the strength of its path.
+	if !migratedBefore(path) || !stamped(pool) {
+		if _, err := pool.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+			_ = pool.Close()
+			return nil, fmt.Errorf("enable WAL: %w", err)
+		}
+		if err := migrate(pool); err != nil {
+			_ = pool.Close()
+			return nil, fmt.Errorf("migrate library database: %w", err)
+		}
+		if _, err := pool.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaStamp)); err != nil {
+			_ = pool.Close()
+			return nil, fmt.Errorf("stamp library database: %w", err)
+		}
+		markMigrated(path)
 	}
-	if err := migrate(pool); err != nil {
+	// Rows an older build wrote may still need bringing forward. Both checks
+	// are index lookups that find nothing on an up-to-date library.
+	if err := backfill(pool); err != nil {
 		_ = pool.Close()
 		return nil, fmt.Errorf("migrate library database: %w", err)
 	}
 	return pool, nil
+}
+
+// schemaStamp is written to PRAGMA user_version once migrate() has run. It
+// only has to differ from 0 (a fresh or foreign file) and from any stamp an
+// older build wrote, so it tracks SchemaVersion.
+const schemaStamp = 0x0CA1_0000 + SchemaVersion
+
+var (
+	migratedMu    sync.Mutex
+	migratedPaths = map[string]bool{}
+)
+
+// migratedBefore reports whether this process has already migrated the
+// database at path.
+func migratedBefore(path string) bool {
+	migratedMu.Lock()
+	defer migratedMu.Unlock()
+	return migratedPaths[path]
+}
+
+func markMigrated(path string) {
+	migratedMu.Lock()
+	migratedPaths[path] = true
+	migratedMu.Unlock()
+}
+
+// stamped reports whether the open database carries the current schema stamp.
+func stamped(pool *sql.DB) bool {
+	var v int
+	return pool.QueryRow(`PRAGMA user_version`).Scan(&v) == nil && v == schemaStamp
 }
 
 var (
@@ -149,6 +214,15 @@ func migrate(db *sql.DB) error {
 	return upgradeMemories(db)
 }
 
+// backfill rewrites rows left in an older shape: files indexed before they
+// were classified, and memories from before the block model.
+func backfill(db *sql.DB) error {
+	if err := classifyIndexedFiles(db); err != nil {
+		return err
+	}
+	return migrateLegacyMemoryBodies(db)
+}
+
 // addIndexedFileMediaType backfills indexed_files.media_type on a library
 // database created before that column existed.
 //
@@ -179,10 +253,15 @@ func addIndexedFileMediaType(db *sql.DB) error {
 		 ON indexed_files (status, media_type, mod_time)`); err != nil {
 		return err
 	}
-	// Every existing row is still classified as 'other' at this point. The
-	// extension is what the type is derived from, so the backfill is a rewrite
-	// rather than a guess — it is also exactly what a re-index would store, so
-	// the two paths cannot disagree.
+	return nil
+}
+
+// classifyIndexedFiles sets media_type on rows still classified as 'other'
+// whose extension says otherwise.
+func classifyIndexedFiles(db *sql.DB) error {
+	// The extension is what the type is derived from, so the backfill is a
+	// rewrite rather than a guess — it is also exactly what a re-index would
+	// store, so the two paths cannot disagree.
 	rows, err := db.Query(`SELECT id, rel_path FROM indexed_files WHERE media_type = 'other'`)
 	if err != nil {
 		return err
@@ -197,7 +276,11 @@ func addIndexedFileMediaType(db *sql.DB) error {
 			_ = rows.Close()
 			return err
 		}
-		updates = append(updates, pending{id: id, relPath: relPath, mediaType: string(media.DetectMediaType(relPath))})
+		// Most rows that are still 'other' really are (sidecars, archives…);
+		// rewriting them to the same value would be a write per row per open.
+		if t := media.DetectMediaType(relPath); t != media.MediaTypeOther {
+			updates = append(updates, pending{id: id, relPath: relPath, mediaType: string(t)})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -206,12 +289,25 @@ func addIndexedFileMediaType(db *sql.DB) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.Prepare(`UPDATE indexed_files SET media_type = ? WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
 	for _, u := range updates {
-		if _, err := db.Exec(`UPDATE indexed_files SET media_type = ? WHERE id = ?`, u.mediaType, u.id); err != nil {
+		if _, err := stmt.Exec(u.mediaType, u.id); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // columnExists reports whether a table already has the named column.
@@ -263,6 +359,8 @@ CREATE TABLE IF NOT EXISTS indexed_files (
 
 CREATE INDEX IF NOT EXISTS indexed_files_rel_path_idx ON indexed_files (rel_path);
 CREATE INDEX IF NOT EXISTS indexed_files_status_idx   ON indexed_files (status);
+-- Folder views: present files under a path prefix, in name order.
+CREATE INDEX IF NOT EXISTS indexed_files_status_path_idx ON indexed_files (status, rel_path);
 CREATE INDEX IF NOT EXISTS indexed_files_hash_idx     ON indexed_files (content_hash)
 	WHERE content_hash IS NOT NULL;
 -- indexed_files_type_idx is deliberately not created here: on a database that
@@ -292,6 +390,12 @@ CREATE TABLE IF NOT EXISTS index_jobs (
 CREATE INDEX IF NOT EXISTS index_jobs_status_idx      ON index_jobs (status);
 CREATE INDEX IF NOT EXISTS index_jobs_next_run_idx    ON index_jobs (next_run_at)
 	WHERE status IN ('queued', 'failed');
+-- The worker's claim order: the next queued job is the first row of this
+-- index, rather than the result of sorting every queued job.
+CREATE INDEX IF NOT EXISTS index_jobs_claim_idx ON index_jobs (status, priority DESC, created_at);
+-- Status lookups (the oldest running/queued job) and "is a scan pending".
+CREATE INDEX IF NOT EXISTS index_jobs_status_created_idx ON index_jobs (status, created_at);
+CREATE INDEX IF NOT EXISTS index_jobs_kind_status_idx ON index_jobs (kind, status);
 
 -- folders tracks directories under the library root that contain indexed files.
 CREATE TABLE IF NOT EXISTS folders (

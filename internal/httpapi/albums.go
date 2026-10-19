@@ -22,14 +22,14 @@ func (s *Server) openAlbumStore(
 		return nil, nil, false
 	}
 	cairnDir := lib.Root + "/.cairn"
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		s.logger.Error("open library db for albums", "library_id", lib.ID, "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open library database.")
 		return nil, nil, false
 	}
-	return albums.NewAlbumStore(db, lib.ID), func() { _ = db.Close() }, true
+	return albums.NewAlbumStore(db, lib.ID), release, true
 }
 
 // albumResponse is the API representation of an album.

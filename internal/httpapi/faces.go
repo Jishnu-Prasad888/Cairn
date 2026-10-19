@@ -399,13 +399,13 @@ func (s *Server) handleFaceImage(w http.ResponseWriter, r *http.Request, u *auth
 	}
 	faceID := r.PathValue("faceID")
 
-	db, err := librarydb.Open(filepath.Join(lib.Root, ".cairn"))
+	db, release, err := librarydb.Acquire(filepath.Join(lib.Root, ".cairn"))
 	if err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
 			CodeInternal, "Failed to open library database.")
 		return
 	}
-	defer func() { _ = db.Close() }()
+	defer release()
 
 	face, err := ml.NewFaceStore(db).FaceByID(r.Context(), faceID)
 	if err != nil || face == nil || face.ID == "" {

@@ -1,16 +1,13 @@
 package httpapi
 
 import (
-	"bytes"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/authz"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
-	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
 )
 
 // sharePasswordHeader carries an optional share password on public requests.
@@ -379,29 +376,7 @@ func (s *Server) handlePublicShareThumbnail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	cairnDir := filepath.Join(acc.library.Root, ".cairn")
-	data, modTime, err := metadata.ReadThumb(cairnDir, f.ID, s.keys)
-	if err == nil {
-		w.Header().Set("Content-Type", "image/jpeg")
-		http.ServeContent(w, r, f.ID+".jpg", modTime, bytes.NewReader(data))
-		return
-	}
-
-	absPath := filepath.Join(acc.library.Root, filepath.FromSlash(f.RelPath))
-	generated, err := metadata.GenerateThumbnail(absPath, cairnDir, f.ID, s.keys)
-	if err != nil || !generated {
-		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
-			CodeNotFound, "Thumbnail not available for this file.")
-		return
-	}
-	data, modTime, err = metadata.ReadThumb(cairnDir, f.ID, s.keys)
-	if err != nil {
-		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
-			CodeInternal, "Failed to open generated thumbnail.")
-		return
-	}
-	w.Header().Set("Content-Type", "image/jpeg")
-	http.ServeContent(w, r, f.ID+".jpg", modTime, bytes.NewReader(data))
+	s.serveThumbnail(w, r, acc.library.Root, f)
 }
 
 // handlePublicShareDownload — GET /api/v1/shares/{token}/files/{fileID}/download

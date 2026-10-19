@@ -59,13 +59,13 @@ func (m *IndexManager) scheduleScan(ctx context.Context, libraryID, root string)
 	if err := m.StartLibraryWorker(ctx, libraryID, root); err != nil {
 		return err
 	}
-	ldb, err := m.openLibraryDB(root)
+	db, release, err := acquireLibraryDB(root)
 	if err != nil {
 		return fmt.Errorf("open library db: %w", err)
 	}
-	defer func() { _ = ldb.Close() }()
+	defer release()
 
-	q := jobs.NewQueue(ldb.DB(), m.logger)
+	q := jobs.NewQueue(db, m.logger)
 	busy, err := hasActiveIndexJob(ctx, q)
 	if err != nil || busy {
 		return err
@@ -76,16 +76,5 @@ func (m *IndexManager) scheduleScan(ctx context.Context, libraryID, root string)
 
 // hasActiveIndexJob reports whether a scan is already queued or running.
 func hasActiveIndexJob(ctx context.Context, q *jobs.Queue) (bool, error) {
-	for _, status := range []string{jobs.StatusRunning, jobs.StatusQueued} {
-		active, err := q.ListByStatus(ctx, status)
-		if err != nil {
-			return false, err
-		}
-		for _, j := range active {
-			if j.Kind == jobs.KindIndex {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return q.HasActive(ctx, jobs.KindIndex)
 }

@@ -20,7 +20,10 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Maps are written for debugging but not referenced from the bundles, so
+    // they can stay out of the embedded binary without browsers asking for
+    // them.
+    sourcemap: 'hidden',
   },
   test: {
     environment: 'jsdom',

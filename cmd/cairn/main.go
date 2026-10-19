@@ -23,6 +23,7 @@ import (
 	"github.com/Jishnu-Prasad888/Cairn/internal/httpapi"
 	"github.com/Jishnu-Prasad888/Cairn/internal/indexer"
 	"github.com/Jishnu-Prasad888/Cairn/internal/library"
+	"github.com/Jishnu-Prasad888/Cairn/internal/librarydb"
 	"github.com/Jishnu-Prasad888/Cairn/internal/logging"
 	"github.com/Jishnu-Prasad888/Cairn/internal/metadata"
 	"github.com/Jishnu-Prasad888/Cairn/internal/metrics"
@@ -108,6 +109,7 @@ func run() error {
 	idxManager.SetBaseContext(ctx)
 	mediaProc := metadata.NewProcessor(logger, keys)
 	idxManager.SetMediaProcessor(mediaProc)
+	idxManager.SetMediaWorkers(cfg.MediaWorkers)
 
 	// Recover persisted scan and media-processing jobs after a restart:
 	// start one job worker per registered library. Offline libraries are
@@ -336,6 +338,7 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
+	librarydb.CloseShared()
 	logger.Info("server stopped")
 	return nil
 }

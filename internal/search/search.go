@@ -218,8 +218,9 @@ func buildExtraFilters(q SearchQuery) ([]string, []any) {
 
 	if q.FolderPath != "" && q.FolderPath != "." {
 		fp := filepath.ToSlash(q.FolderPath)
-		conditions = append(conditions, "f.rel_path LIKE ? "+likeutil.EscapeClause)
-		args = append(args, likeutil.Escape(fp)+"/%")
+		lo, hi := likeutil.PrefixRange(fp + "/")
+		conditions = append(conditions, "f.rel_path >= ? AND f.rel_path < ? AND f.rel_path LIKE ? "+likeutil.EscapeClause)
+		args = append(args, lo, hi, likeutil.Escape(fp)+"/%")
 	}
 	// The type lives on indexed_files, set by the indexer. media_metadata is
 	// only ever written by the photo extractor, so filtering on it here matched

@@ -79,7 +79,9 @@ type Result struct {
 	Missing    int
 	Unchanged  int
 	Errors     int
-	Changes    []FileChange
+	// Changes lists new, modified and moved files; unchanged files are only
+	// counted in Unchanged.
+	Changes []FileChange
 }
 
 // newID returns a new random identifier as 16 hex-encoded random bytes.

@@ -27,7 +27,7 @@ func (s *Server) openMediaService(
 	}
 
 	cairnDir := lib.Root + "/.cairn"
-	db, err := librarydb.Open(cairnDir)
+	db, release, err := librarydb.Acquire(cairnDir)
 	if err != nil {
 		s.logger.Error("open library db", "library_id", lib.ID, "error", err)
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
@@ -36,7 +36,7 @@ func (s *Server) openMediaService(
 	}
 	store := media.NewFileStore(db, lib.ID)
 	svc := media.NewService(store, lib.Root, media.WithMaxUploadBytes(s.maxUploadBytes))
-	cleanup := func() { _ = db.Close() }
+	cleanup := release
 	return svc, cleanup, true
 }
 

@@ -100,8 +100,7 @@ func upgradeMemories(db *sql.DB) error {
 			return fmt.Errorf("replace memory fts triggers: %w", err)
 		}
 	}
-
-	return migrateLegacyMemoryBodies(db)
+	return nil
 }
 
 // migrateLegacyMemoryBodies wraps each pre-v8 memory's body in one text block.

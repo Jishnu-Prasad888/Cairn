@@ -29,9 +29,21 @@ export function downloadUrl(libraryId: string, file: Pick<FileSummary, 'id'>): s
   return `${API_BASE}/libraries/${libraryId}/files/${file.id}/download`;
 }
 
-/** The small JPEG preview the grid uses. Only photos have one. */
-export function thumbnailUrl(libraryId: string, file: Pick<FileSummary, 'id'>): string {
-  return `${API_BASE}/libraries/${libraryId}/files/${file.id}/thumbnail`;
+/**
+ * The small JPEG preview the grid uses. Only photos have one.
+ *
+ * When the file's mod time and size are known they ride along as a version:
+ * the server lets the browser keep a versioned thumbnail for good, so a grid
+ * scrolled back into view or revisited is drawn from cache without a request,
+ * and an edited file (new mod time or size) is a new URL.
+ */
+export function thumbnailUrl(
+  libraryId: string,
+  file: Pick<FileSummary, 'id'> & Partial<Pick<FileSummary, 'mod_time' | 'size_bytes'>>,
+): string {
+  const base = `${API_BASE}/libraries/${libraryId}/files/${file.id}/thumbnail`;
+  if (!file.mod_time || file.size_bytes === undefined) return base;
+  return `${base}?v=${encodeURIComponent(`${file.mod_time}-${file.size_bytes}`)}`;
 }
 
 /** The file's extension, upper-cased, for a list view's Type column ("JPG"). */

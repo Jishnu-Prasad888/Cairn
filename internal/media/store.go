@@ -41,6 +41,9 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 	if opts.FolderPath != "" && opts.FolderPath != "." {
 		folderPath := filepath.ToSlash(opts.FolderPath)
 		esc := likeutil.Escape(folderPath) + "/%"
+		lo, hi := likeutil.PrefixRange(folderPath + "/")
+		conditions = append(conditions, "rel_path >= ? AND rel_path < ?")
+		args = append(args, lo, hi)
 		if opts.Recursive {
 			conditions = append(conditions, "rel_path LIKE ? "+likeutil.EscapeClause)
 			args = append(args, esc)
@@ -64,17 +67,28 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 		args = append(args, string(opts.Type))
 	}
 
-	// Cursor: rel_path > cursor for forward pagination.
+	// Cursor: the rel_path of the last row of the previous page. The next
+	// page starts after that row in (sort key, rel_path) order, so files that
+	// share a sort key are neither skipped nor repeated, and a descending sort
+	// moves down the list rather than back to its top.
 	if opts.Cursor != "" {
+		cmp := ">"
+		if opts.Order == SortDesc {
+			cmp = "<"
+		}
 		switch opts.Sort {
-		case SortBySize:
-			conditions = append(conditions, "size_bytes > (SELECT size_bytes FROM indexed_files WHERE rel_path = ?)")
-			args = append(args, opts.Cursor)
-		case SortByModTime:
-			conditions = append(conditions, "mod_time > (SELECT mod_time FROM indexed_files WHERE rel_path = ?)")
-			args = append(args, opts.Cursor)
+		case SortBySize, SortByModTime:
+			col := "size_bytes"
+			if opts.Sort == SortByModTime {
+				col = "mod_time"
+			}
+			conditions = append(conditions, fmt.Sprintf(
+				"(%[1]s %[2]s (SELECT %[1]s FROM indexed_files WHERE rel_path = ?) OR "+
+					"(%[1]s = (SELECT %[1]s FROM indexed_files WHERE rel_path = ?) AND rel_path > ?))",
+				col, cmp))
+			args = append(args, opts.Cursor, opts.Cursor, opts.Cursor)
 		default: // SortByName
-			conditions = append(conditions, "rel_path > ?")
+			conditions = append(conditions, "rel_path "+cmp+" ?")
 			args = append(args, opts.Cursor)
 		}
 	}
@@ -97,13 +111,19 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 		dir = "DESC"
 	}
 
+	// rel_path breaks ties; when it is already the sort key, repeating it
+	// would only make SQLite add a sort the index already provides.
+	order := orderCol + " " + dir
+	if orderCol != "rel_path" {
+		order += ", rel_path ASC"
+	}
 	query := fmt.Sprintf(`
 		SELECT id, rel_path, size_bytes, mod_time, content_hash, media_type, status,
 		       first_seen_at, last_seen_at
 		FROM indexed_files
 		%s
-		ORDER BY %s %s, rel_path ASC
-		LIMIT ?`, where, orderCol, dir)
+		ORDER BY %s
+		LIMIT ?`, where, order)
 	args = append(args, opts.Limit+1) // fetch one extra to detect next page
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -147,6 +167,9 @@ func (s *FileStore) countFiles(ctx context.Context, opts ListOptions) (int, erro
 	args = append(args, string(opts.Status))
 	if opts.FolderPath != "" && opts.FolderPath != "." {
 		folderPath := filepath.ToSlash(opts.FolderPath)
+		lo, hi := likeutil.PrefixRange(folderPath + "/")
+		conditions = append(conditions, "rel_path >= ? AND rel_path < ?")
+		args = append(args, lo, hi)
 		if opts.Recursive {
 			conditions = append(conditions, "rel_path LIKE ? "+likeutil.EscapeClause)
 			args = append(args, likeutil.Escape(folderPath)+"/%")
@@ -347,9 +370,12 @@ func (s *FileStore) GetFolderByPath(ctx context.Context, relPath string) (*Folde
 // folders table is not maintained by the indexer.
 func (s *FileStore) CountPresentUnder(ctx context.Context, folderPath string) (int, error) {
 	var n int
+	prefix := filepath.ToSlash(folderPath) + "/"
+	lo, hi := likeutil.PrefixRange(prefix)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM indexed_files WHERE status = ? AND rel_path LIKE ? `+likeutil.EscapeClause,
-		string(FileStatusPresent), likeutil.Escape(filepath.ToSlash(folderPath))+"/%").Scan(&n)
+		`SELECT COUNT(*) FROM indexed_files
+		 WHERE status = ? AND rel_path >= ? AND rel_path < ? AND rel_path LIKE ? `+likeutil.EscapeClause,
+		string(FileStatusPresent), lo, hi, likeutil.Escape(prefix)+"%").Scan(&n)
 	return n, err
 }
 
