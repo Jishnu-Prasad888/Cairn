@@ -23,7 +23,7 @@ func TestPrefixRange(t *testing.T) {
 		t.Fatalf("PrefixRange = %q, %q", lo, hi)
 	}
 	for _, s := range []string{"a/b/x.jpg", "a/b/c/d.jpg", "a/b/"} {
-		if !(s >= lo && s < hi) {
+		if s < lo || s >= hi {
 			t.Errorf("%q should be in range", s)
 		}
 	}
