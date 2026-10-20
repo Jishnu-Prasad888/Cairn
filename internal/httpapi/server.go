@@ -196,6 +196,9 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("POST /api/v1/libraries/{id}/index", s.withAuth(allowAdmin, s.handleTriggerIndex))
 		mux.Handle("GET /api/v1/libraries/{id}/index/status", s.withAuth(allowAdmin, s.handleIndexStatus))
 		mux.Handle("GET /api/v1/libraries/{id}/index/progress", s.withAuth(allowAdmin, s.handleIndexProgress))
+		mux.Handle("GET /api/v1/libraries/{id}/ignore", s.withAuth(allowAdmin, s.handleGetIgnoreRules))
+		mux.Handle("PUT /api/v1/libraries/{id}/ignore", s.withAuth(allowAdmin, s.handlePutIgnoreRules))
+		mux.Handle("GET /api/v1/libraries/{id}/fs", s.withAuth(allowAdmin, s.handleBrowseLibrary))
 
 		// Local ML surface (admin): similarity passing, status, and purge are
 		// server operations like indexing. Reading "similar files" follows
@@ -263,6 +266,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/metadata", s.withAuth(allowAny, s.handleGetFileMetadata))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handleGetThumbnail))
 		mux.Handle("PUT /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handlePutThumbnail))
+		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/preview", s.withAuth(allowAny, s.handleGetPreview))
 
 		// Per-file Markdown notes (captions).
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/note", s.withAuth(allowAny, s.handleGetFileNote))

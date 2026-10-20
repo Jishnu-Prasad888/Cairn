@@ -10,9 +10,72 @@
 
 import type { FileSummary } from '../../api/types';
 import { BREAKPOINTS } from '../../lib/breakpoints';
-import { dayKey, formatDayHeading, formatMonthHeading, monthKey } from '../../lib/dates';
+import {
+  dayKey,
+  formatDayHeading,
+  formatMonthHeading,
+  formatWeekHeading,
+  formatYearHeading,
+  monthKey,
+  weekKey,
+  yearKey,
+} from '../../lib/dates';
 
-export type Grouping = 'day' | 'month' | 'none';
+/** How wide a slice of time one date heading (or timeline tick) covers. */
+export type TimeScale = 'day' | 'week' | 'month' | 'year';
+
+export type Grouping = TimeScale | 'none';
+
+/** Finest to coarsest: the order the timeline's zoom buttons step through. */
+export const TIME_SCALES: readonly TimeScale[] = ['day', 'week', 'month', 'year'];
+
+const KEY_OF: Record<TimeScale, (iso: string) => string> = {
+  day: dayKey,
+  week: weekKey,
+  month: monthKey,
+  year: yearKey,
+};
+
+const LABEL_OF: Record<TimeScale, (key: string, now: Date) => string> = {
+  day: formatDayHeading,
+  week: formatWeekHeading,
+  month: formatMonthHeading,
+  year: formatYearHeading,
+};
+
+/** The key of the `scale`-wide slice `iso` falls in, or `''` when undated. */
+export function sliceKey(scale: TimeScale, iso: string): string {
+  return KEY_OF[scale](iso);
+}
+
+/** `scale`, or `coarsest` if it is coarser than that. */
+export function clampScale(scale: TimeScale, coarsest: TimeScale): TimeScale {
+  return TIME_SCALES.indexOf(scale) > TIME_SCALES.indexOf(coarsest) ? coarsest : scale;
+}
+
+/**
+ * The coarsest scale that still splits `files` into more than one slice:
+ * zooming out past it would just put everything under one heading. Only the
+ * earliest and latest dates matter — if they fall in different years there
+ * are at least two year slices, and so on down.
+ */
+export function coarsestScale(files: readonly FileSummary[]): TimeScale {
+  let min = '';
+  let max = '';
+  for (const file of files) {
+    const key = dayKey(file.mod_time);
+    if (!key) continue;
+    if (!min || key < min) min = key;
+    if (!max || key > max) max = key;
+  }
+  if (!min) return 'day';
+  const iso = (key: string) => `${key}T12:00:00`;
+  for (let i = TIME_SCALES.length - 1; i > 0; i--) {
+    const scale = TIME_SCALES[i]!;
+    if (sliceKey(scale, iso(min)) !== sliceKey(scale, iso(max))) return scale;
+  }
+  return 'day';
+}
 
 export interface MediaGroup {
   key: string;
@@ -24,7 +87,8 @@ export interface MediaGroup {
 }
 
 /**
- * Split an already-sorted list into runs that share a calendar day or month.
+ * Split an already-sorted list into runs that share a calendar day, week,
+ * month or year.
  * Order is preserved: a group is a contiguous run, so a list sorted by name
  * would produce many small groups — callers only group date-sorted lists.
  */
@@ -36,8 +100,8 @@ export function groupFiles(
   if (grouping === 'none') {
     return files.length === 0 ? [] : [{ key: 'all', label: '', items: [...files], startIndex: 0 }];
   }
-  const keyOf = grouping === 'day' ? dayKey : monthKey;
-  const labelOf = grouping === 'day' ? formatDayHeading : formatMonthHeading;
+  const keyOf = KEY_OF[grouping];
+  const labelOf = LABEL_OF[grouping];
   const groups: MediaGroup[] = [];
   let current: MediaGroup | null = null;
   files.forEach((file, index) => {

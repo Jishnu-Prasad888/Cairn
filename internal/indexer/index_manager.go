@@ -296,12 +296,15 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 			continue
 		}
 		if change.Kind == ChangeModified {
-			// The thumbnail shows the old content. Browsers cache thumbnails
+			// The thumbnail (and preview) shows the old content. Browsers cache thumbnails
 			// by the file's mod time and size, so one left in place could be
 			// served under the new version for good; the next request (or
 			// the job below) makes a fresh one.
 			if err := os.Remove(metadata.ThumbPath(cairnDir, change.File.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				m.logger.Warn("remove outdated thumbnail", "file_id", change.File.ID, "error", err)
+			}
+			if err := os.Remove(metadata.PreviewPath(cairnDir, change.File.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				m.logger.Warn("remove outdated preview", "file_id", change.File.ID, "error", err)
 			}
 		}
 		payloads = append(payloads, map[string]any{

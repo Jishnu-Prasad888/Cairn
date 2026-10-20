@@ -17,6 +17,7 @@ import { useToast } from '../ui/Toast';
 import { FaceModelHost } from './FaceModelHost';
 import { UploadTray } from '../upload/UploadTray';
 import { MobileNav } from './MobileNav';
+import { useRememberSectionLocation } from './sectionMemory';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -36,6 +37,8 @@ export default function AppShell() {
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { libraryId } = useLibraries();
+  // Files and Albums links lead back to the folder or album left open.
+  useRememberSectionLocation();
 
   // Once per sign-in (per tab session): without ffmpeg many videos get no
   // thumbnail. The toast closes itself after 7 seconds or when dismissed.

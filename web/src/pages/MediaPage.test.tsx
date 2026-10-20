@@ -431,7 +431,7 @@ describe('MediaPage', () => {
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByRole('img')).toHaveAttribute(
       'src',
-      '/api/v1/libraries/lib1/files/f1/download',
+      expect.stringMatching(/^\/api\/v1\/libraries\/lib1\/files\/f1\/preview(\?v=|$)/),
     );
     expect(within(dialog).getByRole('link', { name: 'Download' })).toHaveAttribute(
       'href',
@@ -444,6 +444,41 @@ describe('MediaPage', () => {
     });
   });
 
+  it('shows the original when there is no preview', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const dialog = within(await screen.findByTestId('viewer')).getByRole('dialog');
+
+    fireEvent.error(within(dialog).getByRole('img'));
+    await waitFor(() => {
+      expect(within(dialog).getByRole('img')).toHaveAttribute(
+        'src',
+        '/api/v1/libraries/lib1/files/f1/download',
+      );
+    });
+  });
+
+  it('fetches the original only once the photo is zoomed past fit', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const dialog = within(await screen.findByTestId('viewer')).getByRole('dialog');
+    const img = within(dialog).getByRole('img');
+    fireEvent.load(img);
+    expect(img.getAttribute('src')).toMatch(/\/preview(\?v=|$)/);
+
+    fireEvent.keyDown(document, { key: '+' });
+    await waitFor(() => {
+      expect(within(dialog).getByRole('img')).toHaveAttribute(
+        'src',
+        '/api/v1/libraries/lib1/files/f1/download',
+      );
+    });
+  });
+
   it('falls back to the thumbnail when the original cannot be displayed', async () => {
     setup();
 
@@ -451,6 +486,13 @@ describe('MediaPage', () => {
     fireEvent.click(screen.getByText('IMG_0001.png'));
     const dialog = within(await screen.findByTestId('viewer')).getByRole('dialog');
 
+    fireEvent.error(within(dialog).getByRole('img'));
+    await waitFor(() => {
+      expect(within(dialog).getByRole('img')).toHaveAttribute(
+        'src',
+        '/api/v1/libraries/lib1/files/f1/download',
+      );
+    });
     fireEvent.error(within(dialog).getByRole('img'));
     await waitFor(() => {
       expect(within(dialog).getByRole('img')).toHaveAttribute(

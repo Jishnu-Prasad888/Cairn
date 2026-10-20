@@ -33,7 +33,7 @@ func TestScanProgressCountsEveryFolder(t *testing.T) {
 	if _, _, ok := p.Under(""); ok {
 		t.Fatal("Under reported totals before the counting walk")
 	}
-	if err := p.count(context.Background(), root); err != nil {
+	if err := p.count(context.Background(), root, nil); err != nil {
 		t.Fatal(err)
 	}
 	for folder, want := range map[string]int{"": 5, "a": 3, "a/deep": 1, "b": 1} {
@@ -72,7 +72,7 @@ func TestFolderScanState(t *testing.T) {
 
 	root := t.TempDir()
 	writeTree(t, root, "a/1.jpg", "a/2.jpg")
-	if err := p.count(context.Background(), root); err != nil {
+	if err := p.count(context.Background(), root, nil); err != nil {
 		t.Fatal(err)
 	}
 	if state, total, _ := m.FolderScanState("lib", "a", 0); state != FolderWaiting || total != 2 {
@@ -140,7 +140,7 @@ func TestProgressTree(t *testing.T) {
 
 	// During a scan the walk's counts are reported instead.
 	p := newScanProgress()
-	if err := p.count(ctx, root); err != nil {
+	if err := p.count(ctx, root, nil); err != nil {
 		t.Fatal(err)
 	}
 	p.fileDone("a/1.jpg")

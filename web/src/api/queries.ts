@@ -116,6 +116,37 @@ export const refreshLibrary = (id: string, path?: string) =>
 
 export const unregisterLibrary = (id: string) => apiDelete<void>(`/libraries/${id}`);
 
+/* --------------------------- ignore rules -------------------------- */
+
+/**
+ * What the scanner leaves out of a library: a path inside it (a folder and
+ * everything under it, or one file), a file extension, or a name pattern such
+ * as `*.tmp` matched against every file and folder name.
+ */
+export interface IgnoreRule {
+  kind: 'path' | 'extension' | 'name';
+  pattern: string;
+}
+
+export const getIgnoreRules = (id: string) =>
+  apiGet<{ rules: IgnoreRule[] }>(`/libraries/${id}/ignore`);
+
+export const saveIgnoreRules = (id: string, rules: IgnoreRule[]) =>
+  apiPut<{ rules: IgnoreRule[] }>(`/libraries/${id}/ignore`, { rules });
+
+/** One folder of a library; paths are relative to the library root. */
+export interface LibraryListing {
+  path: string;
+  parent: string;
+  dirs: Array<{ name: string; path: string }>;
+  files: Array<{ name: string; path: string }>;
+  /** True when the folder holds more files than one listing returns. */
+  truncated?: boolean;
+}
+
+export const browseLibrary = (id: string, path: string) =>
+  apiGet<LibraryListing>(`/libraries/${id}/fs?path=${encodeURIComponent(path)}`);
+
 /* ----------------------------- indexing ---------------------------- */
 
 export const triggerIndex = (id: string) =>

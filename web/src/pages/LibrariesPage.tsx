@@ -25,6 +25,7 @@ import {
 import type { IndexStatus, Library, LibraryProbe } from '../api/types';
 import { useAuth } from '../auth/authContext';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
+import IgnoreRulesDialog from '../components/IgnoreRulesDialog';
 import { IndexProgressPanel } from '../components/IndexProgressPanel';
 import LibraryPicker from '../components/LibraryPicker';
 import ServerFolderBrowser, { FolderOpenIcon } from '../components/ServerFolderBrowser';
@@ -338,6 +339,7 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [editingIgnores, setEditingIgnores] = useState(false);
   const [confirmUnregister, setConfirmUnregister] = useState(false);
 
   const open = isLibraryOpen(library.id);
@@ -437,6 +439,17 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
               {busy ? 'Working…' : 'Scan for changes'}
             </button>
           )}
+          {isAdmin && !offline && (
+            <button
+              type="button"
+              className="button"
+              onClick={() => setEditingIgnores(true)}
+              title="Leave folders, file types, or names out of this library"
+              data-testid="ignore-rules-button"
+            >
+              Ignore rules
+            </button>
+          )}
           {isAdmin && (
             <button
               type="button"
@@ -469,6 +482,14 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
       )}
 
       {reconnecting && <ReconnectDialog library={library} onClose={() => setReconnecting(false)} />}
+
+      {editingIgnores && (
+        <IgnoreRulesDialog
+          library={library}
+          onClose={() => setEditingIgnores(false)}
+          onSaved={loadStatus}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmUnregister}

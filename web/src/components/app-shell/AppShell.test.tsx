@@ -16,6 +16,8 @@ function shell(route = '/') {
             <Route path="/" element={<p>home content</p>} />
             <Route path="/photos" element={<p>photos content</p>} />
             <Route path="/files" element={<p>files content</p>} />
+            <Route path="/albums" element={<p>albums content</p>} />
+            <Route path="/albums/:albumId" element={<p>album content</p>} />
             <Route path="/settings" element={<p>settings content</p>} />
           </Route>
         </Routes>
@@ -56,6 +58,46 @@ describe('AppShell', () => {
         name: 'Settings',
       }),
     ).toBeInTheDocument();
+  });
+
+  it('takes Files and Albums back to the folder and album left open', async () => {
+    sessionStorage.clear();
+    mockApi();
+    shell('/files?folder=2019%2Fsummer');
+    expect(await screen.findByText('files content')).toBeInTheDocument();
+
+    const sections = () => screen.getByRole('navigation', { name: 'Sections' });
+    const link = (name: string) => within(sections()).getByRole('link', { name });
+
+    // Inside Files, its link goes to the top of Files.
+    await waitFor(() => expect(link('Files')).toHaveAttribute('href', '/files'));
+
+    fireEvent.click(link('Albums'));
+    expect(await screen.findByText('albums content')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(link('Files')).toHaveAttribute('href', '/files?folder=2019%2Fsummer'),
+    );
+
+    fireEvent.click(link('Photos'));
+    expect(await screen.findByText('photos content')).toBeInTheDocument();
+    expect(link('Files')).toHaveAttribute('href', '/files?folder=2019%2Fsummer');
+    expect(link('Albums')).toHaveAttribute('href', '/albums');
+  });
+
+  it('remembers an open album for the Albums link', async () => {
+    sessionStorage.clear();
+    mockApi();
+    shell('/albums/a1');
+    expect(await screen.findByText('album content')).toBeInTheDocument();
+    const sections = () => screen.getByRole('navigation', { name: 'Sections' });
+    fireEvent.click(within(sections()).getByRole('link', { name: 'Photos' }));
+    expect(await screen.findByText('photos content')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(sections()).getByRole('link', { name: 'Albums' })).toHaveAttribute(
+        'href',
+        '/albums/a1',
+      ),
+    );
   });
 
   it('keeps organizing and upkeep in a collapsible Manage group', () => {

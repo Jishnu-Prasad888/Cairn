@@ -8,7 +8,24 @@ import type { RefObject } from 'react';
 import { NavLink } from 'react-router-dom';
 
 import { Icon } from '../ui/Icon';
-import { MOBILE_NAV } from './navigation';
+import { MOBILE_NAV, type NavItem } from './navigation';
+import { useSectionLink } from './sectionMemory';
+
+function MobileNavEntry({ item }: { item: NavItem }) {
+  const to = useSectionLink(item.to);
+  return (
+    <NavLink
+      to={to}
+      end={item.end ?? false}
+      className={({ isActive }) => (isActive ? 'mobile-nav-item active' : 'mobile-nav-item')}
+    >
+      <span className="mobile-nav-pill">
+        <Icon name={item.icon} size={22} />
+      </span>
+      <span className="mobile-nav-label">{item.label}</span>
+    </NavLink>
+  );
+}
 
 export function MobileNav({
   moreOpen,
@@ -22,17 +39,7 @@ export function MobileNav({
   return (
     <nav className="mobile-nav" aria-label="Primary">
       {MOBILE_NAV.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.end ?? false}
-          className={({ isActive }) => (isActive ? 'mobile-nav-item active' : 'mobile-nav-item')}
-        >
-          <span className="mobile-nav-pill">
-            <Icon name={item.icon} size={22} />
-          </span>
-          <span className="mobile-nav-label">{item.label}</span>
-        </NavLink>
+        <MobileNavEntry key={item.to} item={item} />
       ))}
       <button
         type="button"

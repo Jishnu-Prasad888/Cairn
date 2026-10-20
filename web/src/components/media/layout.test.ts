@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import { fileFixture } from '../../test/harness';
-import { groupFiles, gridMetrics, layoutGrid, moveFocus, visibleRows } from './layout';
+import {
+  clampScale,
+  coarsestScale,
+  groupFiles,
+  gridMetrics,
+  layoutGrid,
+  moveFocus,
+  visibleRows,
+} from './layout';
 
 const day = (n: number, id: string) =>
   fileFixture({
@@ -25,9 +33,38 @@ describe('groupFiles', () => {
     expect(groups[0]!.label).toBe('');
   });
 
+  it('groups by Monday-started week and by year', () => {
+    // Sep 28 2026 is a Monday; the 27th is the Sunday before it.
+    const weeks = groupFiles([day(29, 'a'), day(28, 'b'), day(27, 'c')], 'week', now);
+    expect(weeks.map((g) => g.items.map((f) => f.id))).toEqual([['a', 'b'], ['c']]);
+    expect(weeks[0]!.label).toMatch(/^Week of /);
+
+    const old = fileFixture({ id: 'd', mod_time: '2024-03-01T12:00:00' });
+    const years = groupFiles([day(29, 'a'), day(1, 'b'), old], 'year', now);
+    expect(years.map((g) => g.label)).toEqual(['2026', '2024']);
+  });
+
   it('returns no groups for no files', () => {
     expect(groupFiles([], 'day', now)).toEqual([]);
     expect(groupFiles([], 'none', now)).toEqual([]);
+  });
+});
+
+describe('coarsestScale', () => {
+  const at = (iso: string) => fileFixture({ id: iso, mod_time: `${iso}T12:00:00` });
+
+  it('is the widest slice that still splits the files in two', () => {
+    expect(coarsestScale([at('2024-05-01'), at('2026-01-01')])).toBe('year');
+    expect(coarsestScale([at('2026-05-01'), at('2026-01-01')])).toBe('month');
+    expect(coarsestScale([at('2026-09-28'), at('2026-09-21')])).toBe('week');
+    expect(coarsestScale([at('2026-09-29'), at('2026-09-28')])).toBe('day');
+    expect(coarsestScale([at('2026-09-29')])).toBe('day');
+    expect(coarsestScale([])).toBe('day');
+  });
+
+  it('clamps a chosen scale to it', () => {
+    expect(clampScale('year', 'month')).toBe('month');
+    expect(clampScale('day', 'month')).toBe('day');
   });
 });
 

@@ -14,10 +14,15 @@ configure({ asyncUtilTimeout: 5000 });
 import { afterEach, beforeEach } from 'vitest';
 
 import { clearResourceCache } from '../api/resources';
+import { clearListingCache } from '../components/media/useFileListing';
+import { forgetScrollPositions } from '../components/media/useScrollMemory';
 
-// Results some pages keep across visits (see `cacheAs`) must not carry over
-// from one test into the next.
+// Results some pages keep across visits (see `cacheAs`), listings kept for
+// coming back to a grid, and the scroll positions to put it back at must not
+// carry over from one test into the next.
 afterEach(clearResourceCache);
+afterEach(clearListingCache);
+afterEach(forgetScrollPositions);
 
 /**
  * Per-browser preferences (grid or list, the viewer's details panel, recent

@@ -125,6 +125,18 @@ const ICONS = {
       <path d="m20 20-4.4-4.4" />
     </>
   ),
+  'zoom-in': (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m20 20-4.4-4.4M8.25 11h5.5M11 8.25v5.5" />
+    </>
+  ),
+  'zoom-out': (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m20 20-4.4-4.4M8.25 11h5.5" />
+    </>
+  ),
   close: <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   'chevron-left': <path d="m14.5 5.5-6.5 6.5 6.5 6.5" />,

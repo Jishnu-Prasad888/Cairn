@@ -13,6 +13,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useMLSwitch } from '../../api/mlSwitch';
 import { Icon } from '../ui/Icon';
 import { MANAGE_NAV, type NavItem, PRIMARY_NAV, SETTINGS_NAV } from './navigation';
+import { useSectionLink } from './sectionMemory';
 
 const MANAGE_KEY = 'cairn.nav.manage';
 
@@ -25,9 +26,10 @@ function readManageOpen(): boolean {
 }
 
 function NavEntry({ item, onNavigate }: { item: NavItem; onNavigate?: (() => void) | undefined }) {
+  const to = useSectionLink(item.to);
   return (
     <NavLink
-      to={item.to}
+      to={to}
       end={item.end ?? false}
       onClick={onNavigate}
       className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}

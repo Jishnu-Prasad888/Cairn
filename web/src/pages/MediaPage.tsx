@@ -13,8 +13,8 @@
  * photo — lives in the URL, so Back, reload, and sharing a link all work.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
 import { useLibraryGate } from '../api/libraries';
@@ -31,7 +31,12 @@ import { FilterPanel } from '../components/files/FilterPanel';
 import { EMPTY_RANGE, hasRangeFilters, type RangeFilters } from '../components/files/filters';
 import { FolderGrid } from '../components/files/FolderGrid';
 import { ShareDialog } from '../components/sharing/ShareDialog';
-import type { Grouping } from '../components/media/layout';
+import {
+  clampScale,
+  coarsestScale,
+  type Grouping,
+  type TimeScale,
+} from '../components/media/layout';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
 import { Timeline } from '../components/media/Timeline';
@@ -42,6 +47,7 @@ import {
   useFileListing,
 } from '../components/media/useFileListing';
 import { useMediaActions } from '../components/media/useMediaActions';
+import { useScrollMemory } from '../components/media/useScrollMemory';
 import { useSelection } from '../components/media/useSelection';
 import { useTimelineAutoload } from '../components/media/useTimelineAutoload';
 import {
@@ -58,7 +64,12 @@ import { useToast } from '../components/ui/Toast';
 import { useFileDrop } from '../components/upload/useFileDrop';
 import { useUploads } from '../components/upload/UploadProvider';
 import { ViewerModal } from '../components/ViewerModal';
-import { readTimelineOpen, storeTimelineOpen } from '../lib/timelinePreference';
+import {
+  readTimelineOpen,
+  readTimelineScale,
+  storeTimelineOpen,
+  storeTimelineScale,
+} from '../lib/timelinePreference';
 import './MediaPage.css';
 
 export interface MediaPageConfig {
@@ -193,6 +204,7 @@ function MediaBrowser({
   const primaryLibrary = libraries.find((l) => l.id === primaryId) ?? library;
   const multiOpen = openLibraryIds.length > 1;
   const [params, setParams] = useSearchParams();
+  const { pathname } = useLocation();
   const navigate = useNavigate();
   const toast = useToast();
   const uploads = useUploads();
@@ -230,6 +242,7 @@ function MediaBrowser({
   const tagRefresh = range.tags.length > 0 ? tagsTick : 0;
   const [view, setViewState] = useState<'grid' | 'list'>(() => (folderMode ? readView() : 'grid'));
   const [timelineOpen, setTimelineOpenState] = useState(readTimelineOpen);
+  const [timelineScale, setTimelineScaleState] = useState(readTimelineScale);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [folderBusy, setFolderBusy] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
@@ -251,6 +264,11 @@ function MediaBrowser({
   const setTimelineOpen = (open: boolean) => {
     setTimelineOpenState(open);
     storeTimelineOpen(open);
+  };
+
+  const setTimelineScale = (scale: TimeScale) => {
+    setTimelineScaleState(scale);
+    storeTimelineScale(scale);
   };
 
   /** Change one URL parameter in place (typing a query should not fill history). */
@@ -529,16 +547,28 @@ function MediaBrowser({
     return () => window.removeEventListener('keydown', onShortcut);
   });
 
+  const timelineVisible =
+    showTimeline && timelineOpen && (folderMode ? !q : sort === 'mod_time' && !listing.searching);
+  // While the timeline is open its magnifiers choose the slice of time — and
+  // the grid's headings follow, so a tick on the ruler is a heading below.
+  // Never coarser than what is loaded can split, or it would all be one group.
+  const coarsestTimelineScale = useMemo(
+    () => (timelineVisible ? coarsestScale(timelineFiles) : 'year'),
+    [timelineVisible, timelineFiles],
+  );
+  const pageScale: TimeScale =
+    config.grouping && config.grouping !== 'none' ? config.grouping : 'month';
+  const scale = clampScale(timelineScale ?? pageScale, coarsestTimelineScale);
   // Date headings need a single date stream; the merged view is one combined,
   // date-woven grid and deliberately has none — its tiles are sized purely by
   // how many items there are, whatever library each came from.
   const grouping: Grouping =
     config.grouping && sort === 'mod_time' && !listing.searching && !merged
-      ? config.grouping
+      ? timelineVisible
+        ? scale
+        : config.grouping
       : 'none';
   const filtersActive = hasRangeFilters(range);
-  const timelineVisible =
-    showTimeline && timelineOpen && (folderMode ? !q : sort === 'mod_time' && !listing.searching);
   // The grid's own listing already has what the Photos timeline needs; the
   // folder's recursive one is the only one that still has to catch up.
   useTimelineAutoload(listing, timelineVisible && !folderMode);
@@ -551,6 +581,13 @@ function MediaBrowser({
   }
 
   const ready = !listing.loading && !offline;
+  // Leaving and coming back (Back, or the sidebar) returns to the same spot in
+  // this listing. The open photo (`view=`) is not part of it: the viewer sits
+  // over the grid without moving it.
+  useScrollMemory(
+    `${pathname}|${merged ? openLibraryIds.join(',') : scopedId}|${view}|${JSON.stringify(query)}`,
+    ready,
+  );
   const nothingHere = ready && !listing.error && files.length === 0 && folders.length === 0;
 
   return (
@@ -939,7 +976,14 @@ function MediaBrowser({
         />
       )}
 
-      {timelineVisible && <Timeline files={timelineFiles} label={config.title} />}
+      {timelineVisible && (
+        <Timeline
+          files={timelineFiles}
+          label={config.title}
+          scale={scale}
+          onScaleChange={setTimelineScale}
+        />
+      )}
     </main>
   );
 }

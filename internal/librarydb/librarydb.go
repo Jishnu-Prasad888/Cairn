@@ -32,7 +32,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 9
+	SchemaVersion = 10
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB or AcquireDB to
@@ -753,5 +753,16 @@ CREATE TABLE IF NOT EXISTS face_scans (
 CREATE TABLE IF NOT EXISTS face_holds (
 	face_id    TEXT PRIMARY KEY REFERENCES faces(id) ON DELETE CASCADE,
 	created_at TEXT NOT NULL
+);
+
+-- ignore_rules lists what the scanner leaves out of the index: a path inside
+-- the library (a folder and everything under it, or one file), a file
+-- extension, or a name pattern matched against every file and folder name.
+CREATE TABLE IF NOT EXISTS ignore_rules (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	kind       TEXT NOT NULL CHECK (kind IN ('path', 'extension', 'name')),
+	pattern    TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	UNIQUE (kind, pattern)
 );
 `

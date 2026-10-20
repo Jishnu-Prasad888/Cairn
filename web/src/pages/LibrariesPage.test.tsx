@@ -408,4 +408,58 @@ describe('LibrariesPage', () => {
       'Counting the files in every folder',
     );
   });
+
+  it('adds ignore rules by typing and by browsing the library, then saves and rescans', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        url.endsWith('/libraries/lib1/ignore') && init?.method === 'PUT'
+          ? json({ rules: [] })
+          : undefined,
+      (url) =>
+        url.endsWith('/libraries/lib1/ignore')
+          ? json({ rules: [{ kind: 'name', pattern: 'Thumbs.db' }] })
+          : undefined,
+      (url) =>
+        url.includes('/libraries/lib1/fs')
+          ? json({
+              path: '',
+              parent: '',
+              dirs: [{ name: 'raw', path: 'raw' }],
+              files: [{ name: 'IMG_1.CR2', path: 'IMG_1.CR2' }],
+            })
+          : undefined,
+      (url, init) =>
+        url.endsWith('/libraries/lib1/index') && init?.method === 'POST'
+          ? json({ job_id: 'j1' })
+          : undefined,
+    ]);
+
+    fireEvent.click(await screen.findByTestId('ignore-rules-button'));
+    const dialog = await screen.findByTestId('ignore-rules-dialog');
+    expect(await within(dialog).findByText('Thumbs.db')).toBeInTheDocument();
+
+    // A typed absolute path inside the library is stored relative to it.
+    fireEvent.change(screen.getByTestId('ignore-pattern-input'), {
+      target: { value: '/srv/photos/2019/tmp/' },
+    });
+    fireEvent.click(screen.getByTestId('add-ignore-rule'));
+    expect(within(dialog).getByText('2019/tmp')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('browse-library'));
+    const browser = await screen.findByTestId('library-browser');
+    await within(browser).findByText(/IMG_1\.CR2/);
+    fireEvent.click(within(browser).getByTitle('Ignore raw'));
+    fireEvent.click(within(browser).getByTitle('Ignore every .cr2 file'));
+
+    fireEvent.click(screen.getByTestId('save-ignore-rules'));
+    await waitFor(() => expect(called(fetchMock, 'POST', '/libraries/lib1/index')).toBe(true));
+    expect(bodyOf(fetchMock, 'PUT', '/libraries/lib1/ignore')).toEqual({
+      rules: [
+        { kind: 'name', pattern: 'Thumbs.db' },
+        { kind: 'path', pattern: '2019/tmp' },
+        { kind: 'path', pattern: 'raw' },
+        { kind: 'extension', pattern: 'cr2' },
+      ],
+    });
+  });
 });

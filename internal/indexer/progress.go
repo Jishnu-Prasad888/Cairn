@@ -75,8 +75,8 @@ func (p *ScanProgress) dir(d string) *dirCounts {
 
 // count walks root listing directories only — no file is opened or statted
 // — and records how many files each directory holds. It mirrors the scan's
-// walk, so the totals match what the scan will visit.
-func (p *ScanProgress) count(ctx context.Context, root string) error {
+// walk, ignore rules included, so the totals match what the scan will visit.
+func (p *ScanProgress) count(ctx context.Context, root string, ignore *ignorer) error {
 	totals := map[string]*dirCounts{"": {}}
 	err := filepath.WalkDir(root, func(absPath string, d os.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -94,11 +94,17 @@ func (p *ScanProgress) count(ctx context.Context, root string) error {
 			if d.Name() == cairnDirName {
 				return filepath.SkipDir
 			}
+			if rel != "." && ignore.skip(rel, true) {
+				return filepath.SkipDir
+			}
 			if rel != "." {
 				if _, ok := totals[rel]; !ok {
 					totals[rel] = &dirCounts{}
 				}
 			}
+			return nil
+		}
+		if ignore.skip(rel, false) {
 			return nil
 		}
 		dir := relDir(rel)

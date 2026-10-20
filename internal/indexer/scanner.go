@@ -65,8 +65,16 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 	// can mark unvisited records as missing afterwards.
 	seenIDs := make(map[string]struct{})
 
+	// Paths the library's ignore rules leave out are never visited, so files
+	// indexed before a rule was added are marked missing below.
+	rules, err := LoadIgnoreRules(ctx, sc.store.db)
+	if err != nil {
+		return nil, fmt.Errorf("load ignore rules: %w", err)
+	}
+	ignore := newIgnorer(rules)
+
 	if sc.progress != nil {
-		if err := sc.progress.count(ctx, root); err != nil && isContextErr(err) {
+		if err := sc.progress.count(ctx, root, ignore); err != nil && isContextErr(err) {
 			return result, nil
 		}
 	}
@@ -95,15 +103,6 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 		if d.IsDir() && d.Name() == cairnDirName {
 			return filepath.SkipDir
 		}
-		if d.IsDir() {
-			if sc.progress != nil {
-				if rel, err := filepath.Rel(root, absPath); err == nil && rel != "." {
-					sc.progress.enter(filepath.ToSlash(rel))
-				}
-			}
-			return nil // descend into ordinary directories
-		}
-
 		relPath, err := filepath.Rel(root, absPath)
 		if err != nil {
 			sc.logger.Warn("relative path error", "abs", absPath, "error", err)
@@ -112,6 +111,22 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 		}
 		// Normalise to forward slashes for portability.
 		relPath = filepath.ToSlash(relPath)
+
+		if d.IsDir() {
+			if relPath == "." {
+				return nil
+			}
+			if ignore.skip(relPath, true) {
+				return filepath.SkipDir
+			}
+			if sc.progress != nil {
+				sc.progress.enter(relPath)
+			}
+			return nil // descend into ordinary directories
+		}
+		if ignore.skip(relPath, false) {
+			return nil
+		}
 
 		if sc.progress != nil {
 			// Counted however it turns out, so a folder of unreadable files

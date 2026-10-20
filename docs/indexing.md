@@ -81,6 +81,23 @@ Files with matching path + size + mtime are left untouched and counted as
 `unchanged`. Only genuinely new, modified, or moved files incur the cost of
 hashing.
 
+## Ignore rules
+
+Each library can leave things out of its index. Rules live in the library's
+own `ignore_rules` table (in `.cairn/library.db`), so they travel with it.
+
+| Kind | Pattern | Leaves out |
+|------|---------|------------|
+| `path` | `2019/raw` | That folder and everything under it, or that one file. Stored relative to the root; an absolute path inside the library is accepted and converted. |
+| `extension` | `xmp` | Every file with that extension, in any letter case. A leading `.` or `*.` is dropped. |
+| `name` | `Thumbs.db`, `*.tmp`, `@eaDir` | Every file or folder with a matching name anywhere in the library (`*` and `?` wildcards, any letter case). |
+
+An ignored folder is never walked. Files indexed before a rule covered them are
+marked `missing` on the next scan, so their tags, albums and notes come back if
+the rule is removed. The Libraries page edits rules under **Ignore rules**,
+where paths can be typed or picked by browsing the library, and saving starts a
+scan.
+
 ## Background jobs
 
 Index scans run as background jobs in `index_jobs` (per-library SQLite table).
@@ -101,8 +118,11 @@ Jobs survive process restarts: any `running` job found at startup is reset to
 |--------|------|-------------|
 | `POST` | `/api/v1/libraries/{id}/index` | Enqueue a scan job. Returns `job_id`. |
 | `GET`  | `/api/v1/libraries/{id}/index/status` | Present/missing/deleted counts + active job. |
+| `GET`  | `/api/v1/libraries/{id}/ignore` | The library's ignore rules: `{"rules": [{"kind", "pattern"}]}`. |
+| `PUT`  | `/api/v1/libraries/{id}/ignore` | Replace the ignore rules; returns them normalized. `400` for an invalid rule. |
+| `GET`  | `/api/v1/libraries/{id}/fs?path=rel` | Folders and files directly inside one folder of the library (relative paths, `.cairn` hidden, at most 2000 files). |
 
-Both endpoints require admin authentication. Scanning an offline library returns
+All of these require admin authentication. Scanning an offline library returns
 `409 Conflict`.
 
 ## File status values

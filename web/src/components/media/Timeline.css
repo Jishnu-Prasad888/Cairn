@@ -15,12 +15,55 @@
   pointer-events: none;
 }
 
+.timeline-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: min(100%, 1020px);
+  margin: 0 var(--space-6);
+  padding: 0 2px;
+  pointer-events: auto;
+}
+
+.timeline-zoom {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.timeline-zoom:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  color: var(--color-text-primary);
+}
+
+.timeline-zoom:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.timeline-zoom:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .timeline-track {
   position: relative;
-  width: min(100%, 960px);
+  flex: 1;
+  min-width: 0;
   height: 30px;
-  margin: 0 var(--space-6);
-  pointer-events: auto;
   cursor: pointer;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
@@ -54,12 +97,12 @@
   background: var(--color-border);
 }
 
-.timeline-track::after {
-  /* The card the ruler sits on, always visible — a hairline on bare page
-     would be lost under a grid of photos. */
+.timeline-bar::after {
+  /* The card the ruler and its zoom buttons sit on, always visible — a
+     hairline on bare page would be lost under a grid of photos. */
   content: '';
   position: absolute;
-  inset: 4px -16px;
+  inset: 4px 0;
   z-index: -1;
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-surface-elevated) 96%, transparent);
@@ -69,9 +112,9 @@
   transition: box-shadow var(--duration-base) var(--ease-standard);
 }
 
-.timeline-track:hover::after,
-.timeline-track:focus-visible::after,
-.timeline-track.is-scrubbing::after {
+.timeline-bar:hover::after,
+.timeline-bar:focus-within::after,
+.timeline-bar:has(.is-scrubbing)::after {
   box-shadow: var(--shadow-3);
 }
 
@@ -144,8 +187,9 @@
     bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + var(--space-3));
   }
 
-  .timeline-track {
+  .timeline-bar {
     margin: 0 var(--space-4);
+    gap: var(--space-2);
   }
 }
 
@@ -158,5 +202,10 @@
 @media (pointer: coarse) {
   .timeline-track {
     height: var(--touch-target);
+  }
+
+  .timeline-zoom {
+    width: 36px;
+    height: 36px;
   }
 }

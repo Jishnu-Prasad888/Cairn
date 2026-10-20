@@ -9,7 +9,10 @@
  * dialogs and the reload.
  *
  * Images load progressively: the grid's thumbnail is shown at once, blurred,
- * and the original replaces it when it arrives. Videos stream (the download
+ * and the server's screen-sized preview replaces it when it arrives (the
+ * original when it is small enough not to need one). The original itself, all
+ * of a camera's megapixels, is fetched only when the photo is zoomed past fit.
+ * The photos either side are fetched ahead, so paging is instant. Videos stream (the download
  * route supports Range requests), so a large file starts playing at once and
  * is never held in memory.
  *
@@ -29,7 +32,7 @@ import { formatDateTime } from '../lib/dates';
 import { useFocusTrap } from '../lib/focusTrap';
 import { VideoScrubPreview } from './viewer/VideoScrubPreview';
 import { FileNote } from './FileNote';
-import { downloadUrl, thumbnailUrl, mediaTypeIcon } from './media';
+import { downloadUrl, previewUrl, thumbnailUrl, mediaTypeIcon } from './media';
 import { Icon, type IconName } from './ui/Icon';
 import { Menu, useMenuButton, withDangerLast } from './ui/Menu';
 import { AlbumsPanel } from './viewer/AlbumsPanel';
@@ -88,6 +91,9 @@ interface View {
   r: number;
   k: number;
 }
+/** What the viewer draws a photo from; see `previewUrl`. */
+type PhotoSource = 'preview' | 'original' | 'thumbnail';
+
 const FIT: View = { z: 1, x: 0, y: 0, r: 0, k: 1 };
 
 /**
@@ -190,9 +196,16 @@ export function ViewerModal({
   const [panelOpen, setPanelOpen] = useState(readPanelPreference);
   const [chromeHidden, setChromeHidden] = useState(false);
   const [tab, setTab] = useState<PanelTab>('details');
-  // The original image's load state, tagged with the file it describes so
-  // navigating never shows the previous photo's state.
-  const [original, setOriginal] = useState<{ id: string; state: 'loaded' | 'failed' } | null>(null);
+  // Which image the photo is drawn from, and whether it has arrived, tagged
+  // with the file it describes so navigating never shows the previous
+  // photo's state. `fullFailed` remembers an original the browser could not
+  // decode (HEIC, RAW) so zooming does not ask for it again.
+  const [photo, setPhoto] = useState<{
+    id: string;
+    source: PhotoSource;
+    shown: boolean;
+    fullFailed?: boolean;
+  } | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<ReadonlySet<string> | null>(null);
   const [metadataState, setMetadataState] = useState<{
     fileId: string;
@@ -664,8 +677,51 @@ export function ViewerModal({
 
   const isPhoto = file.media_type === 'photo';
   const isVideo = file.media_type === 'video';
-  const originalState = original?.id === file.id ? original.state : null;
-  const originalShown = originalState === 'loaded' || originalState === 'failed';
+  const photoState =
+    photo?.id === file.id ? photo : { id: file.id, source: 'preview' as const, shown: false };
+  const originalShown = photoState.shown;
+  // Zoomed past fit, the preview runs out of pixels: draw the original. The
+  // preview stays painted until the original has arrived.
+  const zoomedFull =
+    zoom > 1 && photoState.source === 'preview' && photoState.shown && !photoState.fullFailed;
+  const photoSrc =
+    photoState.source === 'preview' && !zoomedFull
+      ? previewUrl(libraryId, file)
+      : photoState.source === 'thumbnail'
+        ? thumbnailUrl(libraryId, file)
+        : downloadUrl(libraryId, file);
+
+  // Fetch the previews of the photos either side, so paging to one finds it
+  // in the browser cache (and the server has made it while this one is seen).
+  const prevSibling = hasPrev ? siblings[index - 1] : undefined;
+  const nextSibling = hasNext ? siblings[index + 1] : undefined;
+  useEffect(() => {
+    const ahead = [nextSibling, prevSibling].filter(
+      (f): f is FileSummary => f?.media_type === 'photo',
+    );
+    // Not abandoned when paging on: the photo paged to is one of them.
+    for (const f of ahead) new Image().src = previewUrl(libraryId, f);
+  }, [libraryId, nextSibling, prevSibling]);
+
+  const onPhotoError = () => {
+    // The original, fetched for zooming over a preview that is still good.
+    if (zoomedFull) {
+      setPhoto({ ...photoState, fullFailed: true });
+      return;
+    }
+    switch (photoState.source) {
+      case 'preview':
+        // No preview: the original is small, or the server cannot read it.
+        setPhoto({ id: file.id, source: 'original', shown: false });
+        break;
+      case 'original':
+        // The browser cannot decode it either (HEIC, RAW).
+        setPhoto({ id: file.id, source: 'thumbnail', shown: true });
+        break;
+      default:
+        setPhoto({ ...photoState, shown: true });
+    }
+  };
 
   // Zoom and pan are one transform about the stage centre, so the photo can
   // grow past 150% (a CSS width is shrunk back by the flex stage) and is
@@ -963,23 +1019,12 @@ export function ViewerModal({
                   key={file.id}
                   ref={imgRef}
                   className={originalShown ? 'viewer-media' : 'viewer-media is-loading'}
-                  // The thumbnail is far too small to fill a window; show the
-                  // original, falling back to the preview for a format the
-                  // browser cannot decode (HEIC, RAW).
-                  src={
-                    originalState === 'failed'
-                      ? thumbnailUrl(libraryId, file)
-                      : downloadUrl(libraryId, file)
-                  }
+                  src={photoSrc}
                   onLoad={() => {
-                    setOriginal((o) =>
-                      o?.id === file.id && o.state === 'failed'
-                        ? o
-                        : { id: file.id, state: 'loaded' },
-                    );
+                    if (!photoState.shown) setPhoto({ ...photoState, shown: true });
                     refitTurn();
                   }}
-                  onError={() => setOriginal({ id: file.id, state: 'failed' })}
+                  onError={onPhotoError}
                   alt={file.name}
                   style={mediaStyle}
                   draggable={false}

@@ -9,6 +9,10 @@
 export function dayKey(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
+  return keyOfDate(date);
+}
+
+function keyOfDate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
@@ -18,6 +22,23 @@ export function dayKey(iso: string): string {
 /** `YYYY-MM` in local time, or `''`. */
 export function monthKey(iso: string): string {
   return dayKey(iso).slice(0, 7);
+}
+
+/** `YYYY` in local time, or `''`. */
+export function yearKey(iso: string): string {
+  return dayKey(iso).slice(0, 4);
+}
+
+/**
+ * The `YYYY-MM-DD` of the Monday starting the week `iso` falls in, local
+ * time, or `''`. Weeks start on Monday (ISO 8601) whatever the locale, so a
+ * week's key never depends on who is looking.
+ */
+export function weekKey(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const back = (date.getDay() + 6) % 7;
+  return keyOfDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() - back));
 }
 
 function parseKey(key: string): Date | null {
@@ -53,6 +74,24 @@ export function formatMonthHeading(key: string, now: Date = new Date()): string 
       ? { month: 'long' }
       : { month: 'long', year: 'numeric' },
   );
+}
+
+/** "Week of Sep 28", with the year added before this one. */
+export function formatWeekHeading(key: string, now: Date = new Date()): string {
+  const date = parseKey(key);
+  if (!date) return 'Undated';
+  const day = date.toLocaleDateString(
+    undefined,
+    date.getFullYear() === now.getFullYear()
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' },
+  );
+  return `Week of ${day}`;
+}
+
+/** "2025". */
+export function formatYearHeading(key: string): string {
+  return /^\d{4}$/.test(key) ? key : 'Undated';
 }
 
 /** A short absolute date for metadata rows and lists. */

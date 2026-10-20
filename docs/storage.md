@@ -34,6 +34,7 @@ single dot-directory:
 └── .cairn/
     ├── library.db              library-level SQLite database
     ├── thumbnails/             derived previews
+    ├── previews/               screen-sized photos for the viewer
     ├── index/                  indexer state and change journals
     ├── embeddings/             optional ML embeddings (future)
     ├── faces/                  optional face data (future)

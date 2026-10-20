@@ -41,7 +41,26 @@ export function thumbnailUrl(
   libraryId: string,
   file: Pick<FileSummary, 'id'> & Partial<Pick<FileSummary, 'mod_time' | 'size_bytes'>>,
 ): string {
-  const base = `${API_BASE}/libraries/${libraryId}/files/${file.id}/thumbnail`;
+  return versioned(`${API_BASE}/libraries/${libraryId}/files/${file.id}/thumbnail`, file);
+}
+
+/**
+ * The screen-sized JPEG the viewer shows in place of a photo's original: a
+ * few hundred kilobytes where a camera original is tens of megabytes, with
+ * the EXIF orientation already applied. Versioned like the thumbnail. A 404
+ * means the original is small enough to show as it is.
+ */
+export function previewUrl(
+  libraryId: string,
+  file: Pick<FileSummary, 'id'> & Partial<Pick<FileSummary, 'mod_time' | 'size_bytes'>>,
+): string {
+  return versioned(`${API_BASE}/libraries/${libraryId}/files/${file.id}/preview`, file);
+}
+
+function versioned(
+  base: string,
+  file: Partial<Pick<FileSummary, 'mod_time' | 'size_bytes'>>,
+): string {
   if (!file.mod_time || file.size_bytes === undefined) return base;
   return `${base}?v=${encodeURIComponent(`${file.mod_time}-${file.size_bytes}`)}`;
 }

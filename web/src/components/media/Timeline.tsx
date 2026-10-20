@@ -11,6 +11,11 @@
  * from whatever files are already loaded, so there is no extra request on
  * Photos or an album; Files supplies its own recursive listing (see
  * `MediaPage`) because the grid it shows is deliberately just one folder.
+ *
+ * The magnifiers at either end zoom the ruler — and, where the page passes
+ * `onScaleChange`, the grid's date headings with it — between days, weeks,
+ * months and years. Zooming out stops at the coarsest scale that still splits
+ * what is loaded into more than one slice.
  */
 
 import {
@@ -24,6 +29,8 @@ import {
 } from 'react';
 
 import type { FileSummary } from '../../api/types';
+import { Icon } from '../ui/Icon';
+import { clampScale, coarsestScale, sliceKey, TIME_SCALES, type TimeScale } from './layout';
 import './Timeline.css';
 
 interface Bucket {
@@ -34,32 +41,50 @@ interface Bucket {
   startIndex: number;
 }
 
-/** `YYYY-MM` in local time, or `null` for an unparseable date. */
-function monthOf(iso: string): { key: string; year: string; date: Date } | null {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  return { key: `${year}-${month}`, year, date };
+const SCALE_NAMES: Record<TimeScale, string> = {
+  day: 'days',
+  week: 'weeks',
+  month: 'months',
+  year: 'years',
+};
+
+/** A slice's name on the ruler: always with its year, unlike a grid heading. */
+function sliceLabel(scale: TimeScale, key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y!, (m || 1) - 1, d || 1);
+  switch (scale) {
+    case 'day':
+      return date.toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    case 'week':
+      return `Week of ${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    case 'month':
+      return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    case 'year':
+      return String(y);
+  }
 }
 
 /**
- * One bucket per distinct month, in the order each first appears — not sorted
- * by date. A list already newest-first lays out newest-to-oldest, which is
- * what should line up with the grid above; a hand-ordered album stays in that
- * order too, rather than being silently re-sorted underneath it.
+ * One bucket per distinct slice of time, in the order each first appears —
+ * not sorted by date. A list already newest-first lays out newest-to-oldest,
+ * which is what should line up with the grid above; a hand-ordered album
+ * stays in that order too, rather than being silently re-sorted underneath it.
  */
-function bucketsOf(files: readonly FileSummary[]): Bucket[] {
+function bucketsOf(files: readonly FileSummary[], scale: TimeScale): Bucket[] {
   const seen = new Set<string>();
   const buckets: Bucket[] = [];
   files.forEach((file, index) => {
-    const month = monthOf(file.mod_time);
-    if (!month || seen.has(month.key)) return;
-    seen.add(month.key);
+    const key = sliceKey(scale, file.mod_time);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
     buckets.push({
-      key: month.key,
-      year: month.year,
-      label: month.date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }),
+      key,
+      year: key.slice(0, 4),
+      label: sliceLabel(scale, key),
       startIndex: index,
     });
   });
@@ -68,7 +93,7 @@ function bucketsOf(files: readonly FileSummary[]): Bucket[] {
 
 /** Narrowest gap, in px, between two year numerals before one is left out. */
 const MIN_YEAR_GAP_PX = 44;
-/** Narrowest gap, in px, between two month ticks before one is left out. */
+/** Narrowest gap, in px, between two ticks before one is left out. */
 const MIN_TICK_GAP_PX = 5;
 
 interface Mark {
@@ -81,9 +106,9 @@ interface Mark {
 
 /**
  * Which ticks and year numerals to draw on a track `width` px wide. Where
- * many months fall close together, drawing every one turns the ruler into a
+ * many slices fall close together, drawing every one turns the ruler into a
  * smudge of ticks and overlapping numerals; ticks are thinned and a numeral is
- * only printed when it clears the previous one. Year ticks are kept over month
+ * only printed when it clears the previous one. Year ticks are kept over other
  * ticks, since they carry the most meaning.
  */
 function marksFor(buckets: readonly Bucket[], lastIndex: number, width: number): Mark[] {
@@ -95,7 +120,7 @@ function marksFor(buckets: readonly Bucket[], lastIndex: number, width: number):
     const x = at(bucket);
     const isYear = bucket.year !== buckets[i - 1]?.year;
     if (isYear) {
-      // A year tick wins over a month tick drawn just before it.
+      // A year tick wins over a finer tick drawn just before it.
       const prev = marks[marks.length - 1];
       if (prev && !prev.isYear && x - lastTick < MIN_TICK_GAP_PX) marks.pop();
       const showYear = x - lastYear >= MIN_YEAR_GAP_PX;
@@ -135,16 +160,37 @@ export interface TimelineProps {
   files: readonly FileSummary[];
   /** What the timeline is a timeline of, for its accessible name. */
   label: string;
+  /**
+   * The slice of time each tick marks. Pass it with `onScaleChange` to let the
+   * page follow the zoom (Photos regroups its grid); leave both out and the
+   * ruler keeps its own, starting at months.
+   */
+  scale?: TimeScale;
+  onScaleChange?: (scale: TimeScale) => void;
 }
 
-export function Timeline({ files, label }: TimelineProps) {
+export function Timeline({ files, label, scale: scaleProp, onScaleChange }: TimelineProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const frame = useRef(0);
   const [scrubbing, setScrubbing] = useState(false);
   const [hoverFraction, setHoverFraction] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  const buckets = useMemo(() => bucketsOf(files), [files]);
+  const [ownScale, setOwnScale] = useState<TimeScale>('month');
+  const requested = scaleProp ?? ownScale;
+  const coarsest = useMemo(() => coarsestScale(files), [files]);
+  const scale = clampScale(requested, coarsest);
+  const scaleIndex = TIME_SCALES.indexOf(scale);
+  const canZoomIn = scaleIndex > 0;
+  const canZoomOut = scaleIndex < TIME_SCALES.indexOf(coarsest);
+  const zoomTo = (next: TimeScale) => {
+    if (onScaleChange) onScaleChange(next);
+    else setOwnScale(next);
+  };
+  const zoomIn = () => canZoomIn && zoomTo(TIME_SCALES[scaleIndex - 1]!);
+  const zoomOut = () => canZoomOut && zoomTo(TIME_SCALES[scaleIndex + 1]!);
+
+  const buckets = useMemo(() => bucketsOf(files, scale), [files, scale]);
   const total = files.length;
   const lastIndex = Math.max(total - 1, 1);
 
@@ -207,6 +253,15 @@ export function Timeline({ files, label }: TimelineProps) {
     return clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
   };
 
+  // Regrouping the grid moves every file down or up the page; keep the one at
+  // the playhead in view rather than leaving the reader somewhere else.
+  const shownScale = useRef(scale);
+  useEffect(() => {
+    if (shownScale.current === scale) return;
+    shownScale.current = scale;
+    jumpToFraction(activeIndex / lastIndex, false);
+  }, [scale, activeIndex, lastIndex, jumpToFraction]);
+
   const jumpToIndex = useCallback(
     (index: number) => {
       const clamped = clamp(index, 0, lastIndex);
@@ -256,6 +311,12 @@ export function Timeline({ files, label }: TimelineProps) {
     } else if (event.key === 'End') {
       event.preventDefault();
       jumpToIndex(lastIndex);
+    } else if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      zoomIn();
+    } else if (event.key === '-' || event.key === '_') {
+      event.preventDefault();
+      zoomOut();
     }
   };
 
@@ -268,12 +329,14 @@ export function Timeline({ files, label }: TimelineProps) {
   if (buckets.length < 2) {
     return (
       <div className="timeline" data-testid="timeline">
-        <div className="timeline-track timeline-track-empty" role="status">
-          <span className="timeline-empty-label">
-            {buckets.length === 1
-              ? `Everything loaded so far is from ${buckets[0]!.label}.`
-              : "The loaded files don't have usable dates."}
-          </span>
+        <div className="timeline-bar">
+          <div className="timeline-track timeline-track-empty" role="status">
+            <span className="timeline-empty-label">
+              {buckets.length === 1
+                ? `Everything loaded so far is from ${buckets[0]!.label}.`
+                : "The loaded files don't have usable dates."}
+            </span>
+          </div>
         </div>
       </div>
     );
@@ -286,52 +349,86 @@ export function Timeline({ files, label }: TimelineProps) {
 
   return (
     <div className="timeline" data-testid="timeline">
-      <div
-        ref={trackRef}
-        className={scrubbing ? 'timeline-track is-scrubbing' : 'timeline-track'}
-        role="slider"
-        tabIndex={0}
-        aria-label={`${label} timeline`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(flagFraction * 100)}
-        aria-valuetext={current.label}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endScrub}
-        onPointerCancel={endScrub}
-        onPointerLeave={() => !scrubbing && setHoverFraction(null)}
-        onKeyDown={onKeyDown}
-      >
-        {marks.map(({ bucket, isYear, showYear }) => (
+      <div className="timeline-bar">
+        <button
+          type="button"
+          className="timeline-zoom"
+          onClick={zoomOut}
+          disabled={!canZoomOut}
+          aria-label="Zoom out"
+          title={
+            canZoomOut
+              ? `Zoom out to ${SCALE_NAMES[TIME_SCALES[scaleIndex + 1]!]}`
+              : `Showing ${SCALE_NAMES[scale]}`
+          }
+          data-testid="timeline-zoom-out"
+        >
+          <Icon name="zoom-out" size={18} />
+        </button>
+        <div
+          ref={trackRef}
+          className={scrubbing ? 'timeline-track is-scrubbing' : 'timeline-track'}
+          role="slider"
+          tabIndex={0}
+          aria-label={`${label} timeline`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(flagFraction * 100)}
+          aria-valuetext={current.label}
+          aria-description={`Grouped by ${SCALE_NAMES[scale]}`}
+          data-scale={scale}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endScrub}
+          onPointerCancel={endScrub}
+          onPointerLeave={() => !scrubbing && setHoverFraction(null)}
+          onKeyDown={onKeyDown}
+        >
+          {marks.map(({ bucket, isYear, showYear }) => (
+            <span
+              key={bucket.key}
+              className={isYear ? 'timeline-tick is-year' : 'timeline-tick'}
+              style={{ left: `${(bucket.startIndex / lastIndex) * 100}%` }}
+              aria-hidden="true"
+            >
+              {showYear && <span className="timeline-year">{bucket.year}</span>}
+            </span>
+          ))}
           <span
-            key={bucket.key}
-            className={isYear ? 'timeline-tick is-year' : 'timeline-tick'}
-            style={{ left: `${(bucket.startIndex / lastIndex) * 100}%` }}
+            className="timeline-flag"
+            style={{ left: `${flagFraction * 100}%` }}
             aria-hidden="true"
-          >
-            {showYear && <span className="timeline-year">{bucket.year}</span>}
-          </span>
-        ))}
-        <span
-          className="timeline-flag"
-          style={{ left: `${flagFraction * 100}%` }}
-          aria-hidden="true"
-        />
-        {/* Inside the track, so its percentage is of the same width as the
+          />
+          {/* Inside the track, so its percentage is of the same width as the
             flag's and the pointer's: positioned against the full-width bar
             around the track, it drifted away from the cursor on wide windows
             and named a different month than the one under the pointer. */}
-        {showLabel && (
-          <span
-            className="timeline-label"
-            data-testid="timeline-label"
-            style={{ left: `${flagFraction * 100}%` }}
-            aria-hidden="true"
-          >
-            {current.label}
-          </span>
-        )}
+          {showLabel && (
+            <span
+              className="timeline-label"
+              data-testid="timeline-label"
+              style={{ left: `${flagFraction * 100}%` }}
+              aria-hidden="true"
+            >
+              {current.label}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="timeline-zoom"
+          onClick={zoomIn}
+          disabled={!canZoomIn}
+          aria-label="Zoom in"
+          title={
+            canZoomIn
+              ? `Zoom in to ${SCALE_NAMES[TIME_SCALES[scaleIndex - 1]!]}`
+              : `Showing ${SCALE_NAMES[scale]}`
+          }
+          data-testid="timeline-zoom-in"
+        >
+          <Icon name="zoom-in" size={18} />
+        </button>
       </div>
     </div>
   );

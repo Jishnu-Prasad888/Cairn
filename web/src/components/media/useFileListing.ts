@@ -23,6 +23,42 @@ import type { FileListResponse, FileSummary, Folder } from '../../api/types';
 export const PAGE_SIZE = 100;
 const MB = 1024 * 1024;
 
+/* ------------------------------ listing cache ------------------------------ */
+
+/**
+ * The last few listings, every page that was loaded, kept for when the reader
+ * comes back. Returning to Photos (or to a folder) then shows exactly the list
+ * that was left — so the scroll position can be put back — and refreshes it
+ * behind the scenes instead of starting again from page one.
+ */
+const CACHE_SIZE = 12;
+const listingCache = new Map<string, unknown>();
+
+function recall<T>(key: string): T | undefined {
+  const hit = listingCache.get(key) as T | undefined;
+  if (hit !== undefined) {
+    // Most recently used goes to the back.
+    listingCache.delete(key);
+    listingCache.set(key, hit);
+  }
+  return hit;
+}
+
+function remember(key: string, value: unknown) {
+  listingCache.delete(key);
+  listingCache.set(key, value);
+  while (listingCache.size > CACHE_SIZE) {
+    const oldest = listingCache.keys().next().value;
+    if (oldest === undefined) break;
+    listingCache.delete(oldest);
+  }
+}
+
+/** Forget every cached listing — another account must never see this one's. */
+export function clearListingCache() {
+  listingCache.clear();
+}
+
 export interface ListingQuery {
   q: string;
   type?: MediaFilter | undefined;
@@ -122,8 +158,34 @@ function fetchPage(
   });
 }
 
+/**
+ * The first page of `query`, followed by as many more as it takes to cover
+ * `want` files. A refresh asks for what is already on screen, so the list it
+ * swaps in is no shorter than the one it replaces — a refresh that only
+ * re-read page one would cut a deep scroll short and throw the reader back
+ * to the top.
+ */
+async function fetchCovering(
+  libraryId: string,
+  query: ListingQuery,
+  want: number,
+): Promise<{ files: FileSummary[]; total: number; cursor: string | undefined }> {
+  const first = await fetchPage(libraryId, query);
+  let files = filterType(first.files ?? [], query.type);
+  let cursor = first.next_cursor || undefined;
+  while (cursor && files.length < want) {
+    const page = await fetchPage(libraryId, query, cursor);
+    files = [...files, ...filterType(page.files ?? [], query.type)];
+    cursor = page.next_cursor || undefined;
+  }
+  return { files, total: first.total ?? first.files?.length ?? 0, cursor };
+}
+
 interface Loaded {
+  /** The query this is a listing of (library and filters, not refreshes). */
   key: string;
+  /** Bumped by every refresh, so a page fetched before one is not appended after it. */
+  version: number;
   files: FileSummary[];
   folders: Folder[];
   total: number;
@@ -139,20 +201,38 @@ export function useFileListing(
   const [run, setRun] = useState(0);
   // Files changed on disk: re-read behind the list already on screen.
   const changeTick = useLibraryChangeTick(libraryId);
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  // What is listed. Reloads, uploads and changes on disk refresh it in place
+  // rather than starting over, so they are not part of the key: the grid stays
+  // up and keeps its scroll position while the fresh result is fetched.
+  const key = enabled && libraryId ? `${libraryId}|${JSON.stringify(query)}` : null;
+  const [loaded, setLoaded] = useState<Loaded | null>(() =>
+    key ? (recall<Loaded>(`one|${key}`) ?? null) : null,
+  );
   const [loadingMore, setLoadingMore] = useState(false);
-
-  const key =
-    enabled && libraryId ? `${libraryId}|${JSON.stringify(query)}|${run}|${refreshKey}` : null;
+  // Back to something listed before: show what was there straight away.
+  const [shownKey, setShownKey] = useState(key);
+  if (shownKey !== key) {
+    setShownKey(key);
+    const cached = key ? recall<Loaded>(`one|${key}`) : undefined;
+    if (cached && loaded?.key !== key) setLoaded(cached);
+  }
+  useEffect(() => {
+    if (loaded && !loaded.error) remember(`one|${loaded.key}`, loaded);
+  }, [loaded]);
   const queryRef = useRef(query);
   useEffect(() => {
     queryRef.current = query;
+  });
+  const loadedRef = useRef(loaded);
+  useEffect(() => {
+    loadedRef.current = loaded;
   });
 
   useEffect(() => {
     if (key === null || libraryId === null) return;
     let cancelled = false;
     const current = queryRef.current;
+    const previous = loadedRef.current?.key === key ? loadedRef.current : null;
     const wantFolders = current.withFolders && !usesSearch(current);
     Promise.all([
       wantFolders
@@ -160,45 +240,53 @@ export function useFileListing(
             .then((r) => r.folders ?? [])
             .catch(() => [] as Folder[])
         : Promise.resolve([] as Folder[]),
-      fetchPage(libraryId, current),
+      fetchCovering(libraryId, current, previous?.files.length ?? 0),
     ])
       .then(([folders, page]) => {
         if (cancelled) return;
-        setLoaded({
+        setLoaded((prev) => ({
           key,
+          version: (prev?.version ?? 0) + 1,
           folders,
-          files: filterType(page.files ?? [], current.type),
-          total: page.total ?? page.files?.length ?? 0,
-          cursor: page.next_cursor || undefined,
+          files: page.files,
+          total: page.total,
+          cursor: page.cursor,
           error: null,
-        });
+        }));
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setLoaded({
-          key,
-          folders: [],
-          files: [],
-          total: 0,
-          cursor: undefined,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        const message = error instanceof Error ? error.message : String(error);
+        setLoaded((prev) =>
+          // A refresh that fails leaves what is on screen alone.
+          prev && prev.key === key && prev.files.length > 0
+            ? prev
+            : {
+                key,
+                version: (prev?.version ?? 0) + 1,
+                folders: [],
+                files: [],
+                total: 0,
+                cursor: undefined,
+                error: message,
+              },
+        );
       });
     return () => {
       cancelled = true;
     };
-  }, [key, libraryId, changeTick]);
+  }, [key, libraryId, changeTick, run, refreshKey]);
 
   const current = loaded && loaded.key === key ? loaded : null;
 
   const loadMore = useCallback(() => {
     if (!libraryId || !current?.cursor || loadingMore) return;
-    const pageKey = current.key;
+    const { key: pageKey, version } = current;
     setLoadingMore(true);
     fetchPage(libraryId, queryRef.current, current.cursor)
       .then((page) => {
         setLoaded((prev) =>
-          prev && prev.key === pageKey
+          prev && prev.key === pageKey && prev.version === version
             ? {
                 ...prev,
                 files: [...prev.files, ...filterType(page.files ?? [], queryRef.current.type)],
@@ -209,7 +297,7 @@ export function useFileListing(
       })
       .catch((error: unknown) => {
         setLoaded((prev) =>
-          prev && prev.key === pageKey
+          prev && prev.key === pageKey && prev.version === version
             ? { ...prev, error: error instanceof Error ? error.message : String(error) }
             : prev,
         );
@@ -350,7 +438,12 @@ interface LibraryPage {
   cursor: string | undefined;
 }
 
-type AggregatedLoaded = { key: string; pages: LibraryPage[]; error: string | null } | null;
+type AggregatedLoaded = {
+  key: string;
+  version: number;
+  pages: LibraryPage[];
+  error: string | null;
+} | null;
 
 /**
  * `useFileListing` over every open library at once.
@@ -371,11 +464,22 @@ export function useAggregatedFileListing(
   // Files changed on disk in any open library: re-read behind the list already
   // on screen.
   const changeTick = useLibrariesChangeTick(libraryIds);
-  const [loaded, setLoaded] = useState<AggregatedLoaded>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-
   const idsKey = libraryIds.join(',');
-  const key = enabled && idsKey ? `${idsKey}|${JSON.stringify(query)}|${run}|${refreshKey}` : null;
+  // As in `useFileListing`: refreshes re-read in place, so they are not part of the key.
+  const key = enabled && idsKey ? `${idsKey}|${JSON.stringify(query)}` : null;
+  const [loaded, setLoaded] = useState<AggregatedLoaded>(() =>
+    key ? (recall<AggregatedLoaded>(`all|${key}`) ?? null) : null,
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [shownKey, setShownKey] = useState(key);
+  if (shownKey !== key) {
+    setShownKey(key);
+    const cached = key ? recall<AggregatedLoaded>(`all|${key}`) : undefined;
+    if (cached && loaded?.key !== key) setLoaded(cached);
+  }
+  useEffect(() => {
+    if (loaded && !loaded.error) remember(`all|${loaded.key}`, loaded);
+  }, [loaded]);
   const queryRef = useRef(query);
   useEffect(() => {
     queryRef.current = query;
@@ -383,6 +487,10 @@ export function useAggregatedFileListing(
   const idsRef = useRef(libraryIds);
   useEffect(() => {
     idsRef.current = libraryIds;
+  });
+  const loadedRef = useRef(loaded);
+  useEffect(() => {
+    loadedRef.current = loaded;
   });
 
   useEffect(() => {
@@ -392,6 +500,9 @@ export function useAggregatedFileListing(
     const ids = idsRef.current;
     if (ids.length === 0) return;
     const wantFolders = current.withFolders && !usesSearch(current);
+    const previous = loadedRef.current?.key === key ? loadedRef.current : null;
+    const onScreen = (libraryId: string) =>
+      previous?.pages.find((p) => p.libraryId === libraryId)?.files.length ?? 0;
 
     Promise.allSettled(
       ids.map((libraryId) =>
@@ -401,16 +512,16 @@ export function useAggregatedFileListing(
                 .then((r) => r.folders ?? [])
                 .catch(() => [] as Folder[])
             : Promise.resolve([] as Folder[]),
-          fetchPage(libraryId, current),
+          fetchCovering(libraryId, current, onScreen(libraryId)),
         ]).then(([folders, page]) => {
           const tag = (f: FileSummary): FileSummary => ({ ...f, library_id: libraryId });
           const tagFolder = (folder: Folder): Folder => ({ ...folder, library_id: libraryId });
           return {
             libraryId,
             folders: folders.map(tagFolder),
-            files: filterType(page.files ?? [], current.type).map(tag),
-            total: page.total ?? page.files?.length ?? 0,
-            cursor: page.next_cursor || undefined,
+            files: page.files.map(tag),
+            total: page.total,
+            cursor: page.cursor,
           } satisfies LibraryPage;
         }),
       ),
@@ -428,18 +539,27 @@ export function useAggregatedFileListing(
             result.reason instanceof Error ? result.reason.message : String(result.reason);
         }
       }
-      setLoaded({ key, pages, error: anyOk ? null : firstError });
+      setLoaded((prev) => {
+        // A refresh where every library failed leaves what is on screen alone.
+        if (!anyOk && prev && prev.key === key && prev.pages.length > 0) return prev;
+        return {
+          key,
+          version: (prev?.version ?? 0) + 1,
+          pages,
+          error: anyOk ? null : firstError,
+        };
+      });
     });
     return () => {
       cancelled = true;
     };
-  }, [key, changeTick]);
+  }, [key, changeTick, run, refreshKey]);
 
   const current = loaded && loaded.key === key ? loaded : null;
 
   const loadMore = useCallback(() => {
     if (!current || loadingMore) return;
-    const stale = current.key;
+    const { key: stale, version } = current;
     const pending = current.pages.filter((p) => p.cursor && p.libraryId);
     if (pending.length === 0) return;
     setLoadingMore(true);
@@ -457,7 +577,7 @@ export function useAggregatedFileListing(
     )
       .then((results) => {
         setLoaded((prev) => {
-          if (!prev || prev.key !== stale) return prev;
+          if (!prev || prev.key !== stale || prev.version !== version) return prev;
           const pages = prev.pages.map((p) => {
             const more = results.find(
               (r) => r.status === 'fulfilled' && r.value.libraryId === p.libraryId,
@@ -469,7 +589,7 @@ export function useAggregatedFileListing(
               cursor: more.value.cursor,
             };
           });
-          return { key: prev.key, pages, error: prev.error };
+          return { ...prev, pages };
         });
       })
       .finally(() => setLoadingMore(false));

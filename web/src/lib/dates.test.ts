@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { dayKey, formatDayHeading, greeting, monthKey } from './dates';
+import { dayKey, formatDayHeading, greeting, monthKey, weekKey, yearKey } from './dates';
 
 describe('dates', () => {
+  it('keys a week by its Monday and a year by its number', () => {
+    // Sunday Oct 4 2026 belongs to the week starting Monday Sep 28.
+    expect(weekKey('2026-10-04T23:00:00')).toBe('2026-09-28');
+    expect(weekKey('2026-09-28T00:30:00')).toBe('2026-09-28');
+    // Across a year boundary: Fri Jan 1 2027 is in the week of Mon Dec 28.
+    expect(weekKey('2027-01-01T12:00:00')).toBe('2026-12-28');
+    expect(yearKey('2027-01-01T12:00:00')).toBe('2027');
+    expect(weekKey('nonsense')).toBe('');
+  });
+
   const now = new Date(2026, 8, 30, 10);
 
   it('keys a timestamp by local day and month', () => {

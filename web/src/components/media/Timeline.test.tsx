@@ -30,10 +30,10 @@ function filesAcross(months: string[]): ReturnType<typeof fileFixture>[] {
 }
 
 describe('Timeline', () => {
-  it('says so, rather than showing nothing, when everything falls in one month', () => {
+  it('says so, rather than showing nothing, when everything falls on one day', () => {
     render(<Timeline files={filesAcross(['2026-09', '2026-09'])} label="Photos" />);
     expect(screen.getByTestId('timeline')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Sep 2026');
+    expect(screen.getByRole('status')).toHaveTextContent('Sep 10, 2026');
   });
 
   it('renders nothing with no files', () => {
@@ -147,5 +147,56 @@ describe('Timeline', () => {
     expect(shown).toContain('2021');
     // Every year still has a tick, numeral or not.
     expect(document.querySelectorAll('.timeline-tick.is-year')).toHaveLength(12);
+  });
+
+  it('zooms between days, weeks, months and years with the magnifiers', () => {
+    const files = ['2025-01-06', '2025-01-08', '2025-01-20', '2025-03-02', '2026-09-10'].map(
+      (d, i) => fileFixture({ id: `f${i}`, mod_time: `${d}T12:00:00` }),
+    );
+    render(<Timeline files={files} label="Photos" />);
+    const track = screen.getByRole('slider');
+    const zoomIn = screen.getByRole('button', { name: 'Zoom in' });
+    const zoomOut = screen.getByRole('button', { name: 'Zoom out' });
+    const ticks = () => document.querySelectorAll('.timeline-tick').length;
+
+    expect(track).toHaveAttribute('data-scale', 'month');
+    expect(ticks()).toBe(3);
+    fireEvent.click(zoomIn);
+    expect(track).toHaveAttribute('data-scale', 'week');
+    expect(ticks()).toBe(4);
+    fireEvent.click(zoomIn);
+    expect(track).toHaveAttribute('data-scale', 'day');
+    expect(ticks()).toBe(5);
+    expect(zoomIn).toBeDisabled();
+
+    fireEvent.click(zoomOut);
+    fireEvent.click(zoomOut);
+    fireEvent.click(zoomOut);
+    expect(track).toHaveAttribute('data-scale', 'year');
+    expect(ticks()).toBe(2);
+    expect(zoomOut).toBeDisabled();
+  });
+
+  it('does not zoom out past the span of what is loaded', () => {
+    render(<Timeline files={filesAcross(['2026-02', '2026-09'])} label="Photos" />);
+    // Both in 2026: years would be a single slice.
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
+    expect(screen.getByRole('slider')).toHaveAttribute('data-scale', 'month');
+  });
+
+  it('reports the zoom to the page when it controls the scale', () => {
+    const onScaleChange = vi.fn();
+    render(
+      <Timeline
+        files={filesAcross(['2024-01', '2026-09'])}
+        label="Photos"
+        scale="day"
+        onScaleChange={onScaleChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(onScaleChange).toHaveBeenCalledWith('week');
+    fireEvent.keyDown(screen.getByRole('slider'), { key: '+' });
+    expect(onScaleChange).toHaveBeenCalledTimes(1);
   });
 });

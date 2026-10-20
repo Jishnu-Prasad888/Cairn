@@ -78,27 +78,29 @@ func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (boo
 // writeThumb resizes img, encodes it as JPEG and commits it atomically to
 // ThumbPath(cairnDir, fileID), sealed when keys are enabled.
 func writeThumb(img image.Image, cairnDir, fileID string, keys *crypto.Keys) error {
-	thumb := resizeToFit(img, ThumbnailSize)
+	return writeRendition(resizeToFit(img, ThumbnailSize), ThumbPath(cairnDir, fileID), ThumbnailQuality, keys)
+}
 
-	thumbsDir := filepath.Join(cairnDir, ThumbsDirName)
-	if err := os.MkdirAll(thumbsDir, 0o755); err != nil {
-		return fmt.Errorf("create thumbs dir: %w", err)
+// writeRendition encodes img as JPEG and commits it atomically to destPath,
+// creating its directory and sealing it when keys are enabled.
+func writeRendition(img image.Image, destPath string, quality int, keys *crypto.Keys) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return fmt.Errorf("create rendition dir: %w", err)
 	}
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: ThumbnailQuality}); err != nil {
-		return fmt.Errorf("encode thumbnail: %w", err)
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+		return fmt.Errorf("encode rendition: %w", err)
 	}
 	data := keys.Seal(buf.Bytes())
 
-	destPath := ThumbPath(cairnDir, fileID)
 	tmp := destPath + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write thumbnail: %w", err)
+		return fmt.Errorf("write rendition: %w", err)
 	}
 	if err := os.Rename(tmp, destPath); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("commit thumbnail: %w", err)
+		return fmt.Errorf("commit rendition: %w", err)
 	}
 	return nil
 }
@@ -106,11 +108,7 @@ func writeThumb(img image.Image, cairnDir, fileID string, keys *crypto.Keys) err
 // ThumbModTime returns when fileID's thumbnail was last written. A missing
 // thumbnail returns an os.ErrNotExist-wrapped error.
 func ThumbModTime(cairnDir, fileID string) (time.Time, error) {
-	info, err := os.Stat(ThumbPath(cairnDir, fileID))
-	if err != nil {
-		return time.Time{}, fmt.Errorf("stat thumbnail: %w", err)
-	}
-	return info.ModTime(), nil
+	return renditionModTime(ThumbPath(cairnDir, fileID))
 }
 
 // ReadThumb reads and decrypts the thumbnail for fileID, returning the JPEG
@@ -118,25 +116,41 @@ func ThumbModTime(cairnDir, fileID string) (time.Time, error) {
 // os.ErrNotExist-wrapped error; legacy plaintext thumbnails are returned
 // unchanged even when keys are enabled.
 func ReadThumb(cairnDir, fileID string, keys *crypto.Keys) ([]byte, time.Time, error) {
-	path := ThumbPath(cairnDir, fileID)
+	return readRendition(ThumbPath(cairnDir, fileID), keys)
+}
+
+func renditionModTime(path string) (time.Time, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("stat thumbnail: %w", err)
+		return time.Time{}, fmt.Errorf("stat rendition: %w", err)
+	}
+	return info.ModTime(), nil
+}
+
+func readRendition(path string, keys *crypto.Keys) ([]byte, time.Time, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("stat rendition: %w", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, info.ModTime(), fmt.Errorf("read thumbnail: %w", err)
+		return nil, info.ModTime(), fmt.Errorf("read rendition: %w", err)
 	}
 	plain, err := keys.Open(data)
 	if err != nil {
-		return nil, info.ModTime(), fmt.Errorf("decrypt thumbnail: %w", err)
+		return nil, info.ModTime(), fmt.Errorf("decrypt rendition: %w", err)
 	}
 	return plain, info.ModTime(), nil
 }
 
 // resizeToFit returns a new image scaled so the larger dimension equals
-// maxDim, preserving aspect ratio. Uses high-quality BiLinear resampling.
-// If the image is already smaller than maxDim it is returned unchanged.
+// maxDim, preserving aspect ratio. If the image is already smaller than
+// maxDim it is returned unchanged.
+//
+// A large reduction is done in two steps: a box filter shrinks the image by
+// a whole factor (averaging every source pixel, so there is no aliasing),
+// then a bilinear pass covers the rest. BiLinear alone over a full-size photo is
+// several times slower and costs more than the decode.
 func resizeToFit(src image.Image, maxDim int) image.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -162,7 +176,17 @@ func resizeToFit(src image.Image, maxDim int) image.Image {
 		newH = 1
 	}
 
+	// Under a 2× reduction the cheap approximation samples densely enough.
+	var scaler draw.Scaler = draw.ApproxBiLinear
+	if k := min(w/newW, h/newH); k >= 2 {
+		if small := boxShrink(src, k); small != nil {
+			src, b = small, small.Bounds()
+		} else {
+			scaler = draw.BiLinear
+		}
+	}
+
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
-	draw.BiLinear.Scale(dst, dst.Bounds(), src, b, draw.Over, nil)
+	scaler.Scale(dst, dst.Bounds(), src, b, draw.Over, nil)
 	return dst
 }

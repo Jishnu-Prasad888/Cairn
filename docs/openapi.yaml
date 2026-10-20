@@ -1340,6 +1340,45 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /libraries/{libraryID}/files/{fileID}/preview:
+    get:
+      tags: [Files]
+      operationId: getPreview
+      summary: Get the screen-sized rendition of a photo
+      description: >
+        Requires an authenticated session with the `download` capability on the
+        file, as it is the photo's content. Returns a JPEG of at most 2048 px on
+        the longer side (quality 85) with the EXIF orientation applied, made on
+        first request and kept under `.cairn/previews/`. With `?v=` (the file's
+        mod time and size) it is cached by the browser as immutable. NOT_FOUND
+        when the original serves as well: it already fits and needs no turning,
+        it is a GIF, it is not a photo, or this server cannot decode it.
+      parameters:
+        - $ref: '#/components/parameters/LibraryID'
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: v
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JPEG preview bytes
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /libraries/{libraryID}/folders:
     get:
       tags: [Files]

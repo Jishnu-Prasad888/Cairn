@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { apiGet, apiPost } from '../api/client';
+import { clearListingCache } from '../components/media/useFileListing';
+import { forgetScrollPositions } from '../components/media/useScrollMemory';
 import type { AuthStatusResponse, User } from '../api/types';
 import { type AuthState, AuthContext } from './authContext';
 
@@ -14,6 +16,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [bootstrapRequired, setBootstrapRequired] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+
+  // Lists and scroll positions kept for coming back to a page belong to whoever
+  // was signed in; a different account (or none) starts clean.
+  const userId = user?.id;
+  useEffect(() => {
+    clearListingCache();
+    forgetScrollPositions();
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
