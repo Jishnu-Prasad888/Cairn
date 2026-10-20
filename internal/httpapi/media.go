@@ -503,7 +503,16 @@ func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request, u *au
 			CodeInternal, "Failed to list folders.")
 		return
 	}
-	writeJSON(w, s.logger, http.StatusOK, map[string]any{"folders": toFolderResponses(folders)})
+	out := toFolderResponses(folders)
+	if s.indexer != nil {
+		for i := range out {
+			state, total, scanned := s.indexer.FolderScanState(lib.ID, out[i].RelPath, out[i].FileCount)
+			if state != "" {
+				out[i].IndexState, out[i].IndexTotal, out[i].IndexScanned = state, total, scanned
+			}
+		}
+	}
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{"folders": out})
 }
 
 // handleCreateFolder — POST /api/v1/libraries/{id}/folders
@@ -629,6 +638,12 @@ type folderResponse struct {
 	RelPath   string `json:"rel_path"`
 	Name      string `json:"name"`
 	FileCount int    `json:"file_count"`
+	// IndexState is "waiting" or "scanning" while the running scan still has
+	// files to record under the folder, so FileCount is not its full size.
+	IndexState string `json:"index_state,omitempty"`
+	// IndexTotal and IndexScanned are the scan's progress through it.
+	IndexTotal   int `json:"index_total,omitempty"`
+	IndexScanned int `json:"index_scanned,omitempty"`
 }
 
 func toFileResponse(f *media.File) fileResponse {

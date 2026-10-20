@@ -16,6 +16,7 @@ import { LibraryTag } from '../LibraryTag';
 import type { Selection } from '../media/useSelection';
 import { VideoThumb } from '../media/VideoThumb';
 import { Icon } from '../ui/Icon';
+import { folderCountLabel } from './folderCount';
 import './Files.css';
 
 interface FileTableProps {
@@ -129,9 +130,7 @@ export function FileTable({
               </button>
             </th>
             <td className="col-type">Folder</td>
-            <td className="col-size">
-              {folder.file_count} {folder.file_count === 1 ? 'item' : 'items'}
-            </td>
+            <td className="col-size">{folderCountLabel(folder)}</td>
             <td className="col-date" />
             {showLocation && <td className="col-location" />}
             <td className="col-actions">

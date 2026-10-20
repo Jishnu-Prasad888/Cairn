@@ -149,6 +149,10 @@
   color: var(--color-text-secondary);
 }
 
+.folder-tile-count.is-indexing {
+  color: var(--color-warning-ink);
+}
+
 @media (max-width: 599px) {
   .folder-grid {
     grid-template-columns: 1fr 1fr;

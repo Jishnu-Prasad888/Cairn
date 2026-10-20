@@ -372,4 +372,40 @@ describe('LibrariesPage', () => {
     // The last open library cannot be closed.
     expect(toggle2).toBeDisabled();
   });
+
+  it('shows an admin how far indexing has got', async () => {
+    setup([
+      (url) =>
+        url.includes('/index/progress')
+          ? json({
+              progress: {
+                library_id: 'lib1',
+                scan: {
+                  phase: 'counting',
+                  started_at: '2026-10-20T00:00:00Z',
+                  current_folder: '',
+                  files_total: 0,
+                  files_scanned: 0,
+                },
+                scan_queued: false,
+                media_pending: 0,
+                media_failed: 0,
+                root: {
+                  path: '',
+                  name: '',
+                  files: 0,
+                  scanned: 0,
+                  media_pending: 0,
+                  media_failed: 0,
+                  status: 'waiting',
+                },
+              },
+            })
+          : undefined,
+    ]);
+    const row = await screen.findByTestId('library-row');
+    expect(await within(row).findByTestId('index-summary')).toHaveTextContent(
+      'Counting the files in every folder',
+    );
+  });
 });

@@ -36,6 +36,7 @@ import type {
   FileSummary,
   FolderListResponse,
   GrantListResponse,
+  IndexProgress,
   IndexStatus,
   IndexTriggerResponse,
   Library,
@@ -122,6 +123,9 @@ export const triggerIndex = (id: string) =>
 
 export const getIndexStatus = (id: string) =>
   apiGet<{ status: IndexStatus }>(`/libraries/${id}/index/status`);
+
+export const getIndexProgress = (id: string) =>
+  apiGet<{ progress: IndexProgress }>(`/libraries/${id}/index/progress`);
 
 /* ------------------------------ files ------------------------------ */
 

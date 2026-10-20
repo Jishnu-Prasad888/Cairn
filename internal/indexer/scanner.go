@@ -24,6 +24,10 @@ type Scanner struct {
 	store  *StateStore
 	logger *slog.Logger
 	buf    []byte // hashing buffer, reused across files
+
+	// progress, when set, is filled in as the scan goes: a counting walk
+	// first, then each file as it is dealt with.
+	progress *ScanProgress
 }
 
 // NewScanner constructs a Scanner backed by the given per-library StateStore.
@@ -61,6 +65,12 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 	// can mark unvisited records as missing afterwards.
 	seenIDs := make(map[string]struct{})
 
+	if sc.progress != nil {
+		if err := sc.progress.count(ctx, root); err != nil && isContextErr(err) {
+			return result, nil
+		}
+	}
+
 	// Writes are batched; see WriteBatch. A cancelled scan still keeps what
 	// it found, as it did when every file was committed on its own.
 	batch := sc.store.NewBatch()
@@ -86,6 +96,11 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
+			if sc.progress != nil {
+				if rel, err := filepath.Rel(root, absPath); err == nil && rel != "." {
+					sc.progress.enter(filepath.ToSlash(rel))
+				}
+			}
 			return nil // descend into ordinary directories
 		}
 
@@ -97,6 +112,12 @@ func (sc *Scanner) Scan(ctx context.Context, libraryID, root string) (*Result, e
 		}
 		// Normalise to forward slashes for portability.
 		relPath = filepath.ToSlash(relPath)
+
+		if sc.progress != nil {
+			// Counted however it turns out, so a folder of unreadable files
+			// still reaches 100%.
+			defer sc.progress.fileDone(relPath)
+		}
 
 		info, err := d.Info()
 		if err != nil {

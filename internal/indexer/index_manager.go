@@ -56,6 +56,10 @@ type IndexManager struct {
 	// cleanup a unique identity so a stale worker cannot cancel its successor.
 	workerMu sync.Mutex
 	workers  map[string]*workerHandle
+
+	// progressMu guards progress, the running scan of each library.
+	progressMu sync.Mutex
+	progress   map[string]*ScanProgress
 }
 
 // SetBaseContext anchors library workers to a server-lifetime context. Call
@@ -74,7 +78,11 @@ type workerHandle struct {
 
 // NewIndexManager returns a new IndexManager.
 func NewIndexManager(logger *slog.Logger) *IndexManager {
-	return &IndexManager{logger: logger, workers: make(map[string]*workerHandle)}
+	return &IndexManager{
+		logger:   logger,
+		workers:  make(map[string]*workerHandle),
+		progress: make(map[string]*ScanProgress),
+	}
 }
 
 // SetMediaProcessor configures the handler for process_media jobs. When nil,
@@ -264,7 +272,10 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 
 	store := NewStateStore(ldb.DB())
 	scanner := NewScanner(store, m.logger)
+	scanner.progress = newScanProgress()
+	m.setScanProgress(libraryID, scanner.progress)
 	result, err := scanner.Scan(ctx, libraryID, root)
+	m.setScanProgress(libraryID, nil)
 	if err != nil {
 		return err
 	}

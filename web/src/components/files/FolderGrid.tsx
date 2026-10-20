@@ -10,9 +10,8 @@ import { useState } from 'react';
 import type { Folder } from '../../api/types';
 import { LibraryTag } from '../LibraryTag';
 import { Icon } from '../ui/Icon';
+import { folderCountLabel, folderIndexing } from './folderCount';
 import './Files.css';
-
-const numberFormat = new Intl.NumberFormat();
 
 export function FolderGrid({
   folders,
@@ -51,9 +50,12 @@ export function FolderGrid({
             <Icon name="folder" size={22} className="folder-tile-icon" />
             <span className="folder-tile-text">
               <span className="folder-tile-name">{folder.name}</span>
-              <span className="folder-tile-count">
-                {numberFormat.format(folder.file_count)}{' '}
-                {folder.file_count === 1 ? 'item' : 'items'}
+              <span
+                className={
+                  folderIndexing(folder) ? 'folder-tile-count is-indexing' : 'folder-tile-count'
+                }
+              >
+                {folderCountLabel(folder)}
               </span>
             </span>
           </button>

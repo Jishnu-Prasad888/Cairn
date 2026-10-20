@@ -72,6 +72,37 @@ func (s *Server) handleIndexStatus(w http.ResponseWriter, r *http.Request, u *au
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{"status": status})
 }
 
+// handleIndexProgress returns the library's indexing progress as a folder
+// tree: what the running scan has reached, and what still waits for metadata
+// and thumbnails.
+// GET /api/v1/libraries/{id}/index/progress
+func (s *Server) handleIndexProgress(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	if s.indexer == nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusServiceUnavailable,
+			CodeInternal, "Indexer not available.")
+		return
+	}
+	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeLibraryError(w, r, err)
+		return
+	}
+	progress, err := s.indexer.Progress(r.Context(), lib.ID, lib.Root)
+	if err != nil {
+		if lib.Status == library.StatusOffline || isLibraryDBMissing(err) {
+			writeJSON(w, s.logger, http.StatusOK, map[string]any{
+				"progress": &indexer.Progress{LibraryID: lib.ID, Root: &indexer.FolderProgress{Status: indexer.FolderDone}},
+			})
+			return
+		}
+		s.logger.Error("index progress", "library_id", lib.ID, "error", err)
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to retrieve index progress.")
+		return
+	}
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{"progress": progress})
+}
+
 // isLibraryDBMissing returns true when the error indicates the per-library
 // database does not yet exist (library was registered but never scanned).
 func isLibraryDBMissing(err error) bool {

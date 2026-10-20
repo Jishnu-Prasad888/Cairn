@@ -25,6 +25,7 @@ import {
 import type { IndexStatus, Library, LibraryProbe } from '../api/types';
 import { useAuth } from '../auth/authContext';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
+import { IndexProgressPanel } from '../components/IndexProgressPanel';
 import LibraryPicker from '../components/LibraryPicker';
 import ServerFolderBrowser, { FolderOpenIcon } from '../components/ServerFolderBrowser';
 import {
@@ -458,6 +459,8 @@ function LibraryRow({ library, isAdmin }: { library: Library; isAdmin: boolean }
           )}
         </div>
       </div>
+
+      {isAdmin && !offline && <IndexProgressPanel libraryId={library.id} name={library.name} />}
 
       {error && (
         <p className="error-text" role="alert">

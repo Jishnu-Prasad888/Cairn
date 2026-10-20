@@ -108,6 +108,41 @@ export interface IndexStatus {
   last_job_id?: string;
 }
 
+export type FolderProgressStatus = 'waiting' | 'scanning' | 'processing' | 'done';
+
+/** One folder of GET /libraries/{id}/index/progress; counts cover its subtree. */
+export interface FolderProgress {
+  path: string;
+  name: string;
+  /** Files in the folder: the running scan's count, else the index's. */
+  files: number;
+  /** How many the running scan has gone through (= files when idle). */
+  scanned: number;
+  /** Files whose metadata and thumbnail are still queued. */
+  media_pending: number;
+  /** Files whose processing gave up after its retries. */
+  media_failed: number;
+  status: FolderProgressStatus;
+  children?: FolderProgress[];
+}
+
+export interface IndexProgress {
+  library_id: string;
+  /** The running scan; absent when none runs. */
+  scan?: {
+    /** "counting" lists folders first so every size is known; then "scanning". */
+    phase: 'counting' | 'scanning';
+    started_at: string;
+    current_folder: string;
+    files_total: number;
+    files_scanned: number;
+  };
+  scan_queued: boolean;
+  media_pending: number;
+  media_failed: number;
+  root: FolderProgress;
+}
+
 /**
  * A background job as the server serializes it. The struct carries no JSON
  * tags, so these keys are capitalised — `Status`, not `status`.
@@ -284,6 +319,16 @@ export interface Folder {
   parent_id?: string;
   name: string;
   file_count: number;
+  /**
+   * Set while the running scan still has files to record under the folder,
+   * so `file_count` is not its full size yet: "waiting" until the scan
+   * reaches it, "scanning" while it is inside.
+   */
+  index_state?: 'waiting' | 'scanning';
+  /** Files the scan found under the folder, when it has counted them. */
+  index_total?: number;
+  /** How many of those it has gone through. */
+  index_scanned?: number;
 }
 
 export interface FolderListResponse {
