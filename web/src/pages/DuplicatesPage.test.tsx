@@ -51,20 +51,23 @@ describe('DuplicatesPage', () => {
     expect(screen.getByTestId('duplicates-summary')).toHaveTextContent('1 duplicate group');
   });
 
-  it('separates the copy to keep from the removable ones', async () => {
+  it('keeps the newest copy and selects every other one', async () => {
     setup();
 
     await screen.findByText('IMG_0001.png');
-    // The first copy is the one Cairn suggests keeping, so it is not listed as
-    // a removal candidate.
-    expect(
-      screen.getByText(
-        'Removable copies — pick one to open it, then delete or move it in the viewer.',
-      ),
-    ).toBeInTheDocument();
-    const keep = document.querySelector('.dup-members:not(.dup-members-removable)') as HTMLElement;
-    expect(within(keep).getByText('IMG_0001.png')).toBeInTheDocument();
-    expect(within(keep).queryByText('IMG_0001_copy.png')).not.toBeInTheDocument();
+    // IMG_0001_copy.png is the newer of the two, so it is the one kept.
+    const [kept, other] = screen.getAllByTestId('dup-member');
+    expect(within(kept!).getByText('IMG_0001_copy.png')).toBeInTheDocument();
+    expect(within(kept!).getByText('Newest · kept')).toBeInTheDocument();
+    expect(within(kept!).getByRole('checkbox')).not.toBeChecked();
+    expect(within(other!).getByRole('checkbox')).toBeChecked();
+    expect(screen.getByTestId('dup-trash-selected')).toHaveTextContent('Move 1 to trash');
+
+    // The person can change their mind either way.
+    fireEvent.click(within(kept!).getByRole('checkbox'));
+    expect(screen.getByTestId('dup-trash-selected')).toHaveTextContent('Move 2 to trash');
+    fireEvent.click(screen.getByRole('button', { name: 'Keep newest only' }));
+    expect(screen.getByTestId('dup-trash-selected')).toHaveTextContent('Move 1 to trash');
   });
 
   it('links every member back to its download endpoint', async () => {
@@ -72,8 +75,73 @@ describe('DuplicatesPage', () => {
 
     await screen.findByText('IMG_0001.png');
     const links = screen.getAllByRole('link', { name: 'Download' });
-    expect(links).toHaveLength(2);
-    expect(links[0]).toHaveAttribute('href', '/api/v1/libraries/lib1/files/f1/download');
+    expect(links.map((l) => l.getAttribute('href')).sort()).toEqual([
+      '/api/v1/libraries/lib1/files/f1/download',
+      '/api/v1/libraries/lib1/files/f2/download',
+    ]);
+  });
+
+  it('moves the selected copies to the trash from the bar at the top', async () => {
+    const fn = mockApi([
+      (url, init) =>
+        init?.method === 'DELETE' && url.includes('/files/f1')
+          ? new Response(null, { status: 204 })
+          : undefined,
+      (url) => (url.includes('/files/duplicates') ? json(duplicatesResponse) : undefined),
+    ]);
+    renderPage(<DuplicatesPage />);
+
+    await screen.findByText('IMG_0001.png');
+    fireEvent.click(screen.getByTestId('dup-trash-selected'));
+    await waitFor(() => {
+      expect(
+        fn.mock.calls.some(
+          ([u, init]) => init?.method === 'DELETE' && String(u).includes('/files/f1'),
+        ),
+      ).toBe(true);
+    });
+    // Only the selected copy goes; the group then has nothing left to resolve.
+    expect(
+      fn.mock.calls.some(
+        ([u, init]) => init?.method === 'DELETE' && String(u).includes('/files/f2'),
+      ),
+    ).toBe(false);
+    await waitFor(() => {
+      expect(screen.queryByText('IMG_0001.png')).not.toBeInTheDocument();
+    });
+  });
+
+  it('moves a single file to the trash from its own button', async () => {
+    const fn = mockApi([
+      (url, init) =>
+        init?.method === 'DELETE' && url.includes('/files/f2')
+          ? new Response(null, { status: 204 })
+          : undefined,
+      (url) => (url.includes('/files/duplicates') ? json(duplicatesResponse) : undefined),
+    ]);
+    renderPage(<DuplicatesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Move IMG_0001_copy.png to trash' }));
+    await waitFor(() => {
+      expect(
+        fn.mock.calls.some(
+          ([u, init]) => init?.method === 'DELETE' && String(u).includes('/files/f2'),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it('shows the last result at once when coming back, without scanning again', async () => {
+    const fn = setup();
+    await screen.findByText('IMG_0001.png');
+    const scans = () =>
+      fn.mock.calls.filter(([u]) => String(u).includes('/files/duplicates')).length;
+    expect(scans()).toBe(1);
+
+    // Leave and come back: the page remounts.
+    renderPage(<DuplicatesPage />);
+    expect((await screen.findAllByText('IMG_0001.png')).length).toBeGreaterThan(0);
+    expect(scans()).toBe(1);
   });
 
   it('shows an empty state when no duplicates exist', async () => {

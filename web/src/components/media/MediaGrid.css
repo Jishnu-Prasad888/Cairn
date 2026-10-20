@@ -35,6 +35,68 @@
   color: var(--color-text-primary);
 }
 
+/* "Select this day": a check after the date, like a tile's, shown on hover
+   and whenever something is selected. */
+.media-date {
+  gap: var(--space-2);
+}
+
+.media-date-check {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 1px;
+  padding: 0;
+  color: transparent;
+  background: transparent;
+  border: 2px solid var(--color-text-secondary);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+/* A larger invisible hit area around the small circle. */
+.media-date-check::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+}
+
+.media-date-check:hover {
+  transform: scale(1.08);
+}
+
+@media (hover: hover) {
+  .media-date:hover .media-date-check {
+    opacity: 1;
+  }
+}
+
+/* Always reachable on touch screens and from the keyboard. */
+@media (hover: none) {
+  .media-date-check {
+    opacity: 1;
+  }
+}
+
+.media-date-check:focus-visible,
+.media-date.is-selecting .media-date-check {
+  opacity: 1;
+}
+
+.media-date.is-selected .media-date-check {
+  opacity: 1;
+  color: var(--color-on-primary);
+  background: var(--color-primary-strong);
+  border-color: var(--color-primary-ink);
+}
+
 /* ------------------------------- tiles -------------------------------- */
 
 .media-tile {

@@ -13,8 +13,11 @@
  * route supports Range requests), so a large file starts playing at once and
  * is never held in memory.
  *
- * Keyboard: ← → navigate, + − zoom, 0 fit, Space play/pause, F fullscreen,
- * S slideshow, I (or T) details, H hide controls, Esc close.
+ * Keyboard: ← → navigate, + − zoom, 0 fit, R / L rotate right / left,
+ * Space play/pause, F fullscreen, S slideshow, I (or T) details,
+ * H hide controls, Esc close.
+ *
+ * Rotating only turns the photo on screen, for viewing; the file is untouched.
  */
 
 import { Maximize, Minimize, X } from 'lucide-react';
@@ -73,26 +76,51 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 8;
 const PAN_KEY_PX = 80;
 
-/** Zoom level and where the photo is shifted to (in stage pixels). */
+/**
+ * Zoom level, where the photo is shifted to (in stage pixels), how many
+ * quarter turns clockwise it is rotated on screen (0–3), and the scale that
+ * keeps it inside the stage at that rotation (see turnScale).
+ */
 interface View {
   z: number;
   x: number;
   y: number;
+  r: number;
+  k: number;
 }
-const FIT: View = { z: 1, x: 0, y: 0 };
+const FIT: View = { z: 1, x: 0, y: 0, r: 0, k: 1 };
 
-/** Keep the zoomed photo covering the stage: no panning into empty space. */
-function clampView(v: View, stage: HTMLElement | null, img: HTMLImageElement | null): View {
-  if (v.z <= MIN_ZOOM || !stage) return FIT;
+/**
+ * The extra scale that keeps a photo turned a quarter inside the stage. The
+ * image box fills the stage with `object-fit: contain`, so a turned photo
+ * would otherwise poke out above and below (or left and right).
+ */
+function turnScale(r: number, stage: HTMLElement | null, img: HTMLImageElement | null): number {
+  if (r % 2 === 0 || !stage) return 1;
   const sw = stage.clientWidth;
   const sh = stage.clientHeight;
   const nw = img?.naturalWidth || sw;
   const nh = img?.naturalHeight || sh;
   const fit = Math.min(sw / nw, sh / nh);
-  if (!(fit > 0)) return { z: v.z, x: 0, y: 0 }; // not laid out yet
-  const mx = Math.max(0, (nw * fit * v.z - sw) / 2);
-  const my = Math.max(0, (nh * fit * v.z - sh) / 2);
-  return { z: v.z, x: Math.min(mx, Math.max(-mx, v.x)), y: Math.min(my, Math.max(-my, v.y)) };
+  if (!(fit > 0)) return 1; // not laid out yet
+  return Math.min(sw / (nh * fit), sh / (nw * fit));
+}
+
+/** Keep the zoomed photo covering the stage: no panning into empty space. */
+function clampView(v: View, stage: HTMLElement | null, img: HTMLImageElement | null): View {
+  if (v.z <= MIN_ZOOM || !stage) return { ...FIT, r: v.r, k: v.k };
+  const sw = stage.clientWidth;
+  const sh = stage.clientHeight;
+  const nw = img?.naturalWidth || sw;
+  const nh = img?.naturalHeight || sh;
+  const fit = Math.min(sw / nw, sh / nh);
+  if (!(fit > 0)) return { ...v, x: 0, y: 0 }; // not laid out yet
+  // On screen a quarter-turned photo is as wide as it was tall.
+  const k = fit * v.k;
+  const [w, h] = v.r % 2 === 0 ? [nw * k, nh * k] : [nh * k, nw * k];
+  const mx = Math.max(0, (w * v.z - sw) / 2);
+  const my = Math.max(0, (h * v.z - sh) / 2);
+  return { ...v, x: Math.min(mx, Math.max(-mx, v.x)), y: Math.min(my, Math.max(-my, v.y)) };
 }
 
 /** Change zoom, keeping the point under `anchor` (client coords) fixed. */
@@ -113,7 +141,7 @@ function zoomView(
     ay = anchor.y - (r.top + r.height / 2);
   }
   const k = nz / v.z;
-  return clampView({ z: nz, x: ax - (ax - v.x) * k, y: ay - (ay - v.y) * k }, stage, img);
+  return clampView({ ...v, z: nz, x: ax - (ax - v.x) * k, y: ay - (ay - v.y) * k }, stage, img);
 }
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 const SLIDESHOW_MS = 4000;
@@ -304,12 +332,38 @@ export function ViewerModal({
     });
   }, []);
 
-  const resetView = useCallback(() => setView(FIT), []);
+  // Fit keeps the rotation: it undoes zoom and pan, not the turn.
+  const resetView = useCallback(() => setView((v) => ({ ...FIT, r: v.r, k: v.k })), []);
+
+  const rotate = useCallback((quarterTurns: 1 | -1) => {
+    setView((v) => {
+      const r = (v.r + quarterTurns + 4) % 4;
+      return { ...FIT, r, k: turnScale(r, stageRef.current, imgRef.current) };
+    });
+  }, []);
+
+  // The fit of a turned photo depends on its size and the window's: work it
+  // out again once the original arrives and whenever the window changes.
+  const refitTurn = useCallback(() => {
+    setView((v) =>
+      v.r % 2 === 0
+        ? v
+        : clampView(
+            { ...v, k: turnScale(v.r, stageRef.current, imgRef.current) },
+            stageRef.current,
+            imgRef.current,
+          ),
+    );
+  }, []);
+  useEffect(() => {
+    window.addEventListener('resize', refitTurn);
+    return () => window.removeEventListener('resize', refitTurn);
+  }, [refitTurn]);
 
   const panBy = useCallback((dx: number, dy: number) => {
     setView((v) =>
       v.z > MIN_ZOOM
-        ? clampView({ z: v.z, x: v.x + dx, y: v.y + dy }, stageRef.current, imgRef.current)
+        ? clampView({ ...v, x: v.x + dx, y: v.y + dy }, stageRef.current, imgRef.current)
         : v,
     );
   }, []);
@@ -418,6 +472,20 @@ export function ViewerModal({
           e.preventDefault();
           setChromeHidden((v) => !v);
           break;
+        case 'r':
+        case 'R':
+          if (file.media_type === 'photo') {
+            e.preventDefault();
+            rotate(1);
+          }
+          break;
+        case 'l':
+        case 'L':
+          if (file.media_type === 'photo') {
+            e.preventDefault();
+            rotate(-1);
+          }
+          break;
         default:
           break;
       }
@@ -431,6 +499,7 @@ export function ViewerModal({
     goPrev,
     panBy,
     resetView,
+    rotate,
     stepZoom,
     toggleFullscreen,
     togglePanel,
@@ -474,7 +543,7 @@ export function ViewerModal({
           if (v.z <= MIN_ZOOM) return v;
           e.preventDefault();
           return clampView(
-            { z: v.z, x: v.x - e.deltaX, y: v.y - e.deltaY },
+            { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY },
             stageRef.current,
             imgRef.current,
           );
@@ -497,7 +566,7 @@ export function ViewerModal({
     if (!d) return;
     setView((v) =>
       clampView(
-        { z: v.z, x: d.vx + e.clientX - d.px, y: d.vy + e.clientY - d.py },
+        { ...v, x: d.vx + e.clientX - d.px, y: d.vy + e.clientY - d.py },
         stageRef.current,
         imgRef.current,
       ),
@@ -601,10 +670,12 @@ export function ViewerModal({
   // Zoom and pan are one transform about the stage centre, so the photo can
   // grow past 150% (a CSS width is shrunk back by the flex stage) and is
   // clamped so it never leaves empty space.
+  // Rotation joins the same transform, scaled so the turned photo still fits.
+  const turnedScale = zoom * view.k;
   const mediaStyle: CSSProperties =
-    zoom > 1 || dragging
+    zoom > 1 || dragging || view.r !== 0
       ? {
-          transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${zoom})`,
+          transform: `translate3d(${view.x}px, ${view.y}px, 0) rotate(${view.r * 90}deg) scale(${turnedScale})`,
           transition: dragging ? 'none' : undefined,
         }
       : {};
@@ -782,6 +853,18 @@ export function ViewerModal({
                 })}
               </div>
             )}
+            {isPhoto && (
+              <div className="viewer-tool-group" role="group" aria-label="Rotate">
+                {tool('rotate-left', 'Rotate left', () => rotate(-1), {
+                  title: 'Rotate left (L)',
+                  testId: 'viewer-rotate-left',
+                })}
+                {tool('rotate-right', 'Rotate right', () => rotate(1), {
+                  title: 'Rotate right (R)',
+                  testId: 'viewer-rotate-right',
+                })}
+              </div>
+            )}
             {tool(
               'star',
               favorite ? 'Remove from favorites' : 'Add to favorites',
@@ -847,7 +930,7 @@ export function ViewerModal({
               if (!isPhoto) return;
               setView((v) =>
                 v.z > MIN_ZOOM
-                  ? FIT
+                  ? { ...FIT, r: v.r, k: v.k }
                   : zoomView(
                       v,
                       2,
@@ -873,6 +956,7 @@ export function ViewerModal({
                     src={thumbnailUrl(libraryId, file)}
                     alt=""
                     aria-hidden="true"
+                    style={view.r !== 0 ? mediaStyle : undefined}
                   />
                 )}
                 <img
@@ -887,13 +971,14 @@ export function ViewerModal({
                       ? thumbnailUrl(libraryId, file)
                       : downloadUrl(libraryId, file)
                   }
-                  onLoad={() =>
+                  onLoad={() => {
                     setOriginal((o) =>
                       o?.id === file.id && o.state === 'failed'
                         ? o
                         : { id: file.id, state: 'loaded' },
-                    )
-                  }
+                    );
+                    refitTurn();
+                  }}
                   onError={() => setOriginal({ id: file.id, state: 'failed' })}
                   alt={file.name}
                   style={mediaStyle}

@@ -38,6 +38,7 @@ type Server struct {
 	ratelimit      *rateLimiter
 	maxUploadBytes int64
 	metrics        *metrics.Registry
+	thumbs         *thumbGate
 	// ready gates the /ready endpoint: true once startup completes, flipped
 	// false by MarkNotReady before graceful shutdown so proxies drain.
 	ready atomic.Bool
@@ -95,6 +96,10 @@ type Dependencies struct {
 	// nil, in which case the metrics endpoint reports NOT_FOUND and no
 	// request statistics are collected.
 	Metrics *metrics.Registry
+	// ThumbnailWorkers caps thumbnails generated inside requests at once
+	// (for files the background worker has not reached yet). Values <= 0
+	// mean 2.
+	ThumbnailWorkers int
 }
 
 // New returns a Server built from the given dependencies. The caller must
@@ -119,9 +124,17 @@ func New(deps Dependencies) *Server {
 		ratelimit:      newRateLimiter(),
 		maxUploadBytes: deps.MaxUploadBytes,
 		metrics:        deps.Metrics,
+		thumbs:         newThumbGate(thumbWorkers(deps.ThumbnailWorkers)),
 	}
 	s.ready.Store(true)
 	return s
+}
+
+func thumbWorkers(n int) int {
+	if n <= 0 {
+		return 2
+	}
+	return n
 }
 
 // MarkNotReady flips the /ready endpoint to 503. Call it before the graceful
@@ -182,6 +195,7 @@ func (s *Server) Handler() http.Handler {
 		// operations, not per-resource capabilities.
 		mux.Handle("POST /api/v1/libraries/{id}/index", s.withAuth(allowAdmin, s.handleTriggerIndex))
 		mux.Handle("GET /api/v1/libraries/{id}/index/status", s.withAuth(allowAdmin, s.handleIndexStatus))
+		mux.Handle("GET /api/v1/libraries/{id}/index/progress", s.withAuth(allowAdmin, s.handleIndexProgress))
 
 		// Local ML surface (admin): similarity passing, status, and purge are
 		// server operations like indexing. Reading "similar files" follows

@@ -14,6 +14,7 @@ import type { FileSummary } from '../../api/types';
 import { LibraryTag } from '../LibraryTag';
 import { Icon } from '../ui/Icon';
 import { thumbnailUrl, mediaTypeIcon } from '../media';
+import { useQueuedImage } from './thumbnailQueue';
 import { VideoThumb } from './VideoThumb';
 
 const LONG_PRESS_MS = 450;
@@ -61,6 +62,11 @@ function MediaTileImpl({
   // The file belongs to a specific library; the tile always renders for it,
   // even when the grid merged several libraries.
   const itemLibraryId = file.library_id || libraryId;
+  const {
+    src: thumbSrc,
+    attach: attachThumb,
+    settle: settleThumb,
+  } = useQueuedImage(hasThumb && !isVideo ? thumbnailUrl(itemLibraryId, file) : undefined);
 
   const cancelPress = () => {
     if (press.current) clearTimeout(press.current.timer);
@@ -141,17 +147,23 @@ function MediaTileImpl({
         {hasThumb && isVideo ? (
           <VideoThumb libraryId={itemLibraryId} fileId={file.id} className="media-tile-img" />
         ) : hasThumb ? (
+          // Not loading="lazy": the grid only mounts tiles near the viewport,
+          // and a lazy image could hold a download slot without downloading.
           <img
+            ref={attachThumb}
             className="media-tile-img"
-            src={thumbnailUrl(itemLibraryId, file)}
+            src={thumbSrc}
             alt=""
-            loading="lazy"
             decoding="async"
             draggable={false}
             onLoad={(event) => {
               event.currentTarget.dataset.loaded = 'true';
+              settleThumb(true);
             }}
-            onError={() => setFailed(true)}
+            onError={() => {
+              settleThumb(false);
+              setFailed(true);
+            }}
           />
         ) : (
           <span className="media-tile-glyph" aria-hidden="true">

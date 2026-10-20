@@ -169,27 +169,18 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, root str
 	cairnDir := filepath.Join(root, ".cairn")
 	modTime, err := metadata.ThumbModTime(cairnDir, f.ID)
 	have := err == nil
-	// A thumbnail older than its file was made from earlier content (an
-	// edit, or a path reused by a new file). A file dated in the future is
-	// left alone, or it would be regenerated on every request.
-	stale := have && modTime.Before(f.ModTime) && !f.ModTime.After(time.Now())
+	stale := have && thumbStale(modTime, f.ModTime)
 	if !have || stale {
-		absPath := filepath.Join(root, filepath.FromSlash(f.RelPath))
-		generated, genErr := metadata.GenerateThumbnail(absPath, cairnDir, f.ID, s.keys)
-		switch {
-		case genErr == nil && generated:
-			if modTime, err = metadata.ThumbModTime(cairnDir, f.ID); err != nil {
-				writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
-					CodeInternal, "Failed to open generated thumbnail.")
-				return
-			}
-			stale = false
-		case !have:
+		var ok bool
+		if modTime, have, stale, ok = s.makeThumbnail(r, root, cairnDir, f, have); !ok {
+			return // the client went away while waiting; nobody to answer
+		}
+		if !have {
 			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
 				CodeNotFound, "Thumbnail not available for this file.")
 			return
 		}
-		// Otherwise serve the old thumbnail rather than none.
+		// A stale thumbnail that could not be remade is served rather than none.
 	}
 
 	if r.URL.Query().Get("v") != "" && !stale {
@@ -210,6 +201,45 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, root str
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	http.ServeContent(w, r, f.ID+".jpg", modTime, bytes.NewReader(data))
+}
+
+// makeThumbnail generates f's thumbnail on demand, waiting for a slot of
+// s.thumbs, which is held only for the decode. It reports the thumbnail's
+// state afterwards, and ok=false if the client gave up while waiting. had
+// says whether an (outdated) thumbnail existed before.
+func (s *Server) makeThumbnail(r *http.Request, root, cairnDir string, f *media.File, had bool) (
+	modTime time.Time, have, stale, ok bool,
+) {
+	release, ok := s.thumbs.acquire(r.Context())
+	if !ok {
+		return time.Time{}, false, false, false
+	}
+	defer release()
+	// While this request waited, another one (or the background worker) may
+	// have made it.
+	if mt, err := metadata.ThumbModTime(cairnDir, f.ID); err == nil && !thumbStale(mt, f.ModTime) {
+		return mt, true, false, true
+	}
+	absPath := filepath.Join(root, filepath.FromSlash(f.RelPath))
+	if generated, err := metadata.GenerateThumbnail(absPath, cairnDir, f.ID, s.keys); err == nil && generated {
+		if mt, err := metadata.ThumbModTime(cairnDir, f.ID); err == nil {
+			return mt, true, false, true
+		}
+	}
+	// Nothing new: report the old thumbnail, if there was one.
+	mt, err := metadata.ThumbModTime(cairnDir, f.ID)
+	if !had || err != nil {
+		return time.Time{}, false, false, true
+	}
+	return mt, true, true, true
+}
+
+// thumbStale reports whether a thumbnail written at thumbMod predates the
+// file content it should show: it was made from earlier content (an edit, or
+// a path reused by a new file). A file dated in the future is left alone, or
+// it would be regenerated on every request.
+func thumbStale(thumbMod, fileMod time.Time) bool {
+	return thumbMod.Before(fileMod) && !fileMod.After(time.Now())
 }
 
 // notModifiedSince reports whether r is a plain If-Modified-Since revalidation

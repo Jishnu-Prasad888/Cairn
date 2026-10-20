@@ -300,8 +300,10 @@ func run() error {
 		Keys:           keys,
 		SecureCookies:  cfg.CookieSecure,
 		MaxUploadBytes: cfg.MaxUploadBytes,
-		WebUI:          webHandler,
-		Metrics:        metrics.New(),
+		// On-demand thumbnails share the CPU budget of background processing.
+		ThumbnailWorkers: cfg.MediaWorkers,
+		WebUI:            webHandler,
+		Metrics:          metrics.New(),
 	})
 
 	srv := &http.Server{

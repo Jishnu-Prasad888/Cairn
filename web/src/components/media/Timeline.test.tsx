@@ -97,4 +97,55 @@ describe('Timeline', () => {
       expect.objectContaining({ top: expect.any(Number), behavior: 'smooth' }),
     );
   });
+
+  it('labels the month under the pointer, placed against the same track', () => {
+    render(
+      <Timeline
+        files={filesAcross(['2024-01', '2024-01', '2025-06', '2025-06', '2026-09'])}
+        label="Photos"
+      />,
+    );
+    const track = screen.getByRole('slider');
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      bottom: 30,
+      height: 30,
+      left: 200,
+      right: 1000,
+      width: 800,
+      x: 200,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    // 90% along the track: the last file, from Sep 2026.
+    fireEvent.pointerMove(track, { clientX: 920, pointerType: 'mouse' });
+    const label = screen.getByTestId('timeline-label');
+    expect(label).toHaveTextContent('Sep 2026');
+    // The label and the flag share the track as their positioning box, so the
+    // same percentage puts them under the pointer.
+    expect(track).toContainElement(label);
+    expect(label.style.left).toBe('90%');
+
+    fireEvent.pointerMove(track, { clientX: 220, pointerType: 'mouse' });
+    expect(screen.getByTestId('timeline-label')).toHaveTextContent('Jan 2024');
+  });
+
+  it('leaves out year numerals that would crowd each other', () => {
+    // Ten years with one photo each, then a thousand from the eleventh: the
+    // first ten land within a few pixels of each other on the ruler.
+    const crowded = [
+      ...Array.from({ length: 10 }, (_, i) => `${2010 + i}-06`),
+      ...Array.from({ length: 990 }, () => '2020-06'),
+      '2021-01',
+    ];
+    render(<Timeline files={filesAcross(crowded)} label="Photos" />);
+    const shown = screen.queryAllByText(/^20\d\d$/).map((el) => el.textContent);
+    expect(shown[0]).toBe('2010');
+    expect(shown.length).toBeLessThan(5);
+    // The year far enough away still gets its numeral.
+    expect(shown).toContain('2021');
+    // Every year still has a tick, numeral or not.
+    expect(document.querySelectorAll('.timeline-tick.is-year')).toHaveLength(12);
+  });
 });

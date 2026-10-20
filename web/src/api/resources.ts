@@ -55,11 +55,17 @@ function toMessage(error: unknown): string {
  * the loader itself is read through a ref, so an inline arrow function does not
  * re-trigger the effect on every render. `enabled` lets a page defer the load
  * until it has something to load it for (a selected tag, say).
+ *
+ * `cacheAs` names a result worth keeping across visits (an expensive scan, say).
+ * Coming back to the page then shows the last result at once instead of a
+ * spinner, and only asks the server again when that result is older than
+ * {@link CACHE_FRESH_MS}, when the library changed on disk, or on `reload`.
  */
 export function useLibraryResource<T>(
   fn: (libraryId: string) => Promise<T>,
   deps: readonly unknown[] = [],
   enabled = true,
+  cacheAs?: string,
 ): LibraryResource<T> {
   const gate = useLibraryGate();
   const [settled, setSettled] = useState<Settled<T>>(null);
@@ -81,14 +87,26 @@ export function useLibraryResource<T>(
   // result belongs to". It is a plain string, so comparing it in the effect's
   // dependency list works by value without a memo.
   const key = active ? `${libraryId}|${JSON.stringify(deps)}|${reloadKey}` : null;
+  const cacheKey = active && cacheAs ? `${cacheAs}|${libraryId}|${JSON.stringify(deps)}` : null;
+  const cached = cacheKey ? (resultCache.get(cacheKey) as Cached<T> | undefined) : undefined;
+  // Only the first load after mounting may be answered from the cache; a
+  // reload, a change on disk or new inputs always go to the server.
+  const firstLoad = useRef(true);
 
   useEffect(() => {
     if (key === null || libraryId === null) return;
+    const first = firstLoad.current;
+    firstLoad.current = false;
+    if (first && cacheKey) {
+      const hit = resultCache.get(cacheKey);
+      if (hit && Date.now() - hit.at < CACHE_FRESH_MS) return;
+    }
     let cancelled = false;
     fnRef
       .current(libraryId)
       .then((data) => {
         if (cancelled) return;
+        if (cacheKey) resultCache.set(cacheKey, { at: Date.now(), data });
         setSettled({ key, status: 'ok', data });
       })
       .catch((error: unknown) => {
@@ -99,19 +117,37 @@ export function useLibraryResource<T>(
       cancelled = true;
     };
     // The key encodes every input, so it is the only dependency that matters.
-  }, [key, libraryId, changeTick]);
+  }, [key, cacheKey, libraryId, changeTick]);
 
   const current = key !== null && settled?.key === key ? settled : null;
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
+  // While a fresh answer is on its way, a cached one stays on screen.
+  const shown = current ?? (cached ? { status: 'ok' as const, data: cached.data } : null);
   return {
-    data: current?.status === 'ok' ? current.data : null,
-    loading: key !== null && current === null,
+    data: shown?.status === 'ok' ? shown.data : null,
+    loading: key !== null && shown === null,
     error: current?.status === 'error' ? current.message : null,
     reload,
     libraryId: libraryId ?? '',
   };
+}
+
+/** How long a cached result (see `cacheAs`) is shown without asking again. */
+export const CACHE_FRESH_MS = 5 * 60 * 1000;
+
+interface Cached<T> {
+  at: number;
+  data: T;
+}
+
+/** Results kept across page visits, for the life of the tab. */
+const resultCache = new Map<string, Cached<unknown>>();
+
+/** Test hook: forget every cached result. */
+export function clearResourceCache() {
+  resultCache.clear();
 }
 
 export interface AggregatedLibraryResource<T> {

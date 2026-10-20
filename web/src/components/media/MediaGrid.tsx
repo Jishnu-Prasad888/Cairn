@@ -12,6 +12,7 @@
  */
 
 import {
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
@@ -22,6 +23,7 @@ import {
 } from 'react';
 
 import type { FileSummary } from '../../api/types';
+import { Icon } from '../ui/Icon';
 import { MediaTile } from './MediaTile';
 import {
   type Grouping,
@@ -117,6 +119,11 @@ export function MediaGrid({
   const pendingFocus = useRef<number | null>(null);
 
   const groups = useMemo(() => groupFiles(files, grouping), [files, grouping]);
+  // A date heading's files, by the heading's layout key, for "select this day".
+  const groupItems = useMemo(
+    () => new Map<string, FileSummary[]>(groups.map((g) => [`h:${g.key}`, g.items])),
+    [groups],
+  );
   const layout: Layout = useMemo(() => {
     const width = box.width || FALLBACK_WIDTH;
     if (masonry) {
@@ -270,6 +277,41 @@ export function MediaGrid({
     [selection],
   );
 
+  // A date heading: its label, and in a selectable grid a check that selects
+  // (or, once all are selected, deselects) every file shown under it.
+  const heading = (key: string, label: string, style: CSSProperties) => {
+    const items = selection ? groupItems.get(key) : undefined;
+    if (!items || items.length === 0 || !selection) {
+      return (
+        <h2 key={key} className="media-date" style={style}>
+          {label}
+        </h2>
+      );
+    }
+    const all = items.every((f) => selection.isSelected(f.id));
+    return (
+      <h2
+        key={key}
+        className={['media-date', selecting ? 'is-selecting' : '', all ? 'is-selected' : '']
+          .filter(Boolean)
+          .join(' ')}
+        style={style}
+      >
+        <span className="media-date-label">{label}</span>
+        <button
+          type="button"
+          className="media-date-check"
+          aria-pressed={all}
+          aria-label={all ? `Deselect all from ${label}` : `Select all from ${label}`}
+          title={all ? 'Deselect all' : 'Select all'}
+          onClick={() => selection.setMany(items, !all)}
+        >
+          <Icon name="check" size={14} />
+        </button>
+      </h2>
+    );
+  };
+
   const onKeyDown = (event: React.KeyboardEvent) => {
     const target = event.target as HTMLElement;
     if (!target.matches('.media-tile-main')) return;
@@ -314,13 +356,10 @@ export function MediaGrid({
     const { tileSize, gap } = layout.layout.metrics;
     content = visible.map((row) =>
       row.kind === 'header' ? (
-        <h2
-          key={row.key}
-          className="media-date"
-          style={{ transform: `translateY(${row.top}px)`, height: row.height }}
-        >
-          {row.label}
-        </h2>
+        heading(row.key, row.label, {
+          transform: `translateY(${row.top}px)`,
+          height: row.height,
+        })
       ) : (
         <div
           key={row.key}
@@ -360,15 +399,9 @@ export function MediaGrid({
     });
     content = (
       <>
-        {headerCells.map((h) => (
-          <h2
-            key={h.key}
-            className="media-date"
-            style={{ transform: `translateY(${h.top}px)`, height: h.height }}
-          >
-            {h.label}
-          </h2>
-        ))}
+        {headerCells.map((h) =>
+          heading(h.key, h.label, { transform: `translateY(${h.top}px)`, height: h.height }),
+        )}
         {tileCells.map((cell) => (
           <MediaTile
             key={cell.file.id}

@@ -347,7 +347,10 @@ function MediaBrowser({
     files,
     `${scopedId ?? openLibraryIds.join('+')}|${JSON.stringify(query)}`,
   );
-  const ops = useFileOperations(openLibraryIds, listing.reload);
+  const ops = useFileOperations(openLibraryIds, listing.reload, {
+    siblings: files,
+    onRemoved: listing.removeFile,
+  });
 
   // New folders, paste, and drag-onto-folder moves all target a folder, which
   // only makes sense while browsing one library. The merged root shows every

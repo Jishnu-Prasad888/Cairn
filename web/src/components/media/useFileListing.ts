@@ -58,6 +58,12 @@ export interface FileListing {
   loadingMore: boolean;
   loadMore: () => void;
   reload: () => void;
+  /**
+   * Drop a file that was just deleted from the list on screen, without a
+   * reload: the grid keeps its place instead of collapsing to a spinner and
+   * jumping back to the top.
+   */
+  removeFile: (file: FileSummary) => void;
   /** Whether this listing went through search (no sort order). */
   searching: boolean;
 }
@@ -213,6 +219,14 @@ export function useFileListing(
 
   const reload = useCallback(() => setRun((n) => n + 1), []);
 
+  const removeFile = useCallback((file: FileSummary) => {
+    setLoaded((prev) => {
+      if (!prev) return prev;
+      const { files, cursor, removed } = without(prev.files, prev.cursor, file);
+      return removed ? { ...prev, files, cursor, total: Math.max(0, prev.total - 1) } : prev;
+    });
+  }, []);
+
   return {
     files: current?.files ?? EMPTY_FILES,
     folders: current?.folders ?? EMPTY_FOLDERS,
@@ -223,8 +237,28 @@ export function useFileListing(
     loadingMore,
     loadMore,
     reload,
+    removeFile,
     searching: usesSearch(query),
   };
+}
+
+/**
+ * `files` without `file`, and the pagination cursor to continue from. The
+ * cursor names the last file loaded; if that is the one removed, the next
+ * page starts after the file before it instead (the removed file is no
+ * longer listed, so nothing is repeated or skipped).
+ */
+function without(
+  files: FileSummary[],
+  cursor: string | undefined,
+  file: FileSummary,
+): { files: FileSummary[]; cursor: string | undefined; removed: boolean } {
+  const at = files.findIndex((f) => f.id === file.id);
+  if (at < 0) return { files, cursor, removed: false };
+  const next = [...files.slice(0, at), ...files.slice(at + 1)];
+  const movedCursor =
+    cursor !== undefined && cursor === file.rel_path ? next[at - 1]?.rel_path : cursor;
+  return { files: next, cursor: movedCursor, removed: true };
 }
 
 /** Guard against an index that classified a file differently from the filter. */
@@ -303,6 +337,7 @@ export interface AggregatedFileListing {
   loadingMore: boolean;
   loadMore: () => void;
   reload: () => void;
+  removeFile: (file: FileSummary) => void;
   searching: boolean;
 }
 
@@ -442,6 +477,21 @@ export function useAggregatedFileListing(
 
   const reload = useCallback(() => setRun((n) => n + 1), []);
 
+  const removeFile = useCallback((file: FileSummary) => {
+    setLoaded((prev) => {
+      if (!prev) return prev;
+      let changed = false;
+      const pages = prev.pages.map((p) => {
+        if (file.library_id && p.libraryId !== file.library_id) return p;
+        const { files, cursor, removed } = without(p.files, p.cursor, file);
+        if (!removed) return p;
+        changed = true;
+        return { ...p, files, cursor, total: Math.max(0, p.total - 1) };
+      });
+      return changed ? { ...prev, pages } : prev;
+    });
+  }, []);
+
   // Search has no meaningful global order (each library returns its own
   // relevance or id order), so a searching listing keeps its per-library
   // concatenation instead of the date/name weave below.
@@ -472,6 +522,7 @@ export function useAggregatedFileListing(
     loadingMore,
     loadMore,
     reload,
+    removeFile,
     searching,
   };
 }

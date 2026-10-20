@@ -66,6 +66,51 @@ function bucketsOf(files: readonly FileSummary[]): Bucket[] {
   return buckets;
 }
 
+/** Narrowest gap, in px, between two year numerals before one is left out. */
+const MIN_YEAR_GAP_PX = 44;
+/** Narrowest gap, in px, between two month ticks before one is left out. */
+const MIN_TICK_GAP_PX = 5;
+
+interface Mark {
+  bucket: Bucket;
+  /** A year boundary: a taller tick. */
+  isYear: boolean;
+  /** Whether there is room to print the year above it. */
+  showYear: boolean;
+}
+
+/**
+ * Which ticks and year numerals to draw on a track `width` px wide. Where
+ * many months fall close together, drawing every one turns the ruler into a
+ * smudge of ticks and overlapping numerals; ticks are thinned and a numeral is
+ * only printed when it clears the previous one. Year ticks are kept over month
+ * ticks, since they carry the most meaning.
+ */
+function marksFor(buckets: readonly Bucket[], lastIndex: number, width: number): Mark[] {
+  const at = (b: Bucket) => (b.startIndex / lastIndex) * width;
+  const marks: Mark[] = [];
+  let lastTick = -Infinity;
+  let lastYear = -Infinity;
+  buckets.forEach((bucket, i) => {
+    const x = at(bucket);
+    const isYear = bucket.year !== buckets[i - 1]?.year;
+    if (isYear) {
+      // A year tick wins over a month tick drawn just before it.
+      const prev = marks[marks.length - 1];
+      if (prev && !prev.isYear && x - lastTick < MIN_TICK_GAP_PX) marks.pop();
+      const showYear = x - lastYear >= MIN_YEAR_GAP_PX;
+      if (showYear) lastYear = x;
+      marks.push({ bucket, isYear, showYear });
+      lastTick = x;
+      return;
+    }
+    if (x - lastTick < MIN_TICK_GAP_PX) return;
+    marks.push({ bucket, isYear: false, showYear: false });
+    lastTick = x;
+  });
+  return marks;
+}
+
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
@@ -102,6 +147,24 @@ export function Timeline({ files, label }: TimelineProps) {
   const buckets = useMemo(() => bucketsOf(files), [files]);
   const total = files.length;
   const lastIndex = Math.max(total - 1, 1);
+
+  // The track's width decides how many marks fit (see marksFor).
+  const hasTrack = total > 0 && buckets.length >= 2;
+  const [trackWidth, setTrackWidth] = useState(960);
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0) setTrackWidth(entry.contentRect.width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+    // The track only exists once there are two months to mark.
+  }, [hasTrack]);
+  const marks = useMemo(
+    () => marksFor(buckets, lastIndex, trackWidth),
+    [buckets, lastIndex, trackWidth],
+  );
 
   // Keep the playhead in step with manual scrolling, folded through one
   // animation frame so a fast scroll does not flood this with renders.
@@ -240,18 +303,14 @@ export function Timeline({ files, label }: TimelineProps) {
         onPointerLeave={() => !scrubbing && setHoverFraction(null)}
         onKeyDown={onKeyDown}
       >
-        {buckets.map((bucket, i) => (
+        {marks.map(({ bucket, isYear, showYear }) => (
           <span
             key={bucket.key}
-            className={
-              bucket.year !== buckets[i - 1]?.year ? 'timeline-tick is-year' : 'timeline-tick'
-            }
+            className={isYear ? 'timeline-tick is-year' : 'timeline-tick'}
             style={{ left: `${(bucket.startIndex / lastIndex) * 100}%` }}
             aria-hidden="true"
           >
-            {bucket.year !== buckets[i - 1]?.year && (
-              <span className="timeline-year">{bucket.year}</span>
-            )}
+            {showYear && <span className="timeline-year">{bucket.year}</span>}
           </span>
         ))}
         <span
@@ -259,16 +318,21 @@ export function Timeline({ files, label }: TimelineProps) {
           style={{ left: `${flagFraction * 100}%` }}
           aria-hidden="true"
         />
+        {/* Inside the track, so its percentage is of the same width as the
+            flag's and the pointer's: positioned against the full-width bar
+            around the track, it drifted away from the cursor on wide windows
+            and named a different month than the one under the pointer. */}
+        {showLabel && (
+          <span
+            className="timeline-label"
+            data-testid="timeline-label"
+            style={{ left: `${flagFraction * 100}%` }}
+            aria-hidden="true"
+          >
+            {current.label}
+          </span>
+        )}
       </div>
-      {showLabel && (
-        <span
-          className="timeline-label"
-          style={{ left: `${flagFraction * 100}%` }}
-          aria-hidden="true"
-        >
-          {current.label}
-        </span>
-      )}
     </div>
   );
 }

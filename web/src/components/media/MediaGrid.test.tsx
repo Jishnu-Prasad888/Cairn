@@ -64,6 +64,25 @@ describe('MediaGrid', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
+  it('selects, and then deselects, every file under a date heading', () => {
+    render(<Harness />);
+    const [first, second] = screen.getAllByRole('heading', { level: 2 });
+    fireEvent.click(within(first!).getByRole('button', { name: /^Select all from / }));
+    expect(screen.getByTestId('count')).toHaveTextContent('6');
+    // Only that day's files: the first six.
+    expect(screen.getByRole('button', { name: 'Deselect photo-5.jpg' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select photo-6.jpg' })).toBeInTheDocument();
+
+    // A second day adds to the selection rather than replacing it.
+    fireEvent.click(within(second!).getByRole('button', { name: /^Select all from / }));
+    expect(screen.getByTestId('count')).toHaveTextContent('12');
+
+    const done = within(first!).getByRole('button', { name: /^Deselect all from / });
+    expect(done).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(done);
+    expect(screen.getByTestId('count')).toHaveTextContent('6');
+  });
+
   it('extends a range with shift-click', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Select photo-1.jpg' }));

@@ -572,6 +572,34 @@ describe('MediaPage', () => {
     expect(stage).toHaveAttribute('data-zoomed', 'false');
   });
 
+  it('rotates a photo on screen only, both ways and from the keyboard', async () => {
+    const fn = setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const viewer = await screen.findByTestId('viewer');
+    const dialog = within(viewer).getByRole('dialog');
+    const photo = () => within(dialog).getByRole('img', { name: 'IMG_0001.png' });
+    const turn = () => /rotate\((-?\d+)deg\)/.exec(photo().style.transform)?.[1] ?? '0';
+    const callsBefore = fn.mock.calls.length;
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rotate right' }));
+    await waitFor(() => expect(turn()).toBe('90'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rotate left' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rotate left' }));
+    await waitFor(() => expect(turn()).toBe('270'));
+    fireEvent.keyDown(window, { key: 'r' });
+    await waitFor(() => expect(turn()).toBe('0'));
+    fireEvent.keyDown(window, { key: 'l' });
+    await waitFor(() => expect(turn()).toBe('270'));
+
+    // Viewing only: rotating sends nothing to the server.
+    const writes = fn.mock.calls
+      .slice(callsBefore)
+      .filter(([, init]) => init?.method && init.method !== 'GET');
+    expect(writes).toEqual([]);
+  });
+
   it('zooms with a transform all the way up to 800%, and pans by dragging', async () => {
     setup();
 
@@ -845,20 +873,28 @@ describe('MediaPage', () => {
     });
   });
 
-  it('trashes a file from the viewer and closes the viewer', async () => {
+  it('trashes from the viewer, moves on to the next file, and closes after the last', async () => {
     const fetchMock = setup([
       (url, init) =>
-        init?.method === 'DELETE' && url.includes('/api/v1/libraries/lib1/files/f1')
+        init?.method === 'DELETE' &&
+        (url.includes('/api/v1/libraries/lib1/files/f1') ||
+          url.includes('/api/v1/libraries/lib1/files/f2'))
           ? noContent()
           : undefined,
     ]);
+    const listings = () =>
+      fetchMock.mock.calls.filter(([u]) => String(u).includes('/api/v1/libraries/lib1/files?'))
+        .length;
 
     await screen.findByTestId('file-grid');
+    const listed = listings();
     fireEvent.click(screen.getByText('IMG_0001.png'));
     fireEvent.click(await screen.findByTestId('viewer-trash'));
-
-    const dialog = await screen.findByTestId('trash-dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }));
+    fireEvent.click(
+      within(await screen.findByTestId('trash-dialog')).getByRole('button', {
+        name: 'Move to trash',
+      }),
+    );
 
     await waitFor(() => {
       expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f1')).toBe(true);
@@ -866,8 +902,48 @@ describe('MediaPage', () => {
     expect(bodyOf(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f1')).toEqual({
       path: 'IMG_0001.png',
     });
+    // The viewer stays open on the next file, and the grid drops the trashed
+    // one in place rather than reloading (which jumped back to the top).
+    await waitFor(() => {
+      expect(within(screen.getByTestId('viewer')).getByRole('dialog')).toHaveAccessibleName(
+        video.name,
+      );
+    });
+    expect(within(screen.getByTestId('file-grid')).queryByText('IMG_0001.png')).toBeNull();
+    expect(listings()).toBe(listed);
+
+    // Trashing the last file left closes the viewer.
+    fireEvent.click(screen.getByTestId('viewer-trash'));
+    fireEvent.click(
+      within(await screen.findByTestId('trash-dialog')).getByRole('button', {
+        name: 'Move to trash',
+      }),
+    );
     await waitFor(() => {
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows the previous file after trashing the last one', async () => {
+    setup([
+      (url, init) =>
+        init?.method === 'DELETE' && url.includes('/api/v1/libraries/lib1/files/f2')
+          ? noContent()
+          : undefined,
+    ]);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText(video.name));
+    fireEvent.click(await screen.findByTestId('viewer-trash'));
+    fireEvent.click(
+      within(await screen.findByTestId('trash-dialog')).getByRole('button', {
+        name: 'Move to trash',
+      }),
+    );
+    await waitFor(() => {
+      expect(within(screen.getByTestId('viewer')).getByRole('dialog')).toHaveAccessibleName(
+        'IMG_0001.png',
+      );
     });
   });
 

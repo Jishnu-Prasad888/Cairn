@@ -13,6 +13,12 @@ configure({ asyncUtilTimeout: 5000 });
 
 import { afterEach, beforeEach } from 'vitest';
 
+import { clearResourceCache } from '../api/resources';
+
+// Results some pages keep across visits (see `cacheAs`) must not carry over
+// from one test into the next.
+afterEach(clearResourceCache);
+
 /**
  * Per-browser preferences (grid or list, the viewer's details panel, recent
  * searches) live in localStorage, which jsdom shares across tests in a file.

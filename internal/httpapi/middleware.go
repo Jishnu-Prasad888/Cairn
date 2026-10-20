@@ -164,7 +164,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy",
-			"default-src 'self'; img-src 'self' data:; media-src 'self' blob: data:; "+
+			"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: data:; "+
 				"style-src 'self' 'unsafe-inline'; script-src 'self'; "+
 				"frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")

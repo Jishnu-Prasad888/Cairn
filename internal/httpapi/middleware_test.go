@@ -48,6 +48,10 @@ func TestSecurityHeadersPresent(t *testing.T) {
 	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+	// Captured video frames (and screenshot tools) show blob: images.
+	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "img-src 'self' data: blob:") {
+		t.Errorf("CSP does not allow blob: images: %q", csp)
+	}
 }
 
 func TestSameOriginAllowsMatchingHost(t *testing.T) {

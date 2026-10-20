@@ -21,6 +21,8 @@ export interface Selection {
   /** Toggle one item; with `range`, select everything from the anchor to it. */
   toggle: (file: FileSummary, range?: boolean) => void;
   selectAll: () => void;
+  /** Select (or, with `on` false, deselect) every one of `files`. */
+  setMany: (files: readonly FileSummary[], on: boolean) => void;
   clear: () => void;
   /** The selected files, in list order. */
   selectedFiles: FileSummary[];
@@ -69,6 +71,20 @@ export function useSelection(files: readonly FileSummary[], resetKey: string): S
     setState({ key: resetKey, ids: new Set(files.map((f) => f.id)) });
   }, [files, resetKey]);
 
+  const setMany = useCallback(
+    (group: readonly FileSummary[], on: boolean) => {
+      setState((prev) => {
+        const next = new Set(prev.key === resetKey ? prev.ids : EMPTY);
+        for (const f of group) {
+          if (on) next.add(f.id);
+          else next.delete(f.id);
+        }
+        return { key: resetKey, ids: next };
+      });
+    },
+    [resetKey],
+  );
+
   const clear = useCallback(() => {
     anchorRef.current = null;
     setState({ key: resetKey, ids: new Set() });
@@ -101,6 +117,7 @@ export function useSelection(files: readonly FileSummary[], resetKey: string): S
     isSelected,
     toggle,
     selectAll,
+    setMany,
     clear,
     selectedFiles,
   };

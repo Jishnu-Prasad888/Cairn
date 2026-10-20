@@ -62,14 +62,32 @@ const libFor = (libraryIds: readonly string[], file: FileSummary): string =>
  * @param onChanged called after any successful mutation, so the caller reloads
  * @param permanent when true the trash dialog runs a permanent delete instead
  *   of a soft delete — that is the Trash page, not the media browser
+ * @param siblings the files the viewer pages through. Deleting the file on
+ *   screen then moves the viewer to the next one (or the previous, after the
+ *   last) instead of closing it.
+ * @param onRemoved called instead of `onChanged` after a delete, so a page
+ *   can drop the file from its list without a reload (which would collapse
+ *   the grid and lose the scroll position)
  */
 export function useFileOperations(
   libraryIds: readonly string[],
   onChanged: () => void,
-  { permanent = false }: { permanent?: boolean } = {},
+  {
+    permanent = false,
+    siblings,
+    onRemoved,
+  }: {
+    permanent?: boolean;
+    siblings?: readonly FileSummary[];
+    onRemoved?: (file: FileSummary) => void;
+  } = {},
 ): FileOperations {
   const viewerState = useViewerParam(libraryIds);
-  const { viewer, viewerLibraryId, closeViewer } = viewerState;
+  const { viewer, viewerLibraryId, closeViewer, openViewer } = viewerState;
+  const siblingsRef = useRef(siblings);
+  useEffect(() => {
+    siblingsRef.current = siblings;
+  });
   const [pending, setPending] = useState<PendingState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,15 +99,29 @@ export function useFileOperations(
   }, []);
 
   const run = useCallback(
-    async (action: () => Promise<unknown>, { closesViewer = false } = {}) => {
+    async (action: () => Promise<unknown>, { removes }: { removes?: FileSummary } = {}) => {
       setBusy(true);
       setError(null);
       try {
         await action();
         setPending(null);
-        // A trashed file is no longer in the collection the viewer is paging
-        // through, so leaving it open would show a ghost.
-        if (closesViewer) closeViewer();
+        if (removes) {
+          // A deleted file is no longer in the collection the viewer is
+          // paging through: show its neighbour (the next file, or the one
+          // before after the last), and close only when nothing is left.
+          const viewing = viewer?.id;
+          if (viewing === removes.id) {
+            const list = siblingsRef.current ?? [];
+            const at = list.findIndex((f) => f.id === removes.id);
+            const neighbour = at >= 0 ? (list[at + 1] ?? list[at - 1]) : undefined;
+            if (neighbour) openViewer(neighbour);
+            else closeViewer();
+          }
+          if (onRemoved) {
+            onRemoved(removes);
+            return;
+          }
+        }
         onChanged();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
@@ -97,7 +129,7 @@ export function useFileOperations(
         setBusy(false);
       }
     },
-    [onChanged, closeViewer],
+    [onChanged, onRemoved, closeViewer, openViewer, viewer],
   );
 
   const requestAction = useCallback(
@@ -147,7 +179,7 @@ export function useFileOperations(
               kind === 'permanent'
                 ? deleteForever(libraryId, target.id)
                 : softDeleteFile(libraryId, target.rel_path, target.id),
-            { closesViewer: true },
+            { removes: target },
           );
         }}
         testId="trash-dialog"
