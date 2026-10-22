@@ -294,4 +294,168 @@ describe('BackupsPage', () => {
     expect(screen.queryByTestId('backup-folder-missing')).not.toBeInTheDocument();
     expect(bodyOf(fn, 'PUT', '/api/v1/backups/settings')).toEqual({ dir: '/srv/backups' });
   });
+
+  it('starts a backup in the background and says so', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'POST' && url.endsWith('/api/v1/backups')
+          ? json({ ...okBackup, id: 'b9', status: 'running' }, 202)
+          : undefined,
+    ]);
+
+    fireEvent.click(await screen.findByTestId('run-backup'));
+    const dialog = await screen.findByTestId('run-backup-dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Back up now' }));
+
+    expect(await screen.findByTestId('backup-notice')).toHaveTextContent('Backup started');
+    expect(bodyOf(fetchMock, 'POST', '/api/v1/backups')).toEqual({ background: true });
+  });
+
+  it('offers mounted drives as backup folders', async () => {
+    setup([
+      (url) =>
+        url.endsWith('/api/v1/backups/drives')
+          ? json([
+              {
+                path: '/',
+                device: '/dev/sda2',
+                fs_type: 'ext4',
+                total_bytes: 1e12,
+                free_bytes: 5e11,
+                removable: false,
+                network: false,
+                system: true,
+              },
+              {
+                path: '/media/me/Backup',
+                device: '/dev/sdb1',
+                fs_type: 'exfat',
+                total_bytes: 2e12,
+                free_bytes: 1e12,
+                removable: true,
+                network: false,
+                system: false,
+              },
+            ])
+          : undefined,
+    ]);
+
+    const drives = await screen.findByTestId('backup-drives');
+    // The system disk is not offered: a backup there does not survive losing it.
+    expect(within(drives).queryByText('/')).not.toBeInTheDocument();
+    fireEvent.click(within(drives).getByText('/media/me/Backup'));
+    expect(screen.getByTestId('backup-folder-input')).toHaveValue('/media/me/Backup/cairn-backups');
+  });
+
+  it('tests and saves an SFTP destination without echoing the password back', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'POST' && url.endsWith('/api/v1/backups/destination/test')
+          ? json({
+              ok: true,
+              destination: { kind: 'sftp', path: 'cairn', host: 'nas', host_key: 'SHA256:abc' },
+            })
+          : undefined,
+      (url, init) =>
+        init?.method === 'PUT' && url.endsWith('/api/v1/backups/settings')
+          ? json({
+              ...settings,
+              dir: '',
+              destination: {
+                kind: 'sftp',
+                path: 'cairn',
+                host: 'nas',
+                username: 'me',
+                host_key: 'SHA256:abc',
+                password_set: true,
+                location: 'sftp://me@nas:22/cairn',
+              },
+            })
+          : undefined,
+    ]);
+
+    fireEvent.click(await screen.findByTestId('backup-kind-sftp'));
+    fireEvent.change(screen.getByTestId('backup-remote-host'), { target: { value: 'nas' } });
+    fireEvent.change(screen.getByTestId('backup-remote-username'), { target: { value: 'me' } });
+    fireEvent.change(screen.getByTestId('backup-remote-password'), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByTestId('backup-remote-path'), { target: { value: 'cairn' } });
+
+    fireEvent.click(screen.getByTestId('backup-remote-test'));
+    expect(await screen.findByTestId('backup-remote-notice')).toHaveTextContent('SHA256:abc');
+
+    fireEvent.click(screen.getByTestId('backup-remote-save'));
+    await waitFor(() => {
+      expect(called(fetchMock, 'PUT', '/api/v1/backups/settings')).toBe(true);
+    });
+    expect(bodyOf(fetchMock, 'PUT', '/api/v1/backups/settings')).toEqual({
+      destination: { kind: 'sftp', host: 'nas', username: 'me', path: 'cairn', password: 'pw' },
+    });
+    // Saved: the password box is cleared and says one is stored.
+    await waitFor(() => expect(screen.getByTestId('backup-remote-password')).toHaveValue(''));
+    expect(screen.getByTestId('backup-remote-password')).toHaveAttribute(
+      'placeholder',
+      'Stored — leave blank to keep',
+    );
+    expect(screen.getByTestId('backup-host-key')).toHaveTextContent('SHA256:abc');
+  });
+
+  it('saves a daily schedule and size triggers', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'PUT' && url.endsWith('/api/v1/backups/settings')
+          ? json({ ...settings, ...(JSON.parse(String(init.body)) as object) })
+          : undefined,
+    ]);
+
+    fireEvent.change(await screen.findByTestId('backup-schedule-mode'), {
+      target: { value: 'daily' },
+    });
+    fireEvent.change(screen.getByTestId('backup-schedule-time'), { target: { value: '03:30' } });
+    fireEvent.click(screen.getByTestId('backup-schedule-save'));
+    await waitFor(() => {
+      expect(called(fetchMock, 'PUT', '/api/v1/backups/settings')).toBe(true);
+    });
+    expect(bodyOf(fetchMock, 'PUT', '/api/v1/backups/settings')).toEqual({
+      schedule: { mode: 'daily', time_of_day: '03:30' },
+    });
+
+    fireEvent.change(screen.getByTestId('backup-trigger-single'), { target: { value: '2' } });
+    fireEvent.click(screen.getByTestId('backup-triggers-save'));
+    await waitFor(() => {
+      const puts = fetchMock.mock.calls.filter(
+        ([u, init]) => String(u).endsWith('/backups/settings') && init?.method === 'PUT',
+      );
+      expect(puts).toHaveLength(2);
+      expect(JSON.parse(String(puts[1]?.[1]?.body))).toEqual({
+        triggers: { single_file_bytes: 2 * 1024 ** 3, total_bytes: 0 },
+      });
+    });
+  });
+
+  it('explains a scheduled backup waiting for its drive', async () => {
+    setup([
+      (url) =>
+        url.endsWith('/api/v1/backups/status')
+          ? json({
+              running: false,
+              next_scheduled_at: '2026-09-02T02:00:00Z',
+              last_scheduled_run_at: '2026-09-01T02:00:00Z',
+              waiting:
+                'backup destination unavailable: the backup drive at /media/usb is not mounted',
+              retry_at: '2026-09-02T02:10:00Z',
+              pending: {
+                since: '2026-09-01T02:00:00Z',
+                files: 3,
+                bytes: 3_145_728,
+                largest_bytes: 2_097_152,
+              },
+            })
+          : undefined,
+    ]);
+
+    expect(await screen.findByTestId('backup-waiting')).toHaveTextContent(
+      '/media/usb is not mounted',
+    );
+    expect(screen.getByTestId('backup-pending')).toHaveTextContent('3 new or changed files');
+  });
 });

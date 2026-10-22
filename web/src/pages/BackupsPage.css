@@ -145,3 +145,11 @@
   align-items: center;
   gap: var(--space-2);
 }
+
+/* Destination, schedule and triggers, stacked above the history. */
+.backup-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-bottom: var(--space-2);
+}

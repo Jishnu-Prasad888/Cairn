@@ -33,6 +33,14 @@ type Entry struct {
 	SHA256     string    `json:"sha256"`
 	Compressed bool      `json:"compressed"`
 	Encrypted  bool      `json:"encrypted"`
+	// Stored is the payload's size on the destination (after compression
+	// and encryption). Zero in manifests written before it was recorded.
+	Stored int64 `json:"stored,omitempty"`
+	// Ref, when set, names the earlier backup folder (a sibling of this
+	// one) that holds this unchanged file's payload. Used on destinations
+	// without hard links (FTP, SMB, exFAT drives) so incremental runs do not
+	// copy everything again.
+	Ref string `json:"ref,omitempty"`
 }
 
 // headerMetadata is the always-plaintext backup-level header (header.json).

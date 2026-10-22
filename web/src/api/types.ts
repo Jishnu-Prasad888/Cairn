@@ -501,11 +501,12 @@ export interface PublicShareInfoResponse {
  * Backups
  * ------------------------------------------------------------------ */
 
-export type BackupStatus = 'running' | 'ok' | 'failed' | string;
+export type BackupStatus = 'running' | 'completed' | 'failed' | 'pruned' | string;
 
 export interface BackupRecord {
   id: string;
   status: BackupStatus;
+  /** A local path, or a URL such as sftp://me@nas:22/backups/cairn-backup-… */
   destination: string;
   /** The server always sets this; a record without it is not a record. */
   started_at: string;
@@ -522,15 +523,113 @@ export interface BackupRecord {
   verify_errors?: number;
   error_msg?: string;
   created_at: string;
+  /** Written to an SFTP, FTP or SMB destination. */
+  remote?: boolean;
+  /** Why it ran. */
+  reason?: 'manual' | 'schedule' | 'size' | string;
+}
+
+export type BackupDestinationKind = 'local' | 'sftp' | 'ftp' | 'smb';
+
+export interface BackupDestination {
+  kind: BackupDestinationKind;
+  /** Absolute local folder, or the folder on the remote side. */
+  path: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  /** SFTP: the pinned server key (SHA256 fingerprint). */
+  host_key?: string;
+  /** SMB share and NTLM domain. */
+  share?: string;
+  domain?: string;
+  /** FTP transport security. */
+  security?: 'none' | 'explicit' | 'implicit';
+  insecure_skip_verify?: boolean;
+  /** Local: the mounted drive the folder is on; backups wait while it is unplugged. */
+  mount_point?: string;
+  /** Secrets are never returned, only whether one is stored. */
+  password_set?: boolean;
+  private_key_set?: boolean;
+  /** Human-readable location; empty when no destination is configured. */
+  location?: string;
+}
+
+/** A destination edit. Leave a secret out to keep the stored one. */
+export type BackupDestinationInput = Omit<
+  BackupDestination,
+  'password_set' | 'private_key_set' | 'location' | 'mount_point'
+> & {
+  password?: string;
+  private_key?: string;
+  /** SFTP: trust whatever key the server presents on this save. */
+  forget_host_key?: boolean;
+};
+
+export type BackupScheduleMode = 'off' | 'interval' | 'daily' | 'weekly';
+
+export interface BackupSchedule {
+  mode: BackupScheduleMode;
+  interval_minutes?: number;
+  /** "HH:MM" in the server's time zone. */
+  time_of_day?: string;
+  /** 0 = Sunday … 6 = Saturday. */
+  weekday?: number;
+}
+
+export interface BackupTriggers {
+  /** Back up when one new file is at least this large; 0 = off. */
+  single_file_bytes: number;
+  /** Back up when new files add up to at least this much; 0 = off. */
+  total_bytes: number;
 }
 
 export interface BackupSettings {
-  /** Where backups are written; empty means backups are disabled. */
+  /** Local backup folder; empty when disabled or remote. Prefer `destination`. */
   dir: string;
   keep: number;
   encrypted: boolean;
-  /** Scheduled cadence in minutes; 0 means manual only. */
+  /** Mirrors an interval schedule; 0 otherwise. Prefer `schedule`. */
   interval_minutes: number;
+  /** Older servers omit these three. */
+  destination?: BackupDestination;
+  schedule?: BackupSchedule;
+  triggers?: BackupTriggers;
+}
+
+export interface BackupPending {
+  since: string;
+  files: number;
+  bytes: number;
+  largest_bytes: number;
+}
+
+export interface BackupSchedulerStatus {
+  running: boolean;
+  /** Zero time ("0001-01-01…") when no schedule is set. */
+  next_scheduled_at: string;
+  last_scheduled_run_at: string;
+  /** Why a due run is waiting (drive unplugged, server unreachable). */
+  waiting?: string;
+  retry_at: string;
+  pending: BackupPending;
+}
+
+export interface BackupDrive {
+  path: string;
+  device: string;
+  fs_type: string;
+  total_bytes: number;
+  free_bytes: number;
+  removable: boolean;
+  network: boolean;
+  system: boolean;
+}
+
+export interface BackupDestinationTest {
+  ok: boolean;
+  error?: string;
+  destination: BackupDestination;
 }
 
 export function formatBytes(bytes: number): string {
