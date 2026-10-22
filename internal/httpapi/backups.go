@@ -28,6 +28,10 @@ type backupResponse struct {
 	VerifyErrors  int    `json:"verify_errors"`
 	ErrorMsg      string `json:"error_msg,omitempty"`
 	CreatedAt     string `json:"created_at"`
+	// Remote is set for backups on an SFTP/FTP/SMB destination.
+	Remote bool `json:"remote"`
+	// Reason is why the backup ran: manual, schedule or size.
+	Reason string `json:"reason"`
 }
 
 func toBackupResponse(r *backups.Record) backupResponse {
@@ -49,6 +53,8 @@ func toBackupResponse(r *backups.Record) backupResponse {
 		VerifyErrors:  r.VerifyErrors,
 		ErrorMsg:      r.ErrorMsg,
 		CreatedAt:     r.CreatedAt.UTC().Format(time.RFC3339),
+		Remote:        r.Target != "",
+		Reason:        r.Reason,
 	}
 }
 
@@ -70,7 +76,28 @@ func formatOptionalTime(t time.Time) string {
 // handleRunBackup — POST /api/v1/backups
 // Runs a backup now (if one is not already in progress) and returns the
 // resulting record. The run is synchronous so the client can poll the record.
+//
+// With {"background": true} the run continues after the response, which is
+// 202 with the running record; poll GET /backups/{id} or /backups/status.
+// Long runs to remote destinations should use it, since a synchronous run
+// can outlast the server's write timeout.
 func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	var in struct {
+		Background bool `json:"background"`
+	}
+	if r.ContentLength != 0 {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in)
+	}
+	if in.Background {
+		rec, err := s.backups.RunInBackground(r.Context())
+		if err != nil {
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusConflict, CodeConflict,
+				"Backup could not be started: "+err.Error())
+			return
+		}
+		writeJSON(w, s.logger, http.StatusAccepted, toBackupResponse(rec))
+		return
+	}
 	rec, err := s.backups.Run(r.Context())
 	if err != nil {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusConflict, CodeConflict,
@@ -140,20 +167,53 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request, u *
 	writeJSON(w, s.logger, http.StatusOK, toBackupResponse(rec))
 }
 
+// backupDestination is the API form of a destination: secrets are never
+// returned, only whether one is stored.
+type backupDestination struct {
+	backups.Destination
+	PasswordSet   bool `json:"password_set"`
+	PrivateKeySet bool `json:"private_key_set"`
+	// Location is the human-readable destination ("/mnt/usb/cairn",
+	// "sftp://me@nas:22/backups").
+	Location string `json:"location"`
+}
+
+func toBackupDestination(d backups.Destination) backupDestination {
+	loc := ""
+	if d.Configured() {
+		loc = d.Key()
+	}
+	return backupDestination{Destination: d, PasswordSet: d.Password != "",
+		PrivateKeySet: d.PrivateKey != "", Location: loc}
+}
+
 // backupSettings is the administrator-editable backup policy.
 type backupSettings struct {
-	// Dir is where backups are written; empty means backups are disabled.
+	// Dir is the local backup directory; empty when backups are disabled or
+	// go to a remote destination. Kept for older clients.
 	Dir       string `json:"dir"`
 	Keep      int    `json:"keep"`
 	Encrypted bool   `json:"encrypted"`
-	// IntervalMinutes is the scheduled cadence (0 = manual only).
-	IntervalMinutes int `json:"interval_minutes"`
+	// IntervalMinutes mirrors an interval schedule (0 otherwise). Kept for
+	// older clients; Schedule is authoritative.
+	IntervalMinutes int               `json:"interval_minutes"`
+	Destination     backupDestination `json:"destination"`
+	Schedule        backups.Schedule  `json:"schedule"`
+	Triggers        backups.Triggers  `json:"triggers"`
 }
 
 func (s *Server) currentBackupSettings() backupSettings {
 	c := s.backups.BackupConfig()
+	sched := s.backups.Schedule()
+	interval := 0
+	if sched.Mode == backups.ScheduleInterval {
+		interval = sched.IntervalMinutes
+	}
 	return backupSettings{Dir: c.Dir, Keep: c.Keep, Encrypted: c.Passphrase != "",
-		IntervalMinutes: int(c.Interval / time.Minute)}
+		IntervalMinutes: interval,
+		Destination:     toBackupDestination(s.backups.Destination()),
+		Schedule:        sched,
+		Triggers:        s.backups.Triggers()}
 }
 
 // handleGetBackupSettings — GET /api/v1/backups/settings
@@ -161,22 +221,108 @@ func (s *Server) handleGetBackupSettings(w http.ResponseWriter, _ *http.Request,
 	writeJSON(w, s.logger, http.StatusOK, s.currentBackupSettings())
 }
 
+// destinationInput is a destination edit. Password and private_key are
+// optional: left out, a stored secret for the same server and login is kept;
+// an empty string clears it.
+type destinationInput struct {
+	backups.Destination
+	Password   *string `json:"password"`
+	PrivateKey *string `json:"private_key"`
+	// ForgetHostKey re-pins an SFTP server's key on save.
+	ForgetHostKey bool `json:"forget_host_key"`
+}
+
+func (in destinationInput) update() backups.DestinationUpdate {
+	return backups.DestinationUpdate{Destination: in.Destination, Password: in.Password,
+		PrivateKey: in.PrivateKey, ForgetHostKey: in.ForgetHostKey}
+}
+
 // handlePutBackupSettings — PUT /api/v1/backups/settings
-// Sets the backup directory. It is created if missing and must be writable;
-// an empty value disables backups.
+//
+// Accepts any of "dir" (a local directory; the original form), "destination",
+// "schedule" and "triggers". Each part present is validated and applied; a
+// destination is tested (created, or connected to and written) before it is
+// saved.
 func (s *Server) handlePutBackupSettings(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	var in struct {
-		Dir *string `json:"dir"`
+		Dir         *string           `json:"dir"`
+		Destination *destinationInput `json:"destination"`
+		Schedule    *backups.Schedule `json:"schedule"`
+		Triggers    *backups.Triggers `json:"triggers"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil || in.Dir == nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil ||
+		(in.Dir == nil && in.Destination == nil && in.Schedule == nil && in.Triggers == nil) {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
-			CodeBadRequest, "Body must contain \"dir\".")
+			CodeBadRequest, "Body must contain \"dir\", \"destination\", \"schedule\" or \"triggers\".")
 		return
 	}
-	if err := s.backups.SetDir(r.Context(), *in.Dir); err != nil {
-		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest, CodeBadRequest,
-			"Could not use that backup directory: "+err.Error())
-		return
+	bad := func(prefix string, err error) {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest, CodeBadRequest, prefix+err.Error())
+	}
+	if in.Dir != nil {
+		if err := s.backups.SetDir(r.Context(), *in.Dir); err != nil {
+			bad("Could not use that backup directory: ", err)
+			return
+		}
+	}
+	if in.Destination != nil {
+		if _, err := s.backups.SetDestination(r.Context(), in.Destination.update()); err != nil {
+			bad("Could not use that backup destination: ", err)
+			return
+		}
+	}
+	if in.Schedule != nil {
+		if _, err := s.backups.SetSchedule(r.Context(), *in.Schedule); err != nil {
+			bad("Invalid schedule: ", err)
+			return
+		}
+	}
+	if in.Triggers != nil {
+		if _, err := s.backups.SetTriggers(r.Context(), *in.Triggers); err != nil {
+			bad("Invalid triggers: ", err)
+			return
+		}
 	}
 	writeJSON(w, s.logger, http.StatusOK, s.currentBackupSettings())
+}
+
+// handleTestBackupDestination — POST /api/v1/backups/destination/test
+// Connects to a destination and round-trips a probe file without saving it.
+// The response carries the destination as it would be stored (an SFTP host
+// key fingerprint is filled in on first contact, for the administrator to
+// compare before saving).
+func (s *Server) handleTestBackupDestination(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	var in destinationInput
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest, CodeBadRequest, "Invalid destination.")
+		return
+	}
+	d, err := s.backups.TestDestination(r.Context(), in.update())
+	out := struct {
+		OK          bool              `json:"ok"`
+		Error       string            `json:"error,omitempty"`
+		Destination backupDestination `json:"destination"`
+	}{OK: err == nil, Destination: toBackupDestination(d)}
+	if err != nil {
+		out.Error = err.Error()
+	}
+	writeJSON(w, s.logger, http.StatusOK, out)
+}
+
+// handleBackupStatus — GET /api/v1/backups/status
+// The scheduler's state: whether a run is in progress, the next scheduled
+// run, a run waiting for its destination, and data pending since the last
+// backup (what the size triggers measure).
+func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	writeJSON(w, s.logger, http.StatusOK, s.backups.SchedulerStatus(r.Context()))
+}
+
+// handleBackupDrives — GET /api/v1/backups/drives
+// Mounted filesystems the server can write backups to.
+func (s *Server) handleBackupDrives(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	mounts, err := backups.ListMounts()
+	if err != nil || mounts == nil {
+		mounts = []backups.Mount{} // no mount table (non-Linux): nothing to offer
+	}
+	writeJSON(w, s.logger, http.StatusOK, mounts)
 }

@@ -333,6 +333,11 @@ unknown token is rejected with `400`.
 | ------ | ------------------------------------- | -------------------------------- | ---- |
 | POST   | `/backups`                            | Run a backup                     | admin |
 | GET    | `/backups`                            | List backups                     | admin |
+| GET    | `/backups/settings`                   | Destination, schedule, triggers  | admin |
+| PUT    | `/backups/settings`                   | Change destination/schedule/triggers | admin |
+| POST   | `/backups/destination/test`           | Test a destination without saving | admin |
+| GET    | `/backups/status`                     | Next run, waiting, pending data  | admin |
+| GET    | `/backups/drives`                     | Mounted drives for backups       | admin |
 | GET    | `/backups/{id}`                       | Backup details                   | admin |
 | POST   | `/backups/{id}/verify`                | Verify a backup                  | admin |
 | POST   | `/backups/{id}/restore`               | Restore from a backup            | admin |

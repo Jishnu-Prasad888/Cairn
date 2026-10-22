@@ -27,7 +27,9 @@ import (
 
 // Config drives the backup subsystem.
 type Config struct {
-	// Dir is the destination directory for backups. Empty disables backups.
+	// Dir is the starting local destination directory (CAIRN_BACKUP_DIR). A
+	// destination an administrator saved wins over it. Empty disables
+	// backups until one is configured.
 	Dir string
 
 	// Keep is how many completed backups to retain; older ones are pruned.
@@ -38,26 +40,60 @@ type Config struct {
 	// Restore requires the same passphrase.
 	Passphrase string
 
-	// Interval is the scheduled backup cadence (0 disables scheduling).
+	// Interval is the starting scheduled cadence (CAIRN_BACKUP_INTERVAL_MIN);
+	// a schedule an administrator saved wins over it. 0 disables it.
 	Interval time.Duration
+
+	// DataDir holds the key that seals remote-destination credentials.
+	DataDir string
 }
 
-// Manager orchestrates backups: an optional scheduler, one-shot runs, sample
-// verification, retention pruning, listing, and restore.
-type Manager struct {
-	db     *sql.DB
-	logger *slog.Logger
-	libs   *library.Manager
-	store  *Store
-	cfg    Config
-	server string // absolute path of the server-level cairn.db
+// Reasons a backup ran, recorded on each record.
+const (
+	ReasonManual   = "manual"
+	ReasonSchedule = "schedule"
+	ReasonSize     = "size"
+)
 
-	// dirMu guards cfg.Dir, which an administrator can change at runtime.
-	dirMu sync.RWMutex
+// Manager orchestrates backups: the scheduler and size triggers, one-shot
+// runs, sample verification, retention pruning, listing, and restore.
+type Manager struct {
+	db      *sql.DB
+	logger  *slog.Logger
+	libs    *library.Manager
+	store   *Store
+	cfg     Config
+	server  string // absolute path of the server-level cairn.db
+	secrets *secretBox
+
+	// mu guards the administrator-editable policy below.
+	mu       sync.RWMutex
+	dest     Destination
+	schedule Schedule
+	anchor   time.Time // when the schedule was last changed
+	lastFire time.Time // when the schedule last ran a backup (persisted)
+	triggers Triggers
 
 	busy    atomic.Bool
 	skipped atomic.Int64
 	trigger chan struct{}
+	wake    chan struct{}
+
+	// startupDelay holds back a missed scheduled run after start so the
+	// server can settle (libraries come online, the indexer catches up).
+	startupDelay time.Duration
+	// retryDelay is how long a run waiting on an unavailable destination
+	// waits before trying again.
+	retryDelay time.Duration
+	// sizeCheckEvery is the cadence of the new-data check; scans also nudge it.
+	sizeCheckEvery time.Duration
+
+	// open connects to a destination; tests replace it.
+	open func(ctx context.Context, d Destination, onHostKey func(string)) (Target, error)
+
+	stateMu sync.Mutex
+	waiting string    // why a due run is waiting ("" = not waiting)
+	nextTry time.Time // when the scheduler next looks again
 }
 
 // NewManager builds the backup manager. serverDB is the absolute path of the
@@ -66,15 +102,30 @@ func NewManager(db *sql.DB, logger *slog.Logger, libs *library.Manager, cfg Conf
 	if cfg.Keep <= 0 {
 		cfg.Keep = 4
 	}
-	return &Manager{
-		db:      db,
-		logger:  logger,
-		libs:    libs,
-		store:   NewStore(db),
-		cfg:     cfg,
-		server:  serverDB,
-		trigger: make(chan struct{}, 1),
+	m := &Manager{
+		db:             db,
+		logger:         logger,
+		libs:           libs,
+		store:          NewStore(db),
+		cfg:            cfg,
+		server:         serverDB,
+		secrets:        newSecretBox(cfg.DataDir),
+		dest:           Destination{Kind: KindLocal, Path: cfg.Dir},
+		schedule:       Schedule{Mode: ScheduleOff},
+		trigger:        make(chan struct{}, 1),
+		wake:           make(chan struct{}, 1),
+		startupDelay:   time.Minute,
+		retryDelay:     10 * time.Minute,
+		sizeCheckEvery: 10 * time.Minute,
+		open:           openTarget,
 	}
+	if cfg.Dir != "" {
+		m.dest.MountPoint = MountPointFor(cfg.Dir)
+	}
+	if cfg.Interval > 0 {
+		m.schedule = Schedule{Mode: ScheduleInterval, IntervalMinutes: int(cfg.Interval / time.Minute)}
+	}
+	return m
 }
 
 // Store exposes the backup record store for endpoint reads.
@@ -97,79 +148,21 @@ func (m *Manager) BackupConfig() Config {
 	return c
 }
 
-// dirKey is the server_settings row holding the administrator's backup
-// directory. When present it wins over CAIRN_BACKUP_DIR.
-const dirKey = "backup.dir"
-
-// Dir reports the directory backups are currently written to ("" = disabled).
+// Dir reports the local directory backups are written to; "" when backups
+// are disabled or go to a remote destination.
 func (m *Manager) Dir() string {
-	m.dirMu.RLock()
-	defer m.dirMu.RUnlock()
-	return m.cfg.Dir
+	d := m.Destination()
+	if d.Kind != KindLocal {
+		return ""
+	}
+	return d.Path
 }
 
-// Load applies the stored backup directory, if an administrator set one.
-func (m *Manager) Load(ctx context.Context) error {
-	var raw string
-	err := m.db.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = ?`, dirKey).Scan(&raw)
-	switch {
-	case err == nil:
-		var dir string
-		if json.Unmarshal([]byte(raw), &dir) == nil {
-			m.dirMu.Lock()
-			m.cfg.Dir = dir
-			m.dirMu.Unlock()
-		}
-	case errors.Is(err, sql.ErrNoRows):
-	default:
-		return err
-	}
-	return nil
-}
-
-// SetDir validates, stores and applies a new backup directory. An empty dir
-// disables backups. The directory is created if missing and must be writable
-// and outside every library root, so the indexer never picks backups up as
-// media.
-func (m *Manager) SetDir(ctx context.Context, dir string) error {
-	dir = strings.TrimSpace(dir)
-	if dir != "" {
-		if !filepath.IsAbs(dir) {
-			return errors.New("backup directory must be an absolute path")
-		}
-		dir = filepath.Clean(dir)
-		libs, err := m.libs.List(ctx)
-		if err != nil {
-			return err
-		}
-		for _, l := range libs {
-			root := filepath.Clean(l.Root)
-			if dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
-				return fmt.Errorf("backup directory must not be inside the library %q", l.Name)
-			}
-		}
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("create backup directory: %w", err)
-		}
-		probe, err := os.CreateTemp(dir, ".cairn-write-test-*")
-		if err != nil {
-			return fmt.Errorf("backup directory is not writable: %w", err)
-		}
-		_ = probe.Close()
-		_ = os.Remove(probe.Name())
-	}
-	raw, _ := json.Marshal(dir)
-	if _, err := m.db.ExecContext(ctx, `
-		INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		dirKey, string(raw), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-		return err
-	}
-	m.dirMu.Lock()
-	m.cfg.Dir = dir
-	m.dirMu.Unlock()
-	m.logger.Info("backup directory changed", "dir", dir)
-	return nil
+// Destination returns the current destination, credentials included.
+func (m *Manager) Destination() Destination {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.dest
 }
 
 // Trigger requests a backup run from the scheduler (non-blocking).
@@ -181,114 +174,106 @@ func (m *Manager) Trigger() {
 	}
 }
 
-// Start launches the scheduler goroutine. Call it exactly once. It runs even
-// without a directory, since an administrator can set one at runtime; each
-// run checks the directory when it starts.
-func (m *Manager) Start(ctx context.Context) {
-	if m.Dir() == "" {
-		m.logger.Info("backups disabled until a backup directory is configured")
+// Nudge asks the scheduler to re-evaluate now: after settings change, and
+// after an index scan so the size triggers see new files promptly.
+func (m *Manager) Nudge() {
+	select {
+	case m.wake <- struct{}{}:
+	default:
 	}
-	go func() {
-		var tick <-chan time.Time
-		if m.cfg.Interval > 0 {
-			t := time.NewTicker(m.cfg.Interval)
-			defer t.Stop()
-			tick = t.C
-			m.logger.Info("backup scheduler started",
-				"interval", m.cfg.Interval.String(),
-				"dir", m.Dir(), "keep", m.cfg.Keep,
-				"encrypted", m.cfg.Passphrase != "")
-		}
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick:
-				m.run(15 * time.Minute)
-			case <-m.trigger:
-				m.run(4 * time.Hour)
-			}
-		}
-	}()
 }
 
-// run is the single-flight wrapper around RunBackup.
-func (m *Manager) run(timeout time.Duration) {
-	if !m.busy.CompareAndSwap(false, true) {
-		m.logger.Warn("backup skipped: another run is in progress")
-		return
-	}
-	defer m.busy.Store(false)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	rec, err := m.RunBackup(ctx)
-	if err != nil {
-		m.logger.Error("backup run errored", "error", err)
-		return
-	}
-	m.logger.Info("backup run finished", "backup_id", rec.ID, "status", rec.Status,
-		"files", rec.Files, "bytes", rec.Bytes, "stored_bytes", rec.StoredBytes)
-}
+// AfterScan is the indexer hook; it has the indexer's signature.
+func (m *Manager) AfterScan(string, string) { m.Nudge() }
+
+// errBusy is returned when a run is refused because another is in progress.
+var errBusy = errors.New("a backup is already running")
 
 // Run performs one full backup synchronously and returns the record. It is
 // safe to call from API handlers; concurrent runs are rejected.
 func (m *Manager) Run(ctx context.Context) (*Record, error) {
-	if !m.busy.CompareAndSwap(false, true) {
-		return nil, errors.New("a backup is already running")
-	}
-	defer m.busy.Store(false)
-	return m.RunBackup(ctx)
+	return m.runExclusive(ctx, ReasonManual)
 }
 
-// Verify re-checks a completed backup's integrity by restoring a sample of
-// entries and comparing plaintext sizes/hashes. Rejected when the backup is
-// encrypted but the configured passphrase differs.
-func (m *Manager) Verify(ctx context.Context, id string) (*Record, error) {
-	rec, err := m.store.Get(ctx, id)
-	if err != nil {
-		return nil, err
+func (m *Manager) runExclusive(ctx context.Context, reason string) (*Record, error) {
+	if !m.busy.CompareAndSwap(false, true) {
+		return nil, errBusy
 	}
-	if rec.Status != StatusCompleted || rec.Destination == "" {
-		return nil, errors.New("backup is not verifiable")
-	}
-	var key []byte
-	if rec.Encrypted {
-		meta, err := readHeader(rec.Destination)
-		if err != nil {
-			return nil, err
-		}
-		if m.cfg.Passphrase == "" {
-			return nil, errors.New("backup is encrypted; configure the passphrase to verify")
-		}
-		salt, err := hex.DecodeString(meta.Salt)
-		if err != nil {
-			return nil, err
-		}
-		key = deriveKey(m.cfg.Passphrase, salt)
-	}
-	mf, err := readManifest(rec.Destination, key)
-	if err != nil {
-		return nil, fmt.Errorf("read manifest: %w", err)
-	}
-	rec.VerifyStatus = ""
-	rec.VerifyChecked = 0
-	rec.VerifyErrors = 0
-	if err := m.verifySample(ctx, &rec, rec.Destination, mf, key); err != nil {
-		return nil, err
-	}
-	if err := m.store.Update(ctx, &rec); err != nil {
-		return nil, err
-	}
-	return &rec, nil
+	defer m.busy.Store(false)
+	return m.runBackup(ctx, reason)
 }
+
+// Running reports whether a backup is in progress.
+func (m *Manager) Running() bool { return m.busy.Load() }
 
 // RunBackup performs one full backup synchronously. Callers should normally
 // use Run; this is exposed for tests.
 func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
-	dir := m.Dir()
-	if dir == "" {
-		return nil, errors.New("backup directory not configured; set one on the Backups page")
+	return m.runBackup(ctx, ReasonManual)
+}
+
+// runBackup performs one backup. A destination that is not configured or
+// cannot be reached is returned as an error without creating a record (the
+// scheduler retries ErrUnavailable); anything that goes wrong once writing has
+// started is recorded as a failed backup.
+func (m *Manager) runBackup(ctx context.Context, reason string) (*Record, error) {
+	r, err := m.begin(ctx, reason)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { _ = r.tgt.Close() }()
+	return m.complete(ctx, r)
+}
+
+// RunInBackground starts a backup and returns its running record as soon as
+// the destination has been reached; the copy continues after the call
+// returns. Problems reaching the destination are returned directly.
+func (m *Manager) RunInBackground(ctx context.Context) (*Record, error) {
+	if !m.busy.CompareAndSwap(false, true) {
+		return nil, errBusy
+	}
+	r, err := m.begin(ctx, ReasonManual)
+	if err != nil {
+		m.busy.Store(false)
+		return nil, err
+	}
+	started := *r.rec
+	go func() {
+		defer m.busy.Store(false)
+		defer func() { _ = r.tgt.Close() }()
+		bctx, cancel := context.WithTimeout(context.Background(), 12*time.Hour)
+		defer cancel()
+		rec, err := m.complete(bctx, r)
+		if err != nil {
+			m.logger.Error("background backup errored", "error", err)
+			return
+		}
+		m.logger.Info("background backup finished", "backup_id", rec.ID, "status", rec.Status)
+	}()
+	return &started, nil
+}
+
+// pendingRun is a backup whose destination is open and record created.
+type pendingRun struct {
+	d      Destination
+	tgt    Target
+	rec    *Record
+	folder string
+}
+
+// begin reaches the destination and creates the running record. A
+// destination that is not configured or cannot be reached is an error and
+// creates no record.
+func (m *Manager) begin(ctx context.Context, reason string) (*pendingRun, error) {
+	d := m.Destination()
+	if !d.Configured() {
+		return nil, errors.New("backup destination not configured; set one on the Backups page")
+	}
+	tgt, err := m.open(ctx, d, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	m.skipped.Store(0)
 	rec := &Record{
@@ -297,29 +282,35 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 		StartedAt: now,
 		CreatedAt: now,
 		ServerDB:  m.server,
+		Reason:    reason,
 	}
+	if d.Kind != KindLocal {
+		rec.Target = d.Key()
+	}
+
+	base := "cairn-backup-" + now.Format("20060102-150405")
+	folder := base
+	for i := 1; exists(tgt, path.Join(folder, "header.json")); i++ {
+		folder = fmt.Sprintf("%s-%d", base, i)
+	}
+	rec.Destination = d.Location(folder)
 	if err := m.store.Create(ctx, rec); err != nil {
+		_ = tgt.Close()
 		return nil, err
 	}
-	m.logger.Info("backup starting", "backup_id", rec.ID)
+	m.logger.Info("backup starting", "backup_id", rec.ID, "destination", rec.Destination, "reason", reason)
+	return &pendingRun{d: d, tgt: tgt, rec: rec, folder: folder}, nil
+}
 
-	destBase := filepath.Join(dir, "cairn-backup-"+now.Format("20060102-150405"))
-	dest := destBase
-	for i := 1; ; i++ {
-		if _, err := os.Stat(dest); os.IsNotExist(err) {
-			break
-		}
-		if i > 10000 {
-			m.fail(ctx, rec, fmt.Errorf("too many backup directories for this second"))
-			return rec, nil
-		}
-		dest = fmt.Sprintf("%s-%d", destBase, i)
-	}
-	if err := os.MkdirAll(dest, 0o700); err != nil {
-		m.fail(ctx, rec, fmt.Errorf("create backup dir: %w", err))
+// complete copies everything for a begun run, verifies a sample, and prunes.
+// Failures along the way are recorded on the returned record.
+func (m *Manager) complete(ctx context.Context, r *pendingRun) (*Record, error) {
+	d, tgt, rec, folder := r.d, r.tgt, r.rec, r.folder
+	now := rec.StartedAt
+	if err := tgt.MkdirAll(folder); err != nil {
+		m.fail(ctx, rec, fmt.Errorf("create backup folder: %w", err))
 		return rec, nil
 	}
-	rec.Destination = dest
 
 	encrypted := m.cfg.Passphrase != ""
 	var key []byte
@@ -332,16 +323,21 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 		}
 		key = deriveKey(m.cfg.Passphrase, kb)
 	}
-	if err := writeHeader(dest, encrypted, salt); err != nil {
+	if err := writeHeader(tgt, folder, encrypted, salt); err != nil {
 		m.fail(ctx, rec, fmt.Errorf("write backup header: %w", err))
 		return rec, nil
 	}
 
-	// Same-device warning: destination on the same volume as any source.
-	dstDev, _ := deviceID(dest)
+	// Same-device warning: a local destination on the same volume as any
+	// source. Remote destinations are by definition elsewhere.
 	same := false
-	if srcDev, ok := deviceID(filepath.Dir(m.server)); ok && dstDev == srcDev {
-		same = true
+	var dstDev uint64
+	local := d.Kind == KindLocal
+	if local {
+		dstDev, _ = deviceID(filepath.Join(d.Path, folder))
+		if srcDev, ok := deviceID(filepath.Dir(m.server)); ok && dstDev == srcDev {
+			same = true
+		}
 	}
 
 	mf := &Manifest{
@@ -350,9 +346,10 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 		CreatedAt: now,
 		Encrypted: encrypted,
 	}
+	w := &writer{m: m, tgt: tgt, folder: folder, encrypted: encrypted, key: key}
 
 	// 1. Server database.
-	srv, err := m.snapshotServerDB(ctx, dest, encrypted, key)
+	srv, err := m.snapshotServerDB(ctx, w)
 	if err != nil {
 		m.fail(ctx, rec, fmt.Errorf("server database: %w", err))
 		return rec, nil
@@ -366,15 +363,17 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 		m.fail(ctx, rec, fmt.Errorf("list libraries: %w", err))
 		return rec, nil
 	}
-	prev := m.loadPrevious(ctx, dest)
+	w.prev = m.loadPrevious(ctx, tgt, d, rec.ID)
 	for _, lib := range libs {
-		lf, err := m.backupLibrary(ctx, dest, lib, encrypted, key, prev)
+		lf, err := m.backupLibrary(ctx, w, lib)
 		if err != nil {
 			m.fail(ctx, rec, fmt.Errorf("library %s: %w", lib.ID, err))
 			return rec, nil
 		}
-		if dev, ok := deviceID(lib.Root); ok && dstDev == dev {
-			same = true
+		if local {
+			if dev, ok := deviceID(lib.Root); ok && dstDev == dev {
+				same = true
+			}
 		}
 		mf.Libraries = append(mf.Libraries, lf)
 		rec.Libraries++
@@ -390,13 +389,12 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 		}
 	}
 
-	if err := writeManifest(dest, mf, encrypted, key); err != nil {
+	mfBytes, err := writeManifestTo(tgt, folder, mf, encrypted, key)
+	if err != nil {
 		m.fail(ctx, rec, fmt.Errorf("write manifest: %w", err))
 		return rec, nil
 	}
-	if stored, err := dirBytes(dest); err == nil {
-		rec.StoredBytes = stored
-	}
+	rec.StoredBytes = w.stored + mfBytes
 
 	rec.Status = StatusCompleted
 	rec.Encrypted = encrypted
@@ -408,7 +406,7 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 	}
 
 	// 3. Sample verification (restore-a-sample integrity checks).
-	if err := m.verifySample(ctx, rec, dest, mf, key); err != nil {
+	if err := m.verifySample(ctx, rec, tgt, folder, mf, key); err != nil {
 		m.logger.Warn("backup verification aborted", "backup_id", rec.ID, "error", err)
 	}
 	if err := m.store.Update(ctx, rec); err != nil {
@@ -416,24 +414,35 @@ func (m *Manager) RunBackup(ctx context.Context) (*Record, error) {
 	}
 
 	// 4. Retention pruning.
-	m.prune(ctx, rec)
+	m.prune(ctx, tgt, d, rec)
 	m.logger.Info("backup completed", "backup_id", rec.ID,
 		"files", rec.Files, "bytes", rec.Bytes, "stored_bytes", rec.StoredBytes,
 		"skipped", rec.FilesSkipped, "verify_errors", rec.VerifyErrors)
 	return rec, nil
 }
 
+// writer carries the state of one backup run's writes.
+type writer struct {
+	m         *Manager
+	tgt       Target
+	folder    string
+	encrypted bool
+	key       []byte
+	prev      *prevBackup
+	stored    int64 // bytes this backup occupies on the target (incl. reused)
+	noLink    bool  // the target refused a hard link once; stop trying
+}
+
 // snapshotServerDB copies the server cairn.db into the backup after forcing a
 // WAL checkpoint so the file is self-contained.
-func (m *Manager) snapshotServerDB(ctx context.Context, dest string, encrypted bool, key []byte) (Entry, error) {
+func (m *Manager) snapshotServerDB(ctx context.Context, w *writer) (Entry, error) {
 	if m.server == "" {
 		return Entry{}, errors.New("no server database path configured")
 	}
 	if _, err := m.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 		return Entry{}, err
 	}
-	rel := path.Join("server", "cairn.db")
-	e, err := copyFileEntry(m.server, filepath.Join(dest, "server", "cairn.db"), rel, true, encrypted, key)
+	e, err := w.put(m.server, path.Join("server", "cairn.db"), true)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -442,7 +451,7 @@ func (m *Manager) snapshotServerDB(ctx context.Context, dest string, encrypted b
 }
 
 // snapshotLibraryDB checkpoints a library's metadata db and copies it.
-func (m *Manager) snapshotLibraryDB(ctx context.Context, libDir, libID, cairnDir string, encrypted bool, key []byte) (Entry, error) {
+func (m *Manager) snapshotLibraryDB(ctx context.Context, w *writer, libID, cairnDir string) (Entry, error) {
 	dbPath := filepath.Join(cairnDir, "library.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		return Entry{}, err
@@ -453,17 +462,15 @@ func (m *Manager) snapshotLibraryDB(ctx context.Context, libDir, libID, cairnDir
 	}
 	_, _ = db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
 	_ = db.Close()
-	rel := path.Join("libraries", libID, "library.db")
-	return copyFileEntry(dbPath, filepath.Join(libDir, "library.db"), rel, true, encrypted, key)
+	return w.put(dbPath, path.Join("libraries", libID, "library.db"), true)
 }
 
 // backupLibrary copies one library's .cairn metadata and its media files.
-func (m *Manager) backupLibrary(ctx context.Context, dest string, lib library.Library, encrypted bool, key []byte, prev *prevBackup) (LibraryBackup, error) {
+func (m *Manager) backupLibrary(ctx context.Context, w *writer, lib library.Library) (LibraryBackup, error) {
 	cairnDir := filepath.Join(lib.Root, ".cairn")
 	lb := LibraryBackup{ID: lib.ID, Name: lib.Name, Root: lib.Root}
-	libDir := filepath.Join(dest, "libraries", lib.ID)
 
-	dbEntry, err := m.snapshotLibraryDB(ctx, libDir, lib.ID, cairnDir, encrypted, key)
+	dbEntry, err := m.snapshotLibraryDB(ctx, w, lib.ID, cairnDir)
 	if err != nil {
 		m.logger.Warn("library db backup skipped", "library_id", lib.ID, "error", err)
 	} else {
@@ -472,20 +479,18 @@ func (m *Manager) backupLibrary(ctx context.Context, dest string, lib library.Li
 
 	idSrc := filepath.Join(cairnDir, "library.json")
 	if _, err := os.Stat(idSrc); err == nil {
-		idRel := path.Join("libraries", lib.ID, "library.json")
-		entry, cerr := copyFileEntry(idSrc, filepath.Join(dest, filepath.FromSlash(idRel)), idRel, true, encrypted, key)
+		entry, cerr := w.put(idSrc, path.Join("libraries", lib.ID, "library.json"), true)
 		if cerr != nil {
 			return lb, cerr
 		}
 		lb.Identity = &entry
 	}
 
-	filesDir := filepath.Join(libDir, "files")
-	if err := os.MkdirAll(filesDir, 0o700); err != nil {
-		return lb, err
-	}
 	walkErr := filepath.WalkDir(lib.Root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		rel := strings.TrimPrefix(p, lib.Root)
@@ -507,7 +512,7 @@ func (m *Manager) backupLibrary(ctx context.Context, dest string, lib library.Li
 			return err
 		}
 		logical := path.Join("libraries", lib.ID, "files", filepath.ToSlash(rel))
-		entry, err := m.copyFile(p, dest, logical, fi, encrypted, key, prev)
+		entry, err := w.putMedia(p, logical, fi)
 		if err != nil {
 			return err
 		}
@@ -517,40 +522,92 @@ func (m *Manager) backupLibrary(ctx context.Context, dest string, lib library.Li
 	return lb, walkErr
 }
 
-// copyFile writes one media file into the backup, hard-linking from the
-// previous backup when the source is byte-for-byte unchanged (same size and
-// mtime, previous run unencrypted).
-func (m *Manager) copyFile(srcPath, destBase, logical string, fi fs.FileInfo, encrypted bool, key []byte, prev *prevBackup) (Entry, error) {
-	if prev != nil {
-		if pe, ok := findPrev(prev.mf, logical); ok &&
-			pe.Size == fi.Size() && pe.MTime.Equal(fi.ModTime()) && !encrypted {
-			prevPath := filepath.Join(prev.dir, filepath.FromSlash(logical))
-			dstPath := filepath.Join(destBase, filepath.FromSlash(logical))
-			if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err == nil {
-				if err := os.Link(prevPath, dstPath); err == nil {
-					rec := Entry{
-						Logical:    logical,
-						Original:   srcPath,
-						Size:       pe.Size,
-						MTime:      fi.ModTime(),
-						SHA256:     pe.SHA256,
-						Compressed: pe.Compressed,
-					}
-					m.logger.Debug("backup reused unchanged file", "logical", logical)
-					m.skipped.Add(1)
-					return rec, nil
-				}
+// putMedia writes one media file into the backup. A file unchanged since the
+// previous backup (same size and mtime, both unencrypted) is not copied
+// again: it is hard-linked where the target supports that, and otherwise the
+// entry references the earlier backup folder that holds the bytes.
+func (w *writer) putMedia(srcPath, logical string, fi fs.FileInfo) (Entry, error) {
+	if w.prev != nil && !w.encrypted {
+		if pe, ok := w.prev.files[logical]; ok && pe.Size == fi.Size() && pe.MTime.Equal(fi.ModTime()) {
+			if e, ok := w.reuse(srcPath, logical, fi, pe); ok {
+				return e, nil
 			}
 		}
 	}
-	dstPath := filepath.Join(destBase, filepath.FromSlash(logical))
-	return copyFileEntry(srcPath, dstPath, logical, shouldCompress(logical), encrypted, key)
+	return w.put(srcPath, logical, shouldCompress(logical))
 }
 
-// loadPrevious finds the most recent completed, reusable backup for
-// incremental hard-linking. Encrypted backups are never reused (a fresh nonce
+func (w *writer) reuse(srcPath, logical string, fi fs.FileInfo, pe Entry) (Entry, bool) {
+	holder := pe.Ref
+	if holder == "" {
+		holder = w.prev.folder
+	}
+	src := path.Join(holder, logical)
+	stored := pe.Stored
+	if stored == 0 {
+		// Manifests from before Stored was recorded.
+		if n, err := w.tgt.Size(src); err == nil {
+			stored = n
+		}
+	}
+	e := Entry{
+		Logical:    logical,
+		Original:   srcPath,
+		Size:       pe.Size,
+		MTime:      fi.ModTime(),
+		SHA256:     pe.SHA256,
+		Compressed: pe.Compressed,
+		Stored:     stored,
+	}
+	if l, ok := w.tgt.(linker); ok && !w.noLink {
+		dst := path.Join(w.folder, logical)
+		err := mkdirParent(w.tgt, dst)
+		if err == nil {
+			err = l.Link(src, dst)
+		}
+		switch {
+		case err == nil:
+			w.stored += stored
+			w.m.skipped.Add(1)
+			return e, true
+		case errors.Is(err, fs.ErrNotExist):
+			// The earlier copy is gone; write a fresh one.
+			return Entry{}, false
+		default:
+			// exFAT/FAT USB drives and servers without the hardlink
+			// extension: fall back to references for the rest of the run.
+			w.m.logger.Info("backup target does not support hard links; referencing earlier backups instead",
+				"error", err)
+			w.noLink = true
+		}
+	}
+	e.Ref = holder
+	w.stored += stored
+	w.m.skipped.Add(1)
+	return e, true
+}
+
+// put streams src into the backup through the payload codec.
+func (w *writer) put(srcPath, logical string, compress bool) (Entry, error) {
+	e, err := copyFileEntry(w.tgt, srcPath, path.Join(w.folder, logical), logical, compress, w.encrypted, w.key)
+	if err != nil {
+		return Entry{}, err
+	}
+	w.stored += e.Stored
+	return e, nil
+}
+
+// prevBackup is the most recent completed backup on the same destination,
+// used for incremental runs.
+type prevBackup struct {
+	folder string
+	files  map[string]Entry // media entries by logical path
+}
+
+// loadPrevious finds the most recent completed, reusable backup on the
+// current destination. Encrypted backups are never reused (a fresh nonce
 // re-encrypts everything each run).
-func (m *Manager) loadPrevious(ctx context.Context, currentDest string) *prevBackup {
+func (m *Manager) loadPrevious(ctx context.Context, tgt Target, d Destination, currentID string) *prevBackup {
 	if m.cfg.Passphrase != "" {
 		return nil
 	}
@@ -559,30 +616,127 @@ func (m *Manager) loadPrevious(ctx context.Context, currentDest string) *prevBac
 		return nil
 	}
 	for _, r := range recs {
-		if r.Status != StatusCompleted || r.Destination == "" || r.Destination == currentDest {
+		if r.ID == currentID || r.Status != StatusCompleted || r.Encrypted || !onDestination(r, d) {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(r.Destination, manifestFilename)); err != nil {
+		folder := recordFolder(r)
+		if !exists(tgt, path.Join(folder, manifestFilename)) {
 			continue
 		}
-		mf, err := readManifest(r.Destination, nil)
+		mf, err := readManifestFrom(tgt, folder, nil)
 		if err != nil {
 			m.logger.Debug("previous backup manifest unreadable; full copy", "backup_id", r.ID, "error", err)
 			return nil
 		}
-		return &prevBackup{dir: r.Destination, mf: mf}
+		p := &prevBackup{folder: folder, files: map[string]Entry{}}
+		for _, lb := range mf.Libraries {
+			for _, e := range lb.Files {
+				p.files[e.Logical] = e
+			}
+		}
+		return p
 	}
 	return nil
 }
 
-type prevBackup struct {
-	dir string
-	mf  *Manifest
+// onDestination reports whether a record was written to destination d.
+func onDestination(r Record, d Destination) bool {
+	if d.Kind == KindLocal {
+		return r.Target == "" && filepath.Dir(r.Destination) == d.Path
+	}
+	return r.Target != "" && r.Target == d.Key()
+}
+
+// recordFolder is the backup folder name of a record, relative to its
+// destination root.
+func recordFolder(r Record) string {
+	if r.Target == "" {
+		return filepath.Base(r.Destination)
+	}
+	return path.Base(r.Destination)
+}
+
+// openRecord connects to the destination holding a record's backup. Local
+// backups are reachable wherever they are; a remote backup only while its
+// destination is the configured one (that is where the credentials are).
+func (m *Manager) openRecord(ctx context.Context, r Record) (Target, string, error) {
+	cur := m.Destination()
+	if r.Target == "" {
+		d := Destination{Kind: KindLocal, Path: filepath.Dir(r.Destination)}
+		if cur.Kind == KindLocal && cur.Path == d.Path {
+			d.MountPoint = cur.MountPoint
+		}
+		tgt, err := m.open(ctx, d, nil)
+		return tgt, recordFolder(r), err
+	}
+	if cur.Kind == KindLocal || cur.Key() != r.Target {
+		return nil, "", fmt.Errorf("this backup is on %s, which is no longer the configured destination", r.Target)
+	}
+	tgt, err := m.open(ctx, cur, nil)
+	return tgt, recordFolder(r), err
+}
+
+// recordKey derives the payload key of an encrypted backup.
+func (m *Manager) recordKey(tgt Target, folder string, encrypted bool, action string) ([]byte, error) {
+	if !encrypted {
+		return nil, nil
+	}
+	meta, err := readHeaderFrom(tgt, folder)
+	if err != nil {
+		return nil, err
+	}
+	if meta.Salt == "" {
+		return nil, errors.New("backup is encrypted but its header has no salt")
+	}
+	if m.cfg.Passphrase == "" {
+		return nil, fmt.Errorf("backup is encrypted; configure the same passphrase to %s", action)
+	}
+	salt, err := hex.DecodeString(meta.Salt)
+	if err != nil {
+		return nil, err
+	}
+	return deriveKey(m.cfg.Passphrase, salt), nil
+}
+
+// Verify re-checks a completed backup's integrity by restoring a sample of
+// entries and comparing plaintext sizes/hashes. Rejected when the backup is
+// encrypted but the configured passphrase differs.
+func (m *Manager) Verify(ctx context.Context, id string) (*Record, error) {
+	rec, err := m.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if rec.Status != StatusCompleted || rec.Destination == "" {
+		return nil, errors.New("backup is not verifiable")
+	}
+	tgt, folder, err := m.openRecord(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tgt.Close() }()
+	key, err := m.recordKey(tgt, folder, rec.Encrypted, "verify")
+	if err != nil {
+		return nil, err
+	}
+	mf, err := readManifestFrom(tgt, folder, key)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+	rec.VerifyStatus = ""
+	rec.VerifyChecked = 0
+	rec.VerifyErrors = 0
+	if err := m.verifySample(ctx, &rec, tgt, folder, mf, key); err != nil {
+		return nil, err
+	}
+	if err := m.store.Update(ctx, &rec); err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }
 
 // verifySample runs the restore-a-sample stream verification and updates the
 // record's per-sample counters.
-func (m *Manager) verifySample(ctx context.Context, rec *Record, dest string, mf *Manifest, key []byte) error {
+func (m *Manager) verifySample(ctx context.Context, rec *Record, tgt Target, folder string, mf *Manifest, key []byte) error {
 	checks := []Entry{}
 	if mf.ServerDB != nil {
 		checks = append(checks, *mf.ServerDB)
@@ -609,7 +763,7 @@ func (m *Manager) verifySample(ctx context.Context, rec *Record, dest string, mf
 			return err
 		}
 		rec.VerifyChecked++
-		if !m.verifyEntry(dest, e, key) {
+		if !verifyEntry(tgt, folder, e, key) {
 			rec.VerifyErrors++
 			rec.VerifyStatus = VerifyFail
 			m.logger.Error("backup verification failed", "logical", e.Logical)
@@ -618,9 +772,17 @@ func (m *Manager) verifySample(ctx context.Context, rec *Record, dest string, mf
 	return nil
 }
 
+// entryPath is where an entry's payload physically lives on the target.
+func entryPath(folder string, e Entry) string {
+	if e.Ref != "" {
+		return path.Join(e.Ref, e.Logical)
+	}
+	return path.Join(folder, e.Logical)
+}
+
 // verifyEntry streams a stored payload back and compares the plaintext hash.
-func (m *Manager) verifyEntry(dest string, e Entry, key []byte) bool {
-	src, err := os.Open(filepath.Join(dest, filepath.FromSlash(e.Logical)))
+func verifyEntry(tgt Target, folder string, e Entry, key []byte) bool {
+	src, err := tgt.Open(entryPath(folder, e))
 	if err != nil {
 		return false
 	}
@@ -638,8 +800,8 @@ func (m *Manager) verifyEntry(dest string, e Entry, key []byte) bool {
 	return pr.Header().PlaintextSize == uint64(e.Size)
 }
 
-// Restore writes the contents of a completed backup into dest, mirroring the
-// stored layout (server/cairn.db, libraries/<id>/...).
+// Restore writes the contents of a completed backup into dest, a directory on
+// the server, mirroring the stored layout (server/cairn.db, libraries/<id>/...).
 func (m *Manager) Restore(ctx context.Context, id, dest string) (*Record, error) {
 	rec, err := m.store.Get(ctx, id)
 	if err != nil {
@@ -651,30 +813,19 @@ func (m *Manager) Restore(ctx context.Context, id, dest string) (*Record, error)
 	if dest == "" {
 		return nil, errors.New("restore destination required")
 	}
+	tgt, folder, err := m.openRecord(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tgt.Close() }()
 	if err := os.MkdirAll(dest, 0o700); err != nil {
 		return nil, err
 	}
-
-	var key []byte
-	if rec.Encrypted {
-		meta, err := readHeader(rec.Destination)
-		if err != nil {
-			return nil, err
-		}
-		if meta.Salt == "" {
-			return nil, errors.New("backup is encrypted but its header has no salt")
-		}
-		if m.cfg.Passphrase == "" {
-			return nil, errors.New("backup is encrypted; configure the same passphrase to restore")
-		}
-		salt, err := hex.DecodeString(meta.Salt)
-		if err != nil {
-			return nil, err
-		}
-		key = deriveKey(m.cfg.Passphrase, salt)
+	key, err := m.recordKey(tgt, folder, rec.Encrypted, "restore")
+	if err != nil {
+		return nil, err
 	}
-
-	mf, err := readManifest(rec.Destination, key)
+	mf, err := readManifestFrom(tgt, folder, key)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
@@ -685,7 +836,7 @@ func (m *Manager) Restore(ctx context.Context, id, dest string) (*Record, error)
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := restoreEntry(rec.Destination, dest, e, key); err != nil {
+			if err := restoreEntry(tgt, folder, dest, e, key); err != nil {
 				return err
 			}
 			count++
@@ -725,8 +876,14 @@ func (m *Manager) fail(ctx context.Context, rec *Record, err error) {
 
 // prune enforces the retention policy after a completed backup. Keep counts
 // the total retained (including the current run); the oldest completed backups
-// beyond that are removed and their records marked pruned.
-func (m *Manager) prune(ctx context.Context, current *Record) {
+// on the same destination beyond that are removed and their records marked
+// pruned.
+//
+// Backups on targets without hard links reference unchanged files in earlier
+// folders. A pruned folder that retained backups still reference keeps just
+// those files (plus its header and manifest) and is removed entirely once
+// nothing points into it any more.
+func (m *Manager) prune(ctx context.Context, tgt Target, d Destination, current *Record) {
 	recs, err := m.store.List(ctx, 500)
 	if err != nil {
 		return
@@ -734,29 +891,127 @@ func (m *Manager) prune(ctx context.Context, current *Record) {
 	sort.Slice(recs, func(i, j int) bool {
 		return recs[i].CreatedAt.After(recs[j].CreatedAt)
 	})
-	kept := 0
-	dir := m.Dir()
+	var retained, expired, partial []Record
+	retained = append(retained, *current)
 	for _, r := range recs {
-		if r.ID == current.ID || r.Status != StatusCompleted || r.Destination == "" {
+		if r.ID == current.ID || r.Destination == "" || !onDestination(r, d) {
 			continue
 		}
-		if !strings.HasPrefix(r.Destination, dir+string(filepath.Separator)) {
-			continue
+		switch {
+		case r.Status == StatusCompleted && len(retained) < m.cfg.Keep:
+			retained = append(retained, r)
+		case r.Status == StatusCompleted:
+			expired = append(expired, r)
+		case r.Status == StatusPruned && r.KeptForRefs:
+			partial = append(partial, r)
 		}
-		kept++
-		if kept <= m.cfg.Keep-1 {
-			continue
+	}
+	if len(expired) == 0 && len(partial) == 0 {
+		return
+	}
+
+	// Files retained backups still point at, by holding folder.
+	live := map[string]map[string]bool{}
+	for _, r := range retained {
+		if r.Encrypted {
+			continue // encrypted backups never reference other folders
 		}
-		if err := os.RemoveAll(r.Destination); err != nil {
-			m.logger.Warn("prune: remove backup dir failed", "dir", r.Destination, "error", err)
-			continue
+		mf, err := readManifestFrom(tgt, recordFolder(r), nil)
+		if err != nil {
+			// Without the manifest we cannot tell what it needs: keep
+			// everything rather than risk deleting referenced files.
+			m.logger.Warn("prune: retained manifest unreadable; skipping prune", "backup_id", r.ID, "error", err)
+			return
 		}
+		for _, lb := range mf.Libraries {
+			for _, e := range lb.Files {
+				if e.Ref == "" {
+					continue
+				}
+				if live[e.Ref] == nil {
+					live[e.Ref] = map[string]bool{}
+				}
+				live[e.Ref][e.Logical] = true
+			}
+		}
+	}
+
+	for _, r := range expired {
+		folder := recordFolder(r)
 		r.Status = StatusPruned
+		r.KeptForRefs = false
+		if refs := live[folder]; len(refs) > 0 {
+			if err := m.trimFolder(tgt, folder, refs, r.Encrypted); err != nil {
+				m.logger.Warn("prune: trim backup failed", "backup_id", r.ID, "error", err)
+				continue
+			}
+			r.KeptForRefs = true
+		} else if err := tgt.RemoveAll(folder); err != nil {
+			m.logger.Warn("prune: remove backup failed", "dir", r.Destination, "error", err)
+			continue
+		}
 		if err := m.store.Update(ctx, &r); err != nil {
 			m.logger.Warn("prune: update record failed", "backup_id", r.ID, "error", err)
 		}
-		m.logger.Info("pruned old backup", "backup_id", r.ID, "dir", r.Destination)
+		m.logger.Info("pruned old backup", "backup_id", r.ID, "dir", r.Destination, "kept_for_refs", r.KeptForRefs)
 	}
+	for _, r := range partial {
+		folder := recordFolder(r)
+		if len(live[folder]) > 0 {
+			continue
+		}
+		if err := tgt.RemoveAll(folder); err != nil {
+			m.logger.Warn("prune: remove backup failed", "dir", r.Destination, "error", err)
+			continue
+		}
+		r.KeptForRefs = false
+		if err := m.store.Update(ctx, &r); err != nil {
+			m.logger.Warn("prune: update record failed", "backup_id", r.ID, "error", err)
+		}
+		m.logger.Info("removed backup no longer referenced", "backup_id", r.ID, "dir", r.Destination)
+	}
+}
+
+// trimFolder deletes the payloads of an expired backup that no retained
+// backup references, keeping header.json and manifest.json.
+func (m *Manager) trimFolder(tgt Target, folder string, keep map[string]bool, encrypted bool) error {
+	if encrypted {
+		return errors.New("encrypted backups are never referenced")
+	}
+	mf, err := readManifestFrom(tgt, folder, nil)
+	if err != nil {
+		return err
+	}
+	var drop []Entry
+	if mf.ServerDB != nil {
+		drop = append(drop, *mf.ServerDB)
+	}
+	for _, lb := range mf.Libraries {
+		if lb.DB != nil {
+			drop = append(drop, *lb.DB)
+		}
+		if lb.Identity != nil {
+			drop = append(drop, *lb.Identity)
+		}
+		for _, e := range lb.Files {
+			if e.Ref == "" && !keep[e.Logical] {
+				drop = append(drop, e)
+			}
+		}
+	}
+	for _, e := range drop {
+		// The manifest lives on the destination; never let a tampered one
+		// steer a delete outside this backup folder.
+		rel, err := sanitize.RelPath(e.Logical)
+		if err != nil {
+			m.logger.Warn("prune: unsafe manifest path skipped", "logical", e.Logical)
+			continue
+		}
+		if err := tgt.Remove(path.Join(folder, rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			m.logger.Debug("prune: remove payload failed", "logical", e.Logical, "error", err)
+		}
+	}
+	return nil
 }
 
 // --- helpers ---
@@ -764,7 +1019,7 @@ func (m *Manager) prune(ctx context.Context, current *Record) {
 func newSalt() []byte {
 	b := make([]byte, 16)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return []byte(fmt.Sprintf("%016d", time.Now().UnixNano()))
+		return fmt.Appendf(nil, "%016d", time.Now().UnixNano())
 	}
 	return b
 }
@@ -777,8 +1032,9 @@ func newID() string {
 	return "bkp-" + hex.EncodeToString(b)
 }
 
-// copyFileEntry streams src into dst through the payload codec.
-func copyFileEntry(srcPath, dstPath, logical string, compress, encrypted bool, key []byte) (Entry, error) {
+// copyFileEntry streams a local file into dstPath on the target through the
+// payload codec.
+func copyFileEntry(tgt Target, srcPath, dstPath, logical string, compress, encrypted bool, key []byte) (Entry, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return Entry{}, err
@@ -788,24 +1044,23 @@ func copyFileEntry(srcPath, dstPath, logical string, compress, encrypted bool, k
 	if err != nil {
 		return Entry{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
-		return Entry{}, err
-	}
-	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return Entry{}, err
-	}
 	sink, err := newPayloadSink(compress, encrypted, key)
 	if err != nil {
-		_ = dst.Close()
 		return Entry{}, err
 	}
 	defer sink.abort()
 	if _, err := io.Copy(sink, src); err != nil {
-		_ = dst.Close()
 		return Entry{}, err
 	}
-	hh, err := sink.Materialize(dst)
+	if err := mkdirParent(tgt, dstPath); err != nil {
+		return Entry{}, err
+	}
+	dst, err := tgt.Create(dstPath)
+	if err != nil {
+		return Entry{}, err
+	}
+	cw := &countingWriter{w: dst}
+	hh, err := sink.Materialize(cw)
 	if err != nil {
 		_ = dst.Close()
 		return Entry{}, err
@@ -821,24 +1076,27 @@ func copyFileEntry(srcPath, dstPath, logical string, compress, encrypted bool, k
 		SHA256:     hh.SHA256Hex,
 		Compressed: hh.Compressed,
 		Encrypted:  hh.Encrypted,
+		Stored:     cw.n,
 	}, nil
 }
 
 // restoreEntry writes one stored payload back to plaintext under destBase,
 // mirroring its logical path and restoring the original mtime. The logical path
-// is validated so a crafted or tampered manifest cannot write outside the
-// destination directory.
-func restoreEntry(backupRoot, destBase string, e Entry, key []byte) error {
+// (and any reference) is validated so a crafted or tampered manifest cannot
+// read or write outside the backup and the destination directory.
+func restoreEntry(tgt Target, folder, destBase string, e Entry, key []byte) error {
 	rel, err := sanitize.RelPath(e.Logical)
 	if err != nil {
 		return fmt.Errorf("unsafe manifest logical path %q: %w", e.Logical, err)
 	}
-	fsRel := filepath.FromSlash(rel)
-	dst := filepath.Join(destBase, fsRel)
+	if e.Ref != "" && (strings.ContainsAny(e.Ref, `/\`) || e.Ref == "." || e.Ref == "..") {
+		return fmt.Errorf("unsafe manifest reference %q", e.Ref)
+	}
+	dst := filepath.Join(destBase, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
-	src, err := os.Open(filepath.Join(backupRoot, fsRel))
+	src, err := tgt.Open(entryPath(folder, Entry{Logical: rel, Ref: e.Ref}))
 	if err != nil {
 		return err
 	}
@@ -887,38 +1145,8 @@ func shouldCompress(name string) bool {
 	return !alreadyCompressedExt[ext]
 }
 
-// findPrev looks up a logical path in a previous backup's manifest.
-func findPrev(mf *Manifest, logical string) (Entry, bool) {
-	for _, lb := range mf.Libraries {
-		for _, e := range lb.Files {
-			if e.Logical == logical {
-				return e, true
-			}
-		}
-	}
-	return Entry{}, false
-}
-
-// dirBytes sums the on-disk size of everything under dir (compressed and/or
-// encrypted payloads included).
-func dirBytes(dir string) (int64, error) {
-	var total int64
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type().IsRegular() {
-			if fi, err := d.Info(); err == nil {
-				total += fi.Size()
-			}
-		}
-		return nil
-	})
-	return total, err
-}
-
-// writeHeader writes header.json (always plaintext).
-func writeHeader(dest string, encrypted bool, salt string) error {
+// writeHeader writes header.json (always plaintext) into a backup folder.
+func writeHeader(tgt Target, folder string, encrypted bool, salt string) error {
 	h := headerMetadata{
 		Format:    "cairn-backup",
 		Version:   1,
@@ -930,12 +1158,12 @@ func writeHeader(dest string, encrypted bool, salt string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dest, "header.json"), b, 0o600)
+	return writeTargetFile(tgt, path.Join(folder, "header.json"), b)
 }
 
-// readHeader reads header.json.
-func readHeader(dest string) (headerMetadata, error) {
-	b, err := os.ReadFile(filepath.Join(dest, "header.json"))
+// readHeaderFrom reads a backup folder's header.json.
+func readHeaderFrom(tgt Target, folder string) (headerMetadata, error) {
+	b, err := readTargetFile(tgt, path.Join(folder, "header.json"))
 	if err != nil {
 		return headerMetadata{}, err
 	}
@@ -946,32 +1174,47 @@ func readHeader(dest string) (headerMetadata, error) {
 	return h, nil
 }
 
-// writeManifest writes the manifest as a payload (encrypted when configured).
-func writeManifest(dest string, mf *Manifest, encrypted bool, key []byte) error {
+// readHeader reads header.json from a local backup directory.
+func readHeader(dest string) (headerMetadata, error) {
+	return readHeaderFrom(newLocalTarget(filepath.Dir(dest)), filepath.Base(dest))
+}
+
+// writeManifestTo writes the manifest as a payload (encrypted when
+// configured) and returns its stored size.
+func writeManifestTo(tgt Target, folder string, mf *Manifest, encrypted bool, key []byte) (int64, error) {
 	b, err := json.Marshal(mf)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	out, err := os.OpenFile(filepath.Join(dest, manifestFilename), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = out.Close() }()
 	sink, err := newPayloadSink(true, encrypted, key)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer sink.abort()
 	if _, err := sink.Write(b); err != nil {
-		return err
+		return 0, err
 	}
-	_, err = sink.Materialize(out)
+	out, err := tgt.Create(path.Join(folder, manifestFilename))
+	if err != nil {
+		return 0, err
+	}
+	cw := &countingWriter{w: out}
+	if _, err := sink.Materialize(cw); err != nil {
+		_ = out.Close()
+		return 0, err
+	}
+	return cw.n, out.Close()
+}
+
+// writeManifest writes a manifest into a local backup directory.
+func writeManifest(dest string, mf *Manifest, encrypted bool, key []byte) error {
+	_, err := writeManifestTo(newLocalTarget(filepath.Dir(dest)), filepath.Base(dest), mf, encrypted, key)
 	return err
 }
 
-// readManifest reads and decodes a backup manifest.
-func readManifest(dest string, key []byte) (*Manifest, error) {
-	f, err := os.Open(filepath.Join(dest, manifestFilename))
+// readManifestFrom reads and decodes a backup folder's manifest.
+func readManifestFrom(tgt Target, folder string, key []byte) (*Manifest, error) {
+	f, err := tgt.Open(path.Join(folder, manifestFilename))
 	if err != nil {
 		return nil, err
 	}
@@ -992,4 +1235,9 @@ func readManifest(dest string, key []byte) (*Manifest, error) {
 		return nil, err
 	}
 	return &mf, nil
+}
+
+// readManifest reads the manifest of a local backup directory.
+func readManifest(dest string, key []byte) (*Manifest, error) {
+	return readManifestFrom(newLocalTarget(filepath.Dir(dest)), filepath.Base(dest), key)
 }

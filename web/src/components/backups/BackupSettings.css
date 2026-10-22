@@ -1,0 +1,159 @@
+/* Backup destination, schedule and trigger settings. */
+
+.backup-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.backup-settings-section h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.backup-settings-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.backup-settings-heading .segmented {
+  flex-wrap: wrap;
+}
+
+/* --------------------------- mounted drives --------------------------- */
+
+.backup-drives {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.backup-drives ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backup-drive {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.backup-drive:hover:not(:disabled) {
+  border-color: var(--color-accent, var(--color-text-secondary));
+}
+
+.backup-drive-path {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.backup-drive-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* ---------------------------- remote form ----------------------------- */
+
+.backup-remote-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.backup-remote-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.backup-remote-grid input,
+.backup-remote-grid select {
+  width: 100%;
+}
+
+.backup-remote-host,
+.backup-remote-path {
+  grid-column: span 2;
+}
+
+.backup-remote-key {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  resize: vertical;
+}
+
+.backup-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
+}
+
+.backup-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.backup-folder-hint code {
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------- schedule / triggers ------------------------ */
+
+.backup-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.backup-narrow input {
+  width: 6rem;
+}
+
+.backup-size-input {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.backup-size-input input {
+  width: 7rem;
+}
+
+@media (max-width: 599px) {
+  .backup-remote-host,
+  .backup-remote-path {
+    grid-column: auto;
+  }
+
+  .backup-inline-form > .field,
+  .backup-inline-form > .field select,
+  .backup-inline-form > .field input {
+    width: 100%;
+  }
+
+  .backup-size-input input {
+    flex: 1;
+    width: auto;
+  }
+}

@@ -120,9 +120,9 @@ All settings use the `CAIRN_` prefix.
 | `CAIRN_LOG_LEVEL`      | `info`                             | `debug`, `info`, `warn`, or `error`     |
 | `CAIRN_WEB_DIST`       | *(embedded frontend)*              | Serve an on-disk build instead (dev)    |
 | `CAIRN_COOKIE_SECURE`  | `false`                            | Force `Secure` on session cookies (TLS-terminating proxy) |
-| `CAIRN_BACKUP_DIR`     | *(disabled)*                       | Where backups are written; empty disables backups |
+| `CAIRN_BACKUP_DIR`     | *(disabled)*                       | Starting local backup folder; the Backups page can set a folder, mounted drive, SFTP, FTP or SMB destination instead |
 | `CAIRN_BACKUP_KEEP`    | `4`                                | Completed backups retained; older are pruned |
-| `CAIRN_BACKUP_INTERVAL_MIN` | `0`                            | Scheduled backup cadence in minutes (`0` = manual only) |
+| `CAIRN_BACKUP_INTERVAL_MIN` | `0`                            | Starting backup interval in minutes (`0` = manual only); the Backups page also offers daily/weekly schedules and size triggers |
 | `CAIRN_BACKUP_PASSPHRASE`| *(disabled)*                     | Encrypts backups (needed for restore/verify) |
 | `CAIRN_ENCRYPTION_PASSPHRASE` | *(disabled)*            | Encrypts Cairn's on-disk metadata (.cairn identity + thumbnails) at rest |
 | `CAIRN_MEDIA_WORKERS`  | *half the CPUs, 1–4*               | Files per library processed at once for thumbnails and metadata |

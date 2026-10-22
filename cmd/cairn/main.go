@@ -263,17 +263,28 @@ func run() error {
 		mlRuntime.StartAll()
 	}
 
-	// Backups: one-shot, scheduled, and restore operations over the server
-	// database and every registered library. The directory comes from
-	// CAIRN_BACKUP_DIR unless an administrator set one on the Backups page.
+	// Backups: one-shot, scheduled, size-triggered and restore operations
+	// over the server database and every registered library, to a local or
+	// mounted directory or an SFTP/FTP/SMB server. The destination and
+	// schedule come from CAIRN_BACKUP_* unless an administrator set them on
+	// the Backups page.
 	backupMgr := backups.NewManager(pool, logger, libraries, backups.Config{
 		Dir:        cfg.BackupDir,
 		Keep:       cfg.BackupKeep,
 		Passphrase: cfg.BackupPassphrase,
 		Interval:   time.Duration(cfg.BackupIntervalMinutes) * time.Minute,
+		DataDir:    cfg.DataDir,
 	}, cfg.DatabasePath())
 	if err := backupMgr.Load(ctx); err != nil {
 		return err
+	}
+	// Size triggers re-check as soon as a scan has indexed new files.
+	afterScanML := idxManager.AfterScan
+	idxManager.AfterScan = func(libraryID, root string) {
+		if afterScanML != nil {
+			afterScanML(libraryID, root)
+		}
+		backupMgr.AfterScan(libraryID, root)
 	}
 	backupMgr.Start(ctx)
 

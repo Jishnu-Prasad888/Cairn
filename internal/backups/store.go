@@ -45,6 +45,15 @@ type Record struct {
 	VerifyErrors  int
 	ErrorMsg      string
 	CreatedAt     time.Time
+
+	// Target identifies a remote destination (its Destination.Key); empty
+	// for a local directory, whose location is Destination itself.
+	Target string
+	// Reason is why the backup ran: manual, schedule or size.
+	Reason string
+	// KeptForRefs marks a pruned backup whose folder still holds files that
+	// newer backups reference; it is removed once nothing does.
+	KeptForRefs bool
 }
 
 // Store provides row-level access to backup records.
@@ -60,17 +69,17 @@ func NewStore(db *sql.DB) *Store {
 const recordCols = `id, status, destination, started_at, finished_at,
 	server_db_path, libraries, files, files_skipped, bytes, stored_bytes,
 	encrypted, same_device, verify_status, verify_checked, verify_errors,
-	error_msg, created_at`
+	error_msg, created_at, target, reason, kept_for_refs`
 
 func (s *Store) Create(ctx context.Context, r *Record) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO backups (`+recordCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, string(r.Status), r.Destination,
 		rf(r.StartedAt), rf(r.FinishedAt),
 		r.ServerDB, r.Libraries, r.Files, r.FilesSkipped,
 		r.Bytes, r.StoredBytes, b2i(r.Encrypted), b2i(r.SameDevice),
 		r.VerifyStatus, r.VerifyChecked, r.VerifyErrors,
-		r.ErrorMsg, rf(r.CreatedAt))
+		r.ErrorMsg, rf(r.CreatedAt), r.Target, reasonOrManual(r.Reason), b2i(r.KeptForRefs))
 	return err
 }
 
@@ -80,13 +89,13 @@ func (s *Store) Update(ctx context.Context, r *Record) error {
 		status=?, destination=?, started_at=?, finished_at=?,
 		server_db_path=?, libraries=?, files=?, files_skipped=?, bytes=?,
 		stored_bytes=?, encrypted=?, same_device=?, verify_status=?,
-		verify_checked=?, verify_errors=?, error_msg=?
+		verify_checked=?, verify_errors=?, error_msg=?, kept_for_refs=?
 		WHERE id=?`,
 		string(r.Status), r.Destination, rf(r.StartedAt), rf(r.FinishedAt),
 		r.ServerDB, r.Libraries, r.Files, r.FilesSkipped, r.Bytes,
 		r.StoredBytes, b2i(r.Encrypted), b2i(r.SameDevice),
 		r.VerifyStatus, r.VerifyChecked, r.VerifyErrors,
-		r.ErrorMsg, r.ID)
+		r.ErrorMsg, b2i(r.KeptForRefs), r.ID)
 	return err
 }
 
@@ -130,13 +139,15 @@ func scanRecord(sc recordScanner) (Record, error) {
 	var (
 		status, destination, serverDB string
 		started, finished, created    string
-		sameDev, encrypted            int
+		sameDev, encrypted, keptRefs  int
+		finishedNull, verifyNull      sql.NullString
+		errNull                       sql.NullString
 	)
-	err := sc.Scan(&r.ID, &status, &destination, &started, &finished,
+	err := sc.Scan(&r.ID, &status, &destination, &started, &finishedNull,
 		&serverDB, &r.Libraries, &r.Files, &r.FilesSkipped,
 		&r.Bytes, &r.StoredBytes, &encrypted, &sameDev,
-		&r.VerifyStatus, &r.VerifyChecked, &r.VerifyErrors,
-		&r.ErrorMsg, &created)
+		&verifyNull, &r.VerifyChecked, &r.VerifyErrors,
+		&errNull, &created, &r.Target, &r.Reason, &keptRefs)
 	if err != nil {
 		return Record{}, err
 	}
@@ -145,6 +156,10 @@ func scanRecord(sc recordScanner) (Record, error) {
 	r.ServerDB = serverDB
 	r.Encrypted = encrypted != 0
 	r.SameDevice = sameDev != 0
+	r.KeptForRefs = keptRefs != 0
+	finished = finishedNull.String
+	r.VerifyStatus = verifyNull.String
+	r.ErrorMsg = errNull.String
 	r.StartedAt, _ = time.Parse(time.RFC3339Nano, started)
 	r.FinishedAt, _ = time.Parse(time.RFC3339Nano, finished)
 	r.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -160,6 +175,41 @@ func rf(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func reasonOrManual(r string) string {
+	if r == "" {
+		return ReasonManual
+	}
+	return r
+}
+
+// MarkInterrupted fails records left "running" by a server that stopped mid-
+// backup, so they do not look in progress forever. It returns how many.
+func (s *Store) MarkInterrupted(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE backups SET status = 'failed',
+		finished_at = ?, error_msg = 'interrupted: the server stopped during this backup'
+		WHERE status = 'running'`, rf(time.Now()))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// LastCompleted returns the start time of the most recent completed backup,
+// or the zero time when there is none.
+func (s *Store) LastCompleted(ctx context.Context) (time.Time, error) {
+	var started sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT started_at FROM backups
+		WHERE status IN ('completed', 'pruned') ORDER BY started_at DESC LIMIT 1`).Scan(&started)
+	if errors.Is(err, sql.ErrNoRows) || !started.Valid {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	t, _ := time.Parse(time.RFC3339Nano, started.String)
+	return t, nil
 }
 
 func b2i(b bool) int {

@@ -24,8 +24,14 @@ import type { UploadProgress } from './client';
 import type {
   Album,
   AlbumListResponse,
+  BackupDestinationInput,
+  BackupDestinationTest,
+  BackupDrive,
   BackupRecord,
+  BackupSchedule,
+  BackupSchedulerStatus,
   BackupSettings,
+  BackupTriggers,
   DuplicatesResponse,
   FaceStatus,
   FaceSummary,
@@ -550,6 +556,9 @@ export const getBackup = (id: string) => apiGet<BackupRecord>(`/backups/${id}`);
 
 export const runBackup = () => apiPost<BackupRecord>('/backups', {});
 
+/** Starts a backup and returns its running record; poll for the outcome. */
+export const startBackup = () => apiPost<BackupRecord>('/backups', { background: true });
+
 export const verifyBackup = (id: string) => apiPost<BackupRecord>(`/backups/${id}/verify`);
 
 export const restoreBackup = (id: string, destination: string) =>
@@ -559,6 +568,25 @@ export const getBackupSettings = () => apiGet<BackupSettings>('/backups/settings
 
 /** The directory is created if missing; an empty value disables backups. */
 export const setBackupDir = (dir: string) => apiPut<BackupSettings>('/backups/settings', { dir });
+
+/** Saves a destination after the server has tested it. */
+export const setBackupDestination = (destination: BackupDestinationInput) =>
+  apiPut<BackupSettings>('/backups/settings', { destination });
+
+export const setBackupSchedule = (schedule: BackupSchedule) =>
+  apiPut<BackupSettings>('/backups/settings', { schedule });
+
+export const setBackupTriggers = (triggers: BackupTriggers) =>
+  apiPut<BackupSettings>('/backups/settings', { triggers });
+
+/** Connects and writes a probe file without saving anything. */
+export const testBackupDestination = (destination: BackupDestinationInput) =>
+  apiPost<BackupDestinationTest>('/backups/destination/test', destination);
+
+export const getBackupStatus = () => apiGet<BackupSchedulerStatus>('/backups/status');
+
+/** Mounted drives on the server that could hold backups. */
+export const listBackupDrives = () => apiGet<BackupDrive[]>('/backups/drives');
 
 /* ------------------------------- users ----------------------------- */
 

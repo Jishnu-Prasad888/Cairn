@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/audit"
 	"github.com/Jishnu-Prasad888/Cairn/internal/auth"
@@ -202,4 +203,91 @@ func TestBackupRunConflictsWhenRunning(t *testing.T) {
 	if second.Code != http.StatusOK && second.Code != http.StatusConflict {
 		t.Fatalf("second run status = %d, want 200 or 409", second.Code)
 	}
+}
+
+func TestBackupScheduleTriggersStatusAndDrives(t *testing.T) {
+	_, client, _ := newBackupTestServer(t)
+
+	rec := client.roundTrip(t, http.MethodPut, "/api/v1/backups/settings",
+		`{"schedule":{"mode":"daily","time_of_day":"03:30"},"triggers":{"single_file_bytes":1073741824,"total_bytes":0}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT settings = %d %s", rec.Code, rec.Body.String())
+	}
+	var got backupSettings
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schedule.Mode != "daily" || got.Schedule.TimeOfDay != "03:30" || got.Triggers.SingleFileBytes != 1<<30 {
+		t.Fatalf("settings = %+v", got)
+	}
+	if got.Destination.Kind != "local" || got.Destination.Location == "" {
+		t.Fatalf("destination = %+v", got.Destination)
+	}
+
+	rec = client.roundTrip(t, http.MethodPut, "/api/v1/backups/settings", `{"schedule":{"mode":"interval","interval_minutes":1}}`)
+	assertErrorEnvelope(t, rec, http.StatusBadRequest, CodeBadRequest)
+
+	rec = client.roundTrip(t, http.MethodGet, "/api/v1/backups/status", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d", rec.Code)
+	}
+	var st backups.SchedulerStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.NextScheduledAt.IsZero() || st.Running {
+		t.Fatalf("status = %+v", st)
+	}
+
+	rec = client.roundTrip(t, http.MethodGet, "/api/v1/backups/drives", "")
+	if rec.Code != http.StatusOK || rec.Body.String()[0] != '[' {
+		t.Fatalf("GET drives = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBackupDestinationTestAndBackgroundRun(t *testing.T) {
+	_, client, _ := newBackupTestServer(t)
+
+	dir := filepath.ToSlash(filepath.Join(t.TempDir(), "elsewhere"))
+	rec := client.roundTrip(t, http.MethodPost, "/api/v1/backups/destination/test",
+		`{"kind":"local","path":"`+dir+`"}`)
+	if rec.Code != http.StatusOK || !json.Valid(rec.Body.Bytes()) {
+		t.Fatalf("test destination = %d %s", rec.Code, rec.Body.String())
+	}
+	var res struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if !res.OK {
+		t.Fatalf("local test failed: %s", res.Error)
+	}
+
+	rec = client.roundTrip(t, http.MethodPost, "/api/v1/backups/destination/test",
+		`{"kind":"sftp","host":"127.0.0.1","port":1,"username":"x","password":"y"}`)
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if rec.Code != http.StatusOK || res.OK || res.Error == "" {
+		t.Fatalf("unreachable sftp test = %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = client.roundTrip(t, http.MethodPost, "/api/v1/backups", `{"background":true}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("background run = %d %s", rec.Code, rec.Body.String())
+	}
+	started := decodeBackupResponse(t, rec)
+	if started.Status != "running" || started.Reason != "manual" {
+		t.Fatalf("started = %+v", started)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		got := decodeBackupResponse(t, client.roundTrip(t, http.MethodGet, "/api/v1/backups/"+started.ID, ""))
+		if got.Status == "completed" {
+			return
+		}
+		if got.Status == "failed" {
+			t.Fatalf("background run failed: %s", got.ErrorMsg)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("background run did not finish")
 }

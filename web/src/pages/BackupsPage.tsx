@@ -12,34 +12,53 @@
  * machine.
  */
 
-import { type FormEvent, useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/authContext';
 import { useResource } from '../api/resources';
 import {
   getBackup,
   getBackupSettings,
+  getBackupStatus,
+  listBackupDrives,
   listBackups,
   restoreBackup,
-  runBackup,
-  setBackupDir,
+  startBackup,
   verifyBackup,
 } from '../api/queries';
-import type { BackupRecord, BackupSettings } from '../api/types';
+import type { BackupRecord, BackupSchedulerStatus, BackupSettings } from '../api/types';
 import { formatBytes } from '../api/types';
+import BackupDestinationSection from '../components/backups/BackupDestinationSection';
+import { destinationConfigured } from '../components/backups/backupSettings';
+import {
+  BackupScheduleSection,
+  BackupTriggersSection,
+} from '../components/backups/BackupScheduleSection';
 import { ConfirmDialog, Dialog, PromptDialog } from '../components/Dialog';
-import ServerFolderBrowser, { FolderOpenIcon } from '../components/ServerFolderBrowser';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import './BackupsPage.css';
 
 const STATUS_LABEL: Record<string, string> = {
   running: 'Running',
+  completed: 'Completed',
+  // Older clients and fixtures used "ok".
   ok: 'Completed',
   failed: 'Failed',
+  pruned: 'Pruned',
 };
 
+const REASON_LABEL: Record<string, string> = {
+  schedule: 'scheduled',
+  size: 'new files',
+};
+
+/** A backup that finished and can be verified or restored. */
+function isDone(record: BackupRecord): boolean {
+  return record.status === 'completed' || record.status === 'ok';
+}
+
 function StatusBadge({ record }: { record: BackupRecord }) {
-  const ok = record.status === 'ok';
+  const ok = isDone(record);
   const failed = record.status === 'failed';
   return (
     <span
@@ -96,7 +115,7 @@ function BackupDetailDialog({
               type="button"
               className="button"
               onClick={verify}
-              disabled={busy || shown.status !== 'ok'}
+              disabled={busy || !isDone(shown)}
               data-testid="verify-backup"
             >
               {busy ? 'Verifying…' : 'Verify'}
@@ -105,7 +124,7 @@ function BackupDetailDialog({
               type="button"
               className="button primary-button"
               onClick={() => setRestoring(true)}
-              disabled={busy || shown.status !== 'ok'}
+              disabled={busy || !isDone(shown)}
               data-testid="open-restore-backup"
             >
               Restore…
@@ -123,6 +142,18 @@ function BackupDetailDialog({
               <code>{shown.destination}</code>
             </dd>
           </div>
+          {shown.reason && (
+            <div>
+              <dt>Started by</dt>
+              <dd>
+                {shown.reason === 'schedule'
+                  ? 'The schedule'
+                  : shown.reason === 'size'
+                    ? 'New files reaching a size trigger'
+                    : 'An administrator'}
+              </dd>
+            </div>
+          )}
           <div>
             <dt>Started</dt>
             <dd>{new Date(shown.started_at).toLocaleString()}</dd>
@@ -157,9 +188,11 @@ function BackupDetailDialog({
           <div>
             <dt>On the same device</dt>
             <dd>
-              {shown.same_device
-                ? 'Yes — this would not survive losing the machine'
-                : 'No — this is on different storage'}
+              {shown.remote
+                ? 'No — this is on another server'
+                : shown.same_device
+                  ? 'Yes — this would not survive losing the machine'
+                  : 'No — this is on different storage'}
             </dd>
           </div>
           {shown.verify_status && (
@@ -213,122 +246,6 @@ function BackupDetailDialog({
   );
 }
 
-/**
- * Where backups go. The folder lives on the server, so this is a path on the
- * server's disk; the server creates it and checks it is writable on save.
- */
-function BackupFolderSection({
-  settings,
-  onSaved,
-}: {
-  settings: BackupSettings;
-  onSaved: (next: BackupSettings) => void;
-}) {
-  const [dir, setDir] = useState(settings.dir);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [browsing, setBrowsing] = useState(false);
-
-  const saveDir = (target: string) => {
-    setBusy(true);
-    setError(null);
-    setSaved(false);
-    setBackupDir(target)
-      .then((next) => {
-        // The server cleans the path; show what it actually stored.
-        setDir(next.dir);
-        onSaved(next);
-        setSaved(true);
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setBusy(false));
-  };
-
-  const save = (e: FormEvent) => {
-    e.preventDefault();
-    saveDir(dir.trim());
-  };
-
-  return (
-    <section className="backup-folder" aria-labelledby="backup-folder-title">
-      <h2 id="backup-folder-title">Backup folder</h2>
-      {!settings.dir && (
-        <p className="muted backups-warning" data-testid="backup-folder-missing">
-          No backup folder is set, so backups cannot run. Choose a folder on the server — ideally on
-          a different disk from your libraries.
-        </p>
-      )}
-      <form className="backup-folder-form" onSubmit={save}>
-        <label className="field">
-          <span className="field-label">Folder on the server</span>
-          <input
-            type="text"
-            value={dir}
-            placeholder="/mnt/backup-disk/cairn"
-            onChange={(e) => {
-              setDir(e.target.value);
-              setSaved(false);
-            }}
-            disabled={busy}
-            data-testid="backup-folder-input"
-          />
-        </label>
-        <button
-          type="button"
-          className="button backup-folder-browse"
-          onClick={() => setBrowsing((open) => !open)}
-          aria-expanded={browsing}
-          disabled={busy}
-          title="Browse folders on the server"
-          data-testid="backup-folder-browse"
-        >
-          <FolderOpenIcon />
-          <span>Browse</span>
-        </button>
-        <button
-          type="submit"
-          className="button"
-          disabled={busy || dir.trim() === settings.dir}
-          data-testid="backup-folder-save"
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-      </form>
-      {browsing && (
-        <ServerFolderBrowser
-          start={dir.trim().startsWith('/') ? dir.trim() : ''}
-          onChoose={(chosen) => {
-            // Choosing a folder is the whole intent, so save it straight away.
-            setDir(chosen);
-            setBrowsing(false);
-            saveDir(chosen);
-          }}
-          onCancel={() => setBrowsing(false)}
-        />
-      )}
-      <p className="muted backup-folder-hint">
-        An absolute path. It is created if missing and must not be inside a library. Keeps the{' '}
-        {settings.keep} most recent backups
-        {settings.interval_minutes > 0
-          ? `, runs every ${settings.interval_minutes} minutes`
-          : ', runs only when you click Back up now'}
-        {settings.encrypted ? ', encrypted' : ''}.
-      </p>
-      {saved && (
-        <p className="muted" role="status">
-          {settings.dir ? 'Backup folder saved.' : 'Backups disabled.'}
-        </p>
-      )}
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
-    </section>
-  );
-}
-
 export default function BackupsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -347,6 +264,24 @@ export default function BackupsPage() {
   );
   const [savedSettings, setSavedSettings] = useState<BackupSettings | null>(null);
   const currentSettings = savedSettings ?? settings.data;
+  // Status and drives are extras: a server that lacks them (or a failed
+  // request) just leaves their lines out.
+  const status = useResource(
+    useCallback(() => getBackupStatus().catch(() => null), []),
+    [],
+    isAdmin,
+  );
+  const drives = useResource(
+    useCallback(() => listBackupDrives().catch(() => null), []),
+    [],
+    isAdmin,
+  );
+  // Fresh copies fetched while a backup runs, so polling does not flash the
+  // loading state.
+  const [polled, setPolled] = useState<{
+    list: BackupRecord[];
+    status: BackupSchedulerStatus | null;
+  } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [confirmRun, setConfirmRun] = useState(false);
@@ -361,6 +296,35 @@ export default function BackupsPage() {
     [detailId],
     detailId !== null,
   );
+
+  const list = polled?.list ?? backups.data;
+  const schedulerStatus = polled?.status ?? status.data;
+  const inProgress =
+    Boolean(schedulerStatus?.running) || (list ?? []).some((r) => r.status === 'running');
+
+  // While a backup runs (started here, by the schedule, or by a trigger),
+  // refresh the list until it finishes.
+  useEffect(() => {
+    if (!isAdmin || !inProgress) return;
+    let cancelled = false;
+    const id = window.setInterval(() => {
+      Promise.all([listBackups(), getBackupStatus().catch(() => null)])
+        .then(([nextList, nextStatus]) => {
+          if (!cancelled) setPolled({ list: nextList, status: nextStatus });
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [isAdmin, inProgress]);
+
+  const reloadAll = () => {
+    setPolled(null);
+    backups.reload();
+    status.reload();
+  };
 
   if (!isAdmin) {
     return (
@@ -380,16 +344,20 @@ export default function BackupsPage() {
     setBusy(true);
     setError(null);
     setNotice(null);
-    runBackup()
+    // Started in the background: a backup to a remote server can take far
+    // longer than one request may stay open.
+    startBackup()
       .then((rec) => {
         setConfirmRun(false);
         setRunning(false);
         setNotice(
-          rec.status === 'ok'
-            ? `Backed up ${rec.files} files (${formatBytes(rec.stored_bytes)}) to ${rec.destination}.`
-            : `Backup finished with status "${rec.status}".`,
+          rec.status === 'running'
+            ? `Backup started to ${rec.destination}. This list updates as it runs.`
+            : isDone(rec)
+              ? `Backed up ${rec.files} files (${formatBytes(rec.stored_bytes)}) to ${rec.destination}.`
+              : `Backup finished with status "${rec.status}".`,
         );
-        backups.reload();
+        reloadAll();
       })
       .catch((e: unknown) => {
         // The dialog stays open on failure, with the reason inside it, so the
@@ -400,7 +368,8 @@ export default function BackupsPage() {
   };
 
   const detailRecord = detail.data;
-  const latest = backups.data?.[0] ?? null;
+  const latest = list?.[0] ?? null;
+  const configured = currentSettings ? destinationConfigured(currentSettings) : true;
 
   return (
     <main className="page backups-page">
@@ -415,10 +384,10 @@ export default function BackupsPage() {
               setRunning(true);
               setConfirmRun(true);
             }}
-            disabled={running || currentSettings?.dir === ''}
+            disabled={running || inProgress || !configured}
             data-testid="run-backup"
           >
-            Back up now
+            {inProgress ? 'Backing up…' : 'Back up now'}
           </button>
         }
       />
@@ -437,10 +406,36 @@ export default function BackupsPage() {
       )}
 
       {currentSettings && (
-        <BackupFolderSection settings={currentSettings} onSaved={setSavedSettings} />
+        <div className="backup-settings">
+          <BackupDestinationSection
+            settings={currentSettings}
+            drives={drives.data}
+            onSaved={(next) => {
+              setSavedSettings(next);
+              status.reload();
+            }}
+          />
+          <BackupScheduleSection
+            settings={currentSettings}
+            status={schedulerStatus}
+            onSaved={(next) => {
+              setSavedSettings(next);
+              status.reload();
+            }}
+          />
+          <BackupTriggersSection
+            settings={currentSettings}
+            status={schedulerStatus}
+            onSaved={setSavedSettings}
+          />
+          <p className="muted backup-folder-hint">
+            Keeps the {currentSettings.keep} most recent backups
+            {currentSettings.encrypted ? ', encrypted with the server passphrase' : ''}.
+          </p>
+        </div>
       )}
 
-      {latest?.same_device && (
+      {latest?.same_device && !latest.remote && (
         <p className="muted backups-warning" data-testid="backup-same-device">
           The most recent backup is on the same device as your libraries. It protects against
           accidental deletion, not against losing the machine — point the backup destination at
@@ -451,7 +446,7 @@ export default function BackupsPage() {
       {backups.error && <ErrorState message={backups.error} onRetry={backups.reload} />}
       {backups.loading && <LoadingState label="Loading backups…" />}
 
-      {backups.data !== null && backups.data.length === 0 && (
+      {list !== null && list.length === 0 && (
         <EmptyState title="No backups yet" testId="backups-empty">
           <p className="muted">
             Nothing has been backed up. A first run copies every indexed file; later runs skip what
@@ -460,7 +455,7 @@ export default function BackupsPage() {
         </EmptyState>
       )}
 
-      {backups.data !== null && backups.data.length > 0 && (
+      {list !== null && list.length > 0 && (
         <table className="backup-table" data-testid="backups-table">
           <caption className="visually-hidden">
             Backups with their status, destination, size, and when they ran
@@ -476,7 +471,7 @@ export default function BackupsPage() {
             </tr>
           </thead>
           <tbody>
-            {backups.data.map((record) => (
+            {list.map((record) => (
               <tr key={record.id} className="backup-row">
                 <th scope="row">
                   <time dateTime={record.started_at}>
@@ -489,7 +484,12 @@ export default function BackupsPage() {
                 <td className="backup-destination">
                   <code>{record.destination}</code>
                   {record.encrypted && <span className="tag-chip">encrypted</span>}
-                  {record.same_device && <span className="tag-chip">same device</span>}
+                  {record.same_device && !record.remote && (
+                    <span className="tag-chip">same device</span>
+                  )}
+                  {record.reason && REASON_LABEL[record.reason] && (
+                    <span className="tag-chip">{REASON_LABEL[record.reason]}</span>
+                  )}
                 </td>
                 <td>{record.files}</td>
                 <td>{formatBytes(record.stored_bytes)}</td>
@@ -515,7 +515,7 @@ export default function BackupsPage() {
           onClose={() => setDetailId(null)}
           onRestored={() => {
             setNotice('Restore started.');
-            backups.reload();
+            reloadAll();
             setDetailId(null);
           }}
         />
@@ -529,9 +529,9 @@ export default function BackupsPage() {
         error={error}
         message={
           <p>
-            This copies every indexed file from every library into the configured destination. It
-            runs synchronously, so a large library can take a while. Files already present at the
-            destination are skipped.
+            This copies every indexed file from every library to the configured destination. It runs
+            in the background, so you can leave this page; files the last backup already holds are
+            not copied again.
           </p>
         }
         onCancel={() => {
