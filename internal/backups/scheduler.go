@@ -46,7 +46,9 @@ func (m *Manager) loop(ctx context.Context) {
 		case <-m.wake:
 			sizeCheckAt = time.Now()
 		case <-m.trigger:
-			m.runLogged(ctx, ReasonManual, 4*time.Hour)
+			// runLogged has already logged the outcome; a manual trigger is
+			// not retried.
+			_ = m.runLogged(ctx, ReasonManual, 4*time.Hour)
 		}
 
 		now := time.Now()
