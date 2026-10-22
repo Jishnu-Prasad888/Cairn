@@ -210,6 +210,63 @@ func (s *FileStore) GetByID(ctx context.Context, id string) (*File, error) {
 	return f, nil
 }
 
+// GetByIDs returns the files with the given IDs, in no particular order;
+// unknown IDs are left out.
+func (s *FileStore) GetByIDs(ctx context.Context, ids []string) ([]*File, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return s.queryFiles(ctx, "WHERE id IN ("+placeholders(len(ids))+")", stringArgs(ids)...)
+}
+
+// Colors returns the placeholder colour ("#rrggbb") of each of ids that has
+// one: a photo's average colour, which the grid paints while its thumbnail
+// loads. Files without one (not processed yet, or no picture) are left out.
+func (s *FileStore) Colors(ctx context.Context, ids []string) (map[string]string, error) {
+	out := make(map[string]string, len(ids))
+	// SQLite caps a statement's parameters; listings are pages of at most a
+	// few hundred, but stay well under the limit regardless.
+	const chunk = 500
+	for start := 0; start < len(ids); start += chunk {
+		part := ids[start:min(start+chunk, len(ids))]
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT file_id, color FROM media_metadata
+			  WHERE color IS NOT NULL AND color != '' AND file_id IN (`+placeholders(len(part))+`)`,
+			stringArgs(part)...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id, color string
+			if err := rows.Scan(&id, &color); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[id] = color
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
+}
+
+func stringArgs(values []string) []any {
+	args := make([]any, len(values))
+	for i, v := range values {
+		args[i] = v
+	}
+	return args
+}
+
 // GetByRelPath returns a single file by its relative path.
 func (s *FileStore) GetByRelPath(ctx context.Context, relPath string) (*File, error) {
 	row := s.db.QueryRowContext(ctx,

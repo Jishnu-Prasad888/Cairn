@@ -768,9 +768,39 @@ video.viewer-media {
   }
 }
 
+/* Phones: the top keeps close, the title and "more"; the everyday actions sit
+   along the bottom, spread for thumbs, with the caption and filmstrip above. */
+.viewer-actionbar {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: calc(var(--z-raised) + 1);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  height: calc(56px + env(safe-area-inset-bottom));
+  padding: 0 var(--space-2) env(safe-area-inset-bottom);
+  background: color-mix(in srgb, var(--viewer-background) 72%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.viewer-actionbar .viewer-tool {
+  width: 48px;
+  height: 48px;
+}
+
 @media (max-width: 599px) {
-  .viewer-toolbar .viewer-tool[aria-label='Share'],
-  .viewer-toolbar .viewer-tool[aria-label='Download'] {
+  .viewer-bottom {
+    bottom: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: var(--space-2);
+  }
+
+  .viewer-toolbar {
+    gap: var(--space-1);
+    padding-left: var(--space-1);
+  }
+
+  /* While the details sheet is up it owns the bottom of the screen. */
+  .viewer-modal.panel-open .viewer-actionbar {
     display: none;
   }
 }
@@ -911,4 +941,11 @@ video.viewer-media {
 
 .viewer-stage[data-video='true'] video.viewer-media {
   max-height: 100%;
+}
+
+@media (max-width: 599px) {
+  /* The strip sits on the phone's action bar, so the video clears both. */
+  .viewer-stage[data-video='true'] {
+    bottom: calc(var(--viewer-bottom-h, 0px) + 56px + env(safe-area-inset-bottom));
+  }
 }

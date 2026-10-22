@@ -28,6 +28,7 @@ import { MediaTile } from './MediaTile';
 import {
   type Grouping,
   type GridLayout,
+  GRID_DENSITIES,
   groupFiles,
   gridMetrics,
   layoutGrid,
@@ -36,6 +37,7 @@ import {
   visibleRows,
 } from './layout';
 import { type MasonryLayout, layoutMasonry, masonryMetrics, moveMasonryFocus } from './masonry';
+import { useGridGestures } from './useGridGestures';
 import type { Selection } from './useSelection';
 import './MediaGrid.css';
 
@@ -64,8 +66,17 @@ function cellBounds(layout: Layout, index: number): { top: number; height: numbe
 
 /** Width assumed before the container has been measured (and in jsdom). */
 const FALLBACK_WIDTH = 1024;
-/** Rows rendered beyond the viewport, in px, so fast scrolling stays filled. */
-const OVERSCAN = 800;
+/** Rendered beyond the viewport, in px, so fast scrolling stays filled: about
+ * three rows of tiles, within these bounds. Fixed pixels would mount a
+ * thousand tiny tiles once the grid is zoomed far out. */
+const OVERSCAN_MIN = 300;
+const OVERSCAN_MAX = 800;
+
+function overscanFor(layout: Layout): number {
+  const tile =
+    layout.kind === 'square' ? layout.layout.metrics.tileSize : layout.layout.metrics.columnWidth;
+  return Math.min(OVERSCAN_MAX, Math.max(OVERSCAN_MIN, tile * 3));
+}
 /** Start fetching the next page this far before the end. */
 const PREFETCH_MARGIN = '1200px';
 
@@ -118,6 +129,12 @@ export function MediaGrid({
   const [focusIndex, setFocusIndex] = useState(0);
   const pendingFocus = useRef<number | null>(null);
 
+  const { density, takePinchAnchor, onLongPress } = useGridGestures({
+    containerRef,
+    files,
+    selection,
+  });
+
   const groups = useMemo(() => groupFiles(files, grouping), [files, grouping]);
   // A date heading's files, by the heading's layout key, for "select this day".
   const groupItems = useMemo(
@@ -126,21 +143,31 @@ export function MediaGrid({
   );
   const layout: Layout = useMemo(() => {
     const width = box.width || FALLBACK_WIDTH;
+    const target = targetTileSize(width) * (GRID_DENSITIES[density] ?? 1);
     if (masonry) {
       return {
         kind: 'masonry',
-        layout: layoutMasonry(groups, masonryMetrics(width, box.gap, targetTileSize(width))),
+        layout: layoutMasonry(groups, masonryMetrics(width, box.gap, target)),
       };
     }
-    return { kind: 'square', layout: layoutGrid(groups, gridMetrics(width, box.gap)) };
-  }, [groups, box, masonry]);
+    return { kind: 'square', layout: layoutGrid(groups, gridMetrics(width, box.gap, target)) };
+  }, [groups, box, masonry, density]);
 
   // Scroll handlers read the latest layout through a ref, synced before the
   // range is recomputed below.
   const layoutRef = useRef(layout);
   useLayoutEffect(() => {
     layoutRef.current = layout;
-  }, [layout]);
+    // After a pinch re-flows the grid, scroll so the tile that was under the
+    // fingers is back where it was on screen.
+    const anchor = takePinchAnchor();
+    const el = containerRef.current;
+    if (!anchor || !el) return;
+    const bounds = cellBounds(layout, anchor.index);
+    if (!bounds) return;
+    const containerTop = el.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: containerTop + bounds.top - anchor.screenTop });
+  }, [layout, takePinchAnchor]);
 
   // Track the container's width; tiles resize to fill each row exactly.
   useLayoutEffect(() => {
@@ -167,14 +194,15 @@ export function MediaGrid({
     const viewTop = -el.getBoundingClientRect().top;
     const viewBottom = viewTop + window.innerHeight;
     const current = layoutRef.current;
+    const overscan = overscanFor(current);
     if (current.kind === 'square') {
-      const next = visibleRows(current.layout.rows, viewTop, viewBottom, OVERSCAN);
+      const next = visibleRows(current.layout.rows, viewTop, viewBottom, overscan);
       setRange((prev) => (prev[0] === next[0] && prev[1] === next[1] ? prev : next));
       return;
     }
-    const headers = visibleRows(current.layout.headers, viewTop, viewBottom, OVERSCAN);
+    const headers = visibleRows(current.layout.headers, viewTop, viewBottom, overscan);
     const columns = current.layout.columns.map((col) =>
-      visibleRows(col, viewTop, viewBottom, OVERSCAN),
+      visibleRows(col, viewTop, viewBottom, overscan),
     );
     setMasonryRange((prev) =>
       prev.headers[0] === headers[0] &&
@@ -354,19 +382,18 @@ export function MediaGrid({
     const [first, last] = range;
     const visible = last >= first ? layout.layout.rows.slice(first, last + 1) : [];
     const { tileSize, gap } = layout.layout.metrics;
-    content = visible.map((row) =>
-      row.kind === 'header' ? (
-        heading(row.key, row.label, {
-          transform: `translateY(${row.top}px)`,
-          height: row.height,
-        })
-      ) : (
-        <div
-          key={row.key}
-          className="media-row"
-          style={{ transform: `translateY(${row.top}px)`, height: tileSize }}
-        >
-          {row.items.map((file, j) => {
+    // Tiles are positioned directly rather than inside row elements, so a
+    // zoom that re-flows the rows moves each tile instead of remounting it
+    // (which would reload its image).
+    content = visible.flatMap((row) =>
+      row.kind === 'header'
+        ? [
+            heading(row.key, row.label, {
+              transform: `translateY(${row.top}px)`,
+              height: row.height,
+            }),
+          ]
+        : row.items.map((file, j) => {
             const index = row.startIndex + j;
             return (
               <MediaTile
@@ -374,7 +401,10 @@ export function MediaGrid({
                 libraryId={libraryId}
                 file={file}
                 index={index}
-                style={{ width: tileSize, height: tileSize, left: j * (tileSize + gap) }}
+                top={row.top}
+                left={j * (tileSize + gap)}
+                width={tileSize}
+                height={tileSize}
                 selected={selection?.isSelected(file.id) ?? false}
                 selectable={selectable}
                 selecting={selecting}
@@ -382,13 +412,12 @@ export function MediaGrid({
                 tabbable={index === safeFocus}
                 onActivate={onActivate}
                 onToggleSelect={onToggleSelect}
+                onLongPress={onLongPress}
                 onFocusTile={setFocusIndex}
                 onContextMenu={onContextMenu}
               />
             );
-          })}
-        </div>
-      ),
+          }),
     );
   } else {
     const [hf, hl] = masonryRange.headers;
@@ -408,7 +437,10 @@ export function MediaGrid({
             libraryId={libraryId}
             file={cell.file}
             index={cell.index}
-            style={{ width: cell.width, height: cell.height, top: cell.top, left: cell.left }}
+            top={cell.top}
+            left={cell.left}
+            width={cell.width}
+            height={cell.height}
             selected={selection?.isSelected(cell.file.id) ?? false}
             selectable={selectable}
             selecting={selecting}
@@ -416,6 +448,7 @@ export function MediaGrid({
             tabbable={cell.index === safeFocus}
             onActivate={onActivate}
             onToggleSelect={onToggleSelect}
+            onLongPress={onLongPress}
             onFocusTile={setFocusIndex}
             onContextMenu={onContextMenu}
           />

@@ -23,7 +23,7 @@ const withSrc = () => urls.filter((u) => screen.getByTestId(u).getAttribute('src
 afterEach(resetThumbnailQueue);
 
 describe('thumbnail queue', () => {
-  it('downloads at most four at once and hands slots on', () => {
+  it('downloads at most five at once and hands slots on', () => {
     render(
       <>
         {urls.map((u) => (
@@ -31,12 +31,12 @@ describe('thumbnail queue', () => {
         ))}
       </>,
     );
-    expect(withSrc()).toEqual(urls.slice(0, 4));
+    expect(withSrc()).toEqual(urls.slice(0, 5));
 
     act(() => {
       fireEvent.load(screen.getByTestId('/t/0'));
     });
-    expect(withSrc()).toEqual(urls.slice(0, 5));
+    expect(withSrc()).toEqual(urls.slice(0, 6));
   });
 
   it('frees the slot and the place in line of a tile that goes away', () => {

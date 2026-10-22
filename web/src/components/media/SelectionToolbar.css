@@ -117,3 +117,70 @@
     height: var(--touch-target);
   }
 }
+
+/* Phones: the count and "clear" stay at the top, and the actions move to a bar
+   at the bottom, over the navigation, with their names under the icons —
+   where a thumb already is. */
+@media (max-width: 599px) {
+  .selection-bar {
+    /* Opacity only: a transform here would make the fixed action bar below
+       position itself against this bar instead of the screen. */
+    animation-name: selection-fade;
+  }
+
+  .selection-actions {
+    position: fixed;
+    inset: auto 0 0 0;
+    justify-content: space-around;
+    gap: 0;
+    height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+    padding: 0 var(--space-1) env(safe-area-inset-bottom);
+    background: var(--color-surface-elevated);
+    border-top: 1px solid var(--color-border);
+    box-shadow: var(--shadow-2);
+    animation: selection-up var(--duration-base) var(--ease-out);
+  }
+
+  .selection-action,
+  .selection-action:hover {
+    flex: 1 0 64px;
+    flex-direction: column;
+    gap: 2px;
+    width: auto;
+    height: 100%;
+    padding: 0 var(--space-1);
+    font-size: var(--font-size-xs);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .selection-action:active {
+    background: var(--color-fill-hover);
+  }
+
+  .selection-action-label {
+    position: static;
+    display: -webkit-box;
+    width: auto;
+    height: auto;
+    overflow: hidden;
+    clip-path: none;
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+
+@keyframes selection-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes selection-up {
+  from {
+    transform: translateY(100%);
+  }
+}

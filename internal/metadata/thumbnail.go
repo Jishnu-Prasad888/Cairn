@@ -34,10 +34,10 @@ func ThumbPath(cairnDir, fileID string) string {
 }
 
 // GenerateThumbnail creates a JPEG thumbnail from srcPath and writes it to
-// ThumbPath(cairnDir, fileID). Photos are decoded directly; videos use their
-// first frame, extracted with ffmpeg when it is installed. The original file
-// is never modified; when keys are enabled the on-disk thumbnail is sealed
-// with the at-rest key. Returns (true, nil) when the thumbnail was written,
+// ThumbPath(cairnDir, fileID). Photos are decoded directly, except AVIF and
+// HEIC, which go through ffmpeg; videos use their first frame, extracted with
+// ffmpeg too. The original file is never modified; when keys are enabled the
+// on-disk thumbnail is sealed with the at-rest key. Returns (true, nil) when the thumbnail was written,
 // (false, nil) when the file has no thumbnail this server can make.
 func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (bool, error) {
 	if media.DetectMediaType(srcPath) == media.MediaTypeVideo {
@@ -52,6 +52,17 @@ func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (boo
 			return false, nil
 		}
 		if err := writeThumb(frame, cairnDir, fileID, keys); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	if stillFramesAvailable(srcPath) {
+		img, err := extractStill(context.Background(), srcPath)
+		if err != nil {
+			return false, nil // not decodable after all; skip like any other
+		}
+		if err := writeThumb(img, cairnDir, fileID, keys); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -94,12 +105,23 @@ func writeRendition(img image.Image, destPath string, quality int, keys *crypto.
 	}
 	data := keys.Seal(buf.Bytes())
 
-	tmp := destPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	// A temp file of its own: the background worker and a request can make
+	// the same rendition at once, and with a shared name one renamed the
+	// other's file away mid-write.
+	tmp, err := os.CreateTemp(filepath.Dir(destPath), filepath.Base(destPath)+".*.tmp")
+	if err != nil {
 		return fmt.Errorf("write rendition: %w", err)
 	}
-	if err := os.Rename(tmp, destPath); err != nil {
-		_ = os.Remove(tmp)
+	_, err = tmp.Write(data)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("write rendition: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), destPath); err != nil {
+		_ = os.Remove(tmp.Name())
 		return fmt.Errorf("commit rendition: %w", err)
 	}
 	return nil

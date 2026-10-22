@@ -485,6 +485,16 @@
     width: var(--touch-target);
     padding: 0;
   }
+
+  /* Scrolling down slides the top bar away so photos get the whole screen;
+     scrolling up brings it straight back. */
+  .topbar {
+    transition: transform var(--duration-slow) var(--ease-standard);
+  }
+
+  .app-shell.is-scrolled-down .topbar {
+    transform: translateY(-100%);
+  }
 }
 
 @keyframes fade-in {

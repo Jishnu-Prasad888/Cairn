@@ -129,6 +129,16 @@ func (m *IndexManager) StartLibraryWorker(ctx context.Context, libraryID, root s
 		w.Register(jobs.KindProcessMedia, func(jctx context.Context, job *jobs.Job) error {
 			return p.Handle(metadata.WithDB(jctx, db), job)
 		})
+		w.Register(jobs.KindRenditions, func(jctx context.Context, job *jobs.Job) error {
+			more, err := p.HandleRenditions(metadata.WithDB(jctx, db), job)
+			if err == nil && more {
+				m.enqueueRenditions(jctx, q, db, job.Payload["cairn_dir"], true)
+			}
+			return err
+		})
+		// A library processed by an older build catches up in the background,
+		// with nobody having to rescan it.
+		m.enqueueRenditions(wctx, q, db, filepath.Join(root, ".cairn"), false)
 	}
 	handle := &workerHandle{cancel: cancel, token: &struct{}{}}
 	m.workers[libraryID] = handle
@@ -303,6 +313,9 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 			if err := os.Remove(metadata.ThumbPath(cairnDir, change.File.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				m.logger.Warn("remove outdated thumbnail", "file_id", change.File.ID, "error", err)
 			}
+			if err := metadata.RemoveSmallThumb(cairnDir, change.File.ID); err != nil {
+				m.logger.Warn("remove outdated small thumbnail", "file_id", change.File.ID, "error", err)
+			}
 			if err := os.Remove(metadata.PreviewPath(cairnDir, change.File.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				m.logger.Warn("remove outdated preview", "file_id", change.File.ID, "error", err)
 			}
@@ -323,8 +336,34 @@ func (m *IndexManager) RunScanJob(ctx context.Context, job *jobs.Job) error {
 	if enqueued > 0 {
 		m.logger.Info("enqueued media processing jobs", "library_id", libraryID, "count", enqueued)
 	}
+	if m.mediaProcessor != nil {
+		m.enqueueRenditions(ctx, q, ldb.DB(), cairnDir, false)
+	}
 	if m.AfterScan != nil {
 		m.AfterScan(libraryID, root)
 	}
 	return nil
+}
+
+// enqueueRenditions queues a renditions job when files still lack their small
+// thumbnail and colour and none is queued already. next is set by a finishing
+// renditions job continuing its own work (it is still "running" itself, so
+// the active check would always see it).
+func (m *IndexManager) enqueueRenditions(ctx context.Context, q *jobs.Queue, db *sql.DB, cairnDir any, next bool) {
+	if !next {
+		if active, err := q.HasActive(ctx, jobs.KindRenditions); err != nil || active {
+			return
+		}
+		pending, err := metadata.PendingRenditions(ctx, db)
+		if err != nil {
+			m.logger.Warn("check pending renditions", "error", err)
+			return
+		}
+		if !pending {
+			return
+		}
+	}
+	if _, err := q.Enqueue(ctx, jobs.KindRenditions, map[string]any{"cairn_dir": cairnDir}); err != nil {
+		m.logger.Warn("enqueue renditions job", "error", err)
+	}
 }

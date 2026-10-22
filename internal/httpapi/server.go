@@ -265,6 +265,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("DELETE /api/v1/libraries/{id}/files/{fileID}/permanent", s.withAuth(allowAny, s.handlePermanentDeleteFile))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/metadata", s.withAuth(allowAny, s.handleGetFileMetadata))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handleGetThumbnail))
+		mux.Handle("GET /api/v1/libraries/{id}/thumbnails", s.withAuth(allowAny, s.handleThumbnailBatch))
 		mux.Handle("PUT /api/v1/libraries/{id}/files/{fileID}/thumbnail", s.withAuth(allowAny, s.handlePutThumbnail))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/preview", s.withAuth(allowAny, s.handleGetPreview))
 

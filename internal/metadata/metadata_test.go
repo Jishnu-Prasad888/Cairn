@@ -2,12 +2,14 @@ package metadata_test
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
@@ -177,6 +179,85 @@ func TestGenerateThumbnailPNG(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected PNG thumbnail to be generated")
+	}
+}
+
+func TestGenerateThumbnailWebP(t *testing.T) {
+	dir := t.TempDir()
+	cairnDir := filepath.Join(dir, ".cairn")
+
+	ok, err := metadata.GenerateThumbnail(filepath.Join("testdata", "photo.webp"), cairnDir, "file-id-webp", crypto.NewKeys(""))
+	if err != nil {
+		t.Fatalf("GenerateThumbnail: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected WebP thumbnail to be generated")
+	}
+
+	info, err := metadata.ExtractFromFile(filepath.Join("testdata", "photo.webp"))
+	if err != nil {
+		t.Fatalf("ExtractFromFile: %v", err)
+	}
+	if info.Width != 640 || info.Height != 480 {
+		t.Errorf("dimensions = %dx%d, want 640x480", info.Width, info.Height)
+	}
+}
+
+func TestGenerateThumbnailAVIF(t *testing.T) {
+	if !metadata.VideoFramesAvailable() {
+		t.Skip("AVIF thumbnails need ffmpeg")
+	}
+	cairnDir := filepath.Join(t.TempDir(), ".cairn")
+
+	ok, err := metadata.GenerateThumbnail(filepath.Join("testdata", "photo.avif"), cairnDir, "file-id-avif", crypto.NewKeys(""))
+	if err != nil || !ok {
+		t.Fatalf("GenerateThumbnail = %v, %v; want a thumbnail", ok, err)
+	}
+	data, _, err := metadata.ReadThumb(cairnDir, "file-id-avif", crypto.NewKeys(""))
+	if err != nil {
+		t.Fatalf("ReadThumb: %v", err)
+	}
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode thumbnail: %v", err)
+	}
+	if cfg.Width != metadata.ThumbnailSize || cfg.Height != 300 {
+		t.Errorf("thumbnail = %dx%d, want %dx300", cfg.Width, cfg.Height, metadata.ThumbnailSize)
+	}
+}
+
+// The background worker and a request can make the same thumbnail at once;
+// both must succeed and leave a whole JPEG.
+func TestGenerateThumbnailConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	cairnDir := filepath.Join(dir, ".cairn")
+	srcPath := filepath.Join(dir, "photo.png")
+	makePNG(t, srcPath, 64, 48)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for range 16 {
+		wg.Go(func() {
+			if ok, err := metadata.GenerateThumbnail(srcPath, cairnDir, "same", crypto.NewKeys("")); err != nil || !ok {
+				errs <- fmt.Errorf("ok=%v err=%v", ok, err)
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+
+	data, _, err := metadata.ReadThumb(cairnDir, "same", crypto.NewKeys(""))
+	if err != nil {
+		t.Fatalf("ReadThumb: %v", err)
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(data)); err != nil {
+		t.Errorf("thumbnail is not a whole JPEG: %v", err)
+	}
+	if tmps, _ := filepath.Glob(filepath.Join(cairnDir, metadata.ThumbsDirName, "*.tmp")); len(tmps) > 0 {
+		t.Errorf("temp files left behind: %v", tmps)
 	}
 }
 

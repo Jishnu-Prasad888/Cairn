@@ -1,0 +1,71 @@
+/*
+ * The fast-scroll thumb: a tab hugging the right edge, out of the way until the
+ * page moves, with a month bubble beside it while it is dragged.
+ */
+
+.fast-scroller {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-slow) var(--ease-standard);
+}
+
+.fast-scroller.is-visible {
+  opacity: 1;
+}
+
+.fast-scroller.is-visible .fast-scroller-thumb {
+  pointer-events: auto;
+}
+
+.fast-scroller-thumb {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 48px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-right: none;
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+  box-shadow: var(--shadow-2);
+  touch-action: none;
+  cursor: grab;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    width var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.fast-scroller.is-dragging .fast-scroller-thumb {
+  width: 44px;
+  color: var(--color-on-primary);
+  background: var(--color-primary-strong);
+  border-color: var(--color-primary-strong);
+  cursor: grabbing;
+}
+
+.fast-scroller-label {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-3);
+  animation: fade-in var(--duration-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fast-scroller,
+  .fast-scroller-thumb {
+    transition: none;
+  }
+}

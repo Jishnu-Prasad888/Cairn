@@ -32,7 +32,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 10
+	SchemaVersion = 11
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB or AcquireDB to
@@ -211,6 +211,9 @@ func migrate(db *sql.DB) error {
 	if err := addIndexedFileMediaType(db); err != nil {
 		return err
 	}
+	if err := addMediaMetadataColor(db); err != nil {
+		return err
+	}
 	return upgradeMemories(db)
 }
 
@@ -221,6 +224,19 @@ func backfill(db *sql.DB) error {
 		return err
 	}
 	return migrateLegacyMemoryBodies(db)
+}
+
+// addMediaMetadataColor adds media_metadata.color — a photo's average colour,
+// which the grid paints while the thumbnail loads — to a library database
+// created before it existed. Rows start without one; the background renditions
+// job fills them in (see indexer).
+func addMediaMetadataColor(db *sql.DB) error {
+	has, err := columnExists(db, "media_metadata", "color")
+	if err != nil || has {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE media_metadata ADD COLUMN color TEXT`)
+	return err
 }
 
 // addIndexedFileMediaType backfills indexed_files.media_type on a library

@@ -53,7 +53,8 @@ The server database and state live in `$XDG_DATA_HOME/cairn`
 ### Requirements
 
 - Go and Node (to build from source).
-- **ffmpeg** (recommended): Cairn uses it to make video thumbnails. Without it,
+- **ffmpeg** (recommended): Cairn uses it to make video thumbnails, and AVIF
+  and HEIC photo thumbnails (HEIC needs ffmpeg 7.1 or newer). Without it,
   the browser has to decode each video itself, which fails for formats it
   cannot play (for example HEVC/x265 `.mkv`), and those videos show no
   preview. Install it with `sudo apt install ffmpeg` (Debian/Ubuntu),

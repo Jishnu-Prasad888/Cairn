@@ -124,10 +124,19 @@ export interface GridMetrics {
 
 /** The tile size a grid aims for at a given container width. */
 export function targetTileSize(width: number): number {
-  if (width < BREAKPOINTS.compact) return 120;
-  if (width < BREAKPOINTS.medium) return 160;
-  return 196;
+  // Four across a typical phone, the way a camera roll reads.
+  if (width < BREAKPOINTS.compact) return 88;
+  if (width < BREAKPOINTS.medium) return 128;
+  return 150;
 }
+
+/**
+ * Zooming the grid (pinch, Ctrl + wheel, Ctrl + plus/minus) steps through these
+ * multipliers of the target tile size: bigger tiles (fewer columns) at the
+ * start, smaller at the end. `DEFAULT_DENSITY` is the 1x step.
+ */
+export const GRID_DENSITIES = [2.2, 1.8, 1.5, 1.25, 1, 0.82, 0.68, 0.56, 0.46] as const;
+export const DEFAULT_DENSITY = 4;
 
 /**
  * How many square tiles fit across `width`, and how big each one is so the row

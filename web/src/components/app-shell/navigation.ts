@@ -45,10 +45,14 @@ export const MANAGE_NAV: NavItem[] = [
 
 export const SETTINGS_NAV: NavItem = { to: '/settings', label: 'Settings', icon: 'settings' };
 
-/** The four destinations a phone shows in its bottom bar; "More" holds the rest. */
+/**
+ * The four destinations a phone shows in its bottom bar; "More" holds the rest
+ * (Settings is there too, and in the account menu). Search is a tab because
+ * phones have no room for the top bar's search box.
+ */
 export const MOBILE_NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: 'home', end: true },
   { to: '/photos', label: 'Photos', icon: 'photo' },
+  { to: '/search', label: 'Search', icon: 'search' },
   { to: '/albums', label: 'Albums', icon: 'album' },
-  { to: '/settings', label: 'Settings', icon: 'settings' },
 ];

@@ -30,6 +30,7 @@ import { addFavorite, getFileMetadata, listFavorites, removeFavorite } from '../
 import type { FileMetadata, FileSummary } from '../api/types';
 import { formatDateTime } from '../lib/dates';
 import { useFocusTrap } from '../lib/focusTrap';
+import { COMPACT_QUERY, useMediaQuery } from '../lib/useMediaQuery';
 import { VideoScrubPreview } from './viewer/VideoScrubPreview';
 import { FileNote } from './FileNote';
 import { downloadUrl, previewUrl, thumbnailUrl, mediaTypeIcon } from './media';
@@ -155,6 +156,11 @@ const CHROME_IDLE_MS = 3500;
 /** In fullscreen, the pointer must reach this close to the top to show controls. */
 const TOP_REVEAL_PX = 90;
 const SWIPE_PX = 50;
+/** A touch that moves less than this, and lifts within TAP_MS, is a tap. */
+const TAP_SLOP_PX = 10;
+const TAP_MS = 300;
+/** A second tap within this long is a double tap (zoom), not two single taps. */
+const DOUBLE_TAP_MS = 260;
 const NEAR_END = 3;
 
 const PANEL_STORAGE_KEY = 'cairn.viewer.panel';
@@ -227,7 +233,10 @@ export function ViewerModal({
   // drawn underneath it.
   const [bottomH, setBottomH] = useState(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const swipeRef = useRef<{ x: number; y: number } | null>(null);
+  const swipeRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Phones move the actions to a bar along the bottom, within thumb reach.
+  const compact = useMediaQuery(COMPACT_QUERY);
 
   const index = siblings.findIndex((f) => f.id === file.id);
   const position = index >= 0 ? index + 1 : 0;
@@ -331,6 +340,7 @@ export function ViewerModal({
     armIdle();
     return () => {
       if (idleRef.current) clearTimeout(idleRef.current);
+      if (tapTimer.current) clearTimeout(tapTimer.current);
     };
   }, [armIdle, file.id]);
 
@@ -595,7 +605,9 @@ export function ViewerModal({
   const onTouchStart = (e: React.TouchEvent) => {
     const touch = e.touches[0];
     swipeRef.current =
-      touch && e.touches.length === 1 ? { x: touch.clientX, y: touch.clientY } : null;
+      touch && e.touches.length === 1
+        ? { x: touch.clientX, y: touch.clientY, t: Date.now() }
+        : null;
   };
   const onTouchEnd = (e: React.TouchEvent) => {
     const start = swipeRef.current;
@@ -604,6 +616,27 @@ export function ViewerModal({
     if (!start || !touch || zoom > 1) return;
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
+    // A tap on the photo shows or hides the controls. It waits a moment so a
+    // double tap (zoom) does not flash them; a video keeps its own taps.
+    if (
+      Math.hypot(dx, dy) < TAP_SLOP_PX &&
+      Date.now() - start.t < TAP_MS &&
+      !(e.target instanceof Element && e.target.closest('video'))
+    ) {
+      if (tapTimer.current) {
+        clearTimeout(tapTimer.current);
+        tapTimer.current = null;
+        return;
+      }
+      tapTimer.current = setTimeout(() => {
+        tapTimer.current = null;
+        setChromeHidden((hidden) => {
+          if (hidden) armIdle();
+          return !hidden;
+        });
+      }, DOUBLE_TAP_MS);
+      return;
+    }
     if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
       if (dx < 0) goNext();
       else goPrev();
@@ -804,6 +837,38 @@ export function ViewerModal({
     </button>
   );
 
+  // The actions a phone moves to the bottom bar; the desktop shows them in
+  // the top toolbar.
+  const favoriteTool = tool(
+    'star',
+    favorite ? 'Remove from favorites' : 'Add to favorites',
+    () => void toggleFavorite(),
+    {
+      pressed: favorite === true,
+      disabled: favorite === null || busy,
+      testId: 'viewer-favorite',
+    },
+  );
+  const shareTool = tool('share', 'Share', () => openPanelAt('share'));
+  const detailsTool = (
+    <button
+      type="button"
+      className={panelOpen ? 'viewer-tool active' : 'viewer-tool'}
+      onClick={togglePanel}
+      aria-expanded={panelOpen}
+      aria-controls="viewer-panel"
+      aria-label="Details"
+      title="Details (I)"
+      data-testid="toggle-panel"
+    >
+      <Icon name="info" />
+    </button>
+  );
+  const trashTool = tool('trash', 'Move to trash', () => onRequestAction('trash', file), {
+    disabled: busy,
+    testId: 'viewer-trash',
+  });
+
   return (
     <div
       className="viewer-backdrop"
@@ -835,7 +900,10 @@ export function ViewerModal({
           if (isFullscreen && chromeHidden && e.clientY > TOP_REVEAL_PX) return;
           revealChrome();
         }}
-        onTouchStart={revealChrome}
+        onTouchStart={(e) => {
+          // Touches on the photo itself toggle the controls (see onTouchEnd).
+          if (!(e.target instanceof Node && stageRef.current?.contains(e.target))) revealChrome();
+        }}
         onKeyDown={revealChrome}
       >
         <header className="viewer-toolbar viewer-chrome">
@@ -858,19 +926,21 @@ export function ViewerModal({
           </div>
 
           <div className="viewer-toolbar-actions">
-            <button
-              type="button"
-              className="viewer-tool"
-              onClick={toggleFullscreen}
-              aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
-              title={isFullscreen ? 'Exit full screen (Esc)' : 'Full screen (F)'}
-            >
-              {isFullscreen ? (
-                <Minimize size={20} aria-hidden="true" />
-              ) : (
-                <Maximize size={20} aria-hidden="true" />
-              )}
-            </button>
+            {!compact && (
+              <button
+                type="button"
+                className="viewer-tool"
+                onClick={toggleFullscreen}
+                aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+                title={isFullscreen ? 'Exit full screen (Esc)' : 'Full screen (F)'}
+              >
+                {isFullscreen ? (
+                  <Minimize size={20} aria-hidden="true" />
+                ) : (
+                  <Maximize size={20} aria-hidden="true" />
+                )}
+              </button>
+            )}
             {isVideo && (
               <label className="viewer-tool-group viewer-speed">
                 <span className="visually-hidden">Playback speed</span>
@@ -909,7 +979,7 @@ export function ViewerModal({
                 })}
               </div>
             )}
-            {isPhoto && (
+            {isPhoto && !compact && (
               <div className="viewer-tool-group" role="group" aria-label="Rotate">
                 {tool('rotate-left', 'Rotate left', () => rotate(-1), {
                   title: 'Rotate left (L)',
@@ -921,42 +991,21 @@ export function ViewerModal({
                 })}
               </div>
             )}
-            {tool(
-              'star',
-              favorite ? 'Remove from favorites' : 'Add to favorites',
-              () => void toggleFavorite(),
-              {
-                pressed: favorite === true,
-                disabled: favorite === null || busy,
-                testId: 'viewer-favorite',
-              },
+            {!compact && favoriteTool}
+            {!compact && shareTool}
+            {!compact && (
+              <a
+                className="viewer-tool"
+                href={downloadUrl(libraryId, file)}
+                download={file.name}
+                aria-label="Download"
+                title="Download"
+              >
+                <Icon name="download" />
+              </a>
             )}
-            {tool('share', 'Share', () => openPanelAt('share'))}
-            <a
-              className="viewer-tool"
-              href={downloadUrl(libraryId, file)}
-              download={file.name}
-              aria-label="Download"
-              title="Download"
-            >
-              <Icon name="download" />
-            </a>
-            <button
-              type="button"
-              className={panelOpen ? 'viewer-tool active' : 'viewer-tool'}
-              onClick={togglePanel}
-              aria-expanded={panelOpen}
-              aria-controls="viewer-panel"
-              aria-label="Details"
-              title="Details (I)"
-              data-testid="toggle-panel"
-            >
-              <Icon name="info" />
-            </button>
-            {tool('trash', 'Move to trash', () => onRequestAction('trash', file), {
-              disabled: busy,
-              testId: 'viewer-trash',
-            })}
+            {!compact && detailsTool}
+            {!compact && trashTool}
             <button
               type="button"
               className="viewer-tool"
@@ -1096,6 +1145,17 @@ export function ViewerModal({
           >
             <Icon name="chevron-right" size={28} />
           </button>
+        )}
+
+        {compact && (
+          <nav className="viewer-actionbar viewer-chrome" aria-label="Photo actions">
+            {shareTool}
+            {favoriteTool}
+            {isPhoto &&
+              tool('rotate-right', 'Rotate', () => rotate(1), { testId: 'viewer-rotate-right' })}
+            {detailsTool}
+            {trashTool}
+          </nav>
         )}
 
         <div className="viewer-bottom viewer-chrome" ref={bottomRef}>

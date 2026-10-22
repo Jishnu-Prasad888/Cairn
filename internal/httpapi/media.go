@@ -72,7 +72,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, u *auth
 		return
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{
-		"files":       toFileResponses(page.Files),
+		"files":       s.withColors(r, lib, toFileResponses(page.Files)),
 		"next_cursor": page.NextCursor,
 		"total":       page.Total,
 	})
@@ -615,6 +615,9 @@ type fileResponse struct {
 	MIMEType    string `json:"mime_type"`
 	Status      string `json:"status"`
 	ContentHash string `json:"content_hash,omitempty"`
+	// Color is the picture's average colour ("#rrggbb"), painted in the grid
+	// while the thumbnail loads. Absent until the file has been processed.
+	Color string `json:"color,omitempty"`
 }
 
 // duplicateGroupResponse is one duplicate group in the duplicates listing.
@@ -660,6 +663,33 @@ func toFileResponse(f *media.File) fileResponse {
 		Status:      string(f.Status),
 		ContentHash: f.ContentHash,
 	}
+}
+
+// withColors fills in the placeholder colour of each file in out, from the
+// library's database. Best effort: a listing without colours still works, its
+// tiles are just grey until their thumbnails arrive.
+func (s *Server) withColors(r *http.Request, lib *library.Library, out []fileResponse) []fileResponse {
+	if len(out) == 0 {
+		return out
+	}
+	db, release, err := librarydb.Acquire(lib.Root + "/.cairn")
+	if err != nil {
+		return out
+	}
+	defer release()
+	ids := make([]string, len(out))
+	for i := range out {
+		ids[i] = out[i].ID
+	}
+	colors, err := media.NewFileStore(db, lib.ID).Colors(r.Context(), ids)
+	if err != nil {
+		s.logger.Warn("read placeholder colours", "library_id", lib.ID, "error", err)
+		return out
+	}
+	for i := range out {
+		out[i].Color = colors[out[i].ID]
+	}
+	return out
 }
 
 func toFileResponses(files []*media.File) []fileResponse {

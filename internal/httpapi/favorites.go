@@ -100,7 +100,7 @@ func (s *Server) handleListFavorites(w http.ResponseWriter, r *http.Request, u *
 			CodeInternal, "Failed to list favorites.")
 		return
 	}
-	writeJSON(w, s.logger, http.StatusOK, map[string]any{"files": toFileResponses(files)})
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{"files": s.withColors(r, lib, toFileResponses(files))})
 }
 
 // writeFavoriteError maps favorites domain errors to HTTP responses.

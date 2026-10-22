@@ -7,24 +7,54 @@
  * video is marked with a small badge that never covers the subject.
  */
 
-import { memo, useRef, useState } from 'react';
-import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, PointerEvent } from 'react';
 
 import type { FileSummary } from '../../api/types';
 import { LibraryTag } from '../LibraryTag';
 import { Icon } from '../ui/Icon';
 import { thumbnailUrl, mediaTypeIcon } from '../media';
+import { thumbBatchingEnabled, thumbSizeFor, useBatchedThumb } from './thumbBatch';
 import { useQueuedImage } from './thumbnailQueue';
 import { VideoThumb } from './VideoThumb';
 
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_SLOP = 10;
+/** Waits before asking again for a thumbnail that failed to load. A failure
+ * is often passing — the server busy making it, or a dropped connection — so
+ * the tile tries again before settling on the broken-image glyph. */
+const THUMB_RETRY_MS = [2000, 8000];
+
+/** One thumbnail URL's loading state: retries made, and whether the tile is
+ * loading it, waiting to retry, or has given up. */
+interface ThumbAttempt {
+  url: string | undefined;
+  retries: number;
+  phase: 'loading' | 'waiting' | 'failed';
+}
+
+/** The small thumbnail is the same URL with `size=sm`. */
+function sized(url: string, size: 'sm' | 'md'): string {
+  return size === 'sm' ? `${url}${url.includes('?') ? '&' : '?'}size=sm` : url;
+}
+
+/** A retry is a distinct URL, so the browser asks the server again and the
+ * download queue gives it a fresh turn. */
+function withRetry(url: string, retries: number): string {
+  return retries === 0 ? url : `${url}${url.includes('?') ? '&' : '?'}retry=${retries}`;
+}
 
 export interface MediaTileProps {
   libraryId: string;
   file: FileSummary;
   index: number;
-  style: CSSProperties;
+  /** Position and size in the grid, in px. Plain numbers rather than a style
+   * object so `memo` can skip a tile whose place did not change — scrolling
+   * re-renders the grid every few rows, and only new tiles should pay. */
+  top: number;
+  left: number;
+  width: number;
+  height: number;
   selected: boolean;
   selectable: boolean;
   /** A selection is in progress: the check is always shown. */
@@ -34,6 +64,8 @@ export interface MediaTileProps {
   tabbable: boolean;
   onActivate: (file: FileSummary, index: number, event: ReactMouseEvent) => void;
   onToggleSelect: (file: FileSummary, index: number, range: boolean) => void;
+  /** A touch long-press; selects the tile (and may start a drag-select). */
+  onLongPress?: ((file: FileSummary, index: number) => void) | undefined;
   onFocusTile: (index: number) => void;
   onContextMenu?: ((file: FileSummary, x: number, y: number) => void) | undefined;
 }
@@ -42,7 +74,10 @@ function MediaTileImpl({
   libraryId,
   file,
   index,
-  style,
+  top,
+  left,
+  width,
+  height,
   selected,
   selectable,
   selecting,
@@ -50,23 +85,73 @@ function MediaTileImpl({
   tabbable,
   onActivate,
   onToggleSelect,
+  onLongPress,
   onFocusTile,
   onContextMenu,
 }: MediaTileProps) {
-  const [failed, setFailed] = useState(false);
+  const [thumbState, setThumbState] = useState<ThumbAttempt | null>(null);
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
   const longPressed = useRef(false);
 
   const isVideo = file.media_type === 'video';
-  const hasThumb = (file.media_type === 'photo' || isVideo) && !failed;
   // The file belongs to a specific library; the tile always renders for it,
   // even when the grid merged several libraries.
   const itemLibraryId = file.library_id || libraryId;
+  // Small tiles get the 256px thumbnail: a quarter of the bytes.
+  const size = thumbSizeFor(Math.max(width, height));
+  const isPhoto = file.media_type === 'photo';
+  // Photos come through the batcher first (many per request, kept on the
+  // device); one it cannot supply loads on its own below, retries and all.
+  const [batchBroken, setBatchBroken] = useState(false);
+  const batched = useBatchedThumb(
+    itemLibraryId,
+    file,
+    size,
+    isPhoto && !batchBroken && thumbBatchingEnabled(),
+  );
+  const single = batched.missing;
+  const photoUrl = isPhoto ? sized(thumbnailUrl(itemLibraryId, file), size) : undefined;
+  // A new URL (the file changed) starts over.
+  const thumb: ThumbAttempt =
+    thumbState && thumbState.url === photoUrl
+      ? thumbState
+      : { url: photoUrl, retries: 0, phase: 'loading' };
+  const failed = thumb.phase === 'failed';
+  const hasThumb = (file.media_type === 'photo' || isVideo) && !failed;
   const {
     src: thumbSrc,
     attach: attachThumb,
     settle: settleThumb,
-  } = useQueuedImage(hasThumb && !isVideo ? thumbnailUrl(itemLibraryId, file) : undefined);
+  } = useQueuedImage(
+    single && photoUrl !== undefined && thumb.phase === 'loading'
+      ? withRetry(photoUrl, thumb.retries)
+      : undefined,
+  );
+  const attachBatched = batched.attach;
+  const attachImage = useCallback(
+    (el: HTMLImageElement | null) => {
+      attachThumb(el);
+      attachBatched(el);
+    },
+    [attachThumb, attachBatched],
+  );
+  // While a zoom swaps the thumbnail size, keep the old picture up until the
+  // new one is here rather than flashing the tile empty.
+  const freshSrc = batched.src ?? thumbSrc;
+  const [lastSrc, setLastSrc] = useState(freshSrc);
+  if (freshSrc && freshSrc !== lastSrc) setLastSrc(freshSrc);
+  // Only while the batcher fetches the new size: a failed single download
+  // must clear, so its retry (or the broken glyph) shows.
+  const shownSrc = freshSrc ?? (single ? undefined : lastSrc);
+
+  useEffect(() => {
+    if (thumbState?.phase !== 'waiting' || thumbState.url !== photoUrl) return;
+    const timer = setTimeout(
+      () => setThumbState({ ...thumbState, retries: thumbState.retries + 1, phase: 'loading' }),
+      THUMB_RETRY_MS[thumbState.retries],
+    );
+    return () => clearTimeout(timer);
+  }, [thumbState, photoUrl]);
 
   const cancelPress = () => {
     if (press.current) clearTimeout(press.current.timer);
@@ -86,7 +171,8 @@ function MediaTileImpl({
         longPressed.current = true;
         press.current = null;
         navigator.vibrate?.(10);
-        onToggleSelect(file, index, false);
+        if (onLongPress) onLongPress(file, index);
+        else onToggleSelect(file, index, false);
       }, LONG_PRESS_MS),
     };
   };
@@ -109,7 +195,18 @@ function MediaTileImpl({
     .join(' ');
 
   return (
-    <div className={className} style={style} data-testid="media-tile">
+    <div
+      className={className}
+      // The picture's average colour stands in until the thumbnail arrives.
+      style={{
+        top,
+        left,
+        width,
+        height,
+        backgroundColor: hasThumb ? file.color : undefined,
+      }}
+      data-testid="media-tile"
+    >
       <button
         type="button"
         className="media-tile-main"
@@ -150,9 +247,9 @@ function MediaTileImpl({
           // Not loading="lazy": the grid only mounts tiles near the viewport,
           // and a lazy image could hold a download slot without downloading.
           <img
-            ref={attachThumb}
+            ref={attachImage}
             className="media-tile-img"
-            src={thumbSrc}
+            src={shownSrc}
             alt=""
             decoding="async"
             draggable={false}
@@ -161,8 +258,16 @@ function MediaTileImpl({
               settleThumb(true);
             }}
             onError={() => {
+              if (!single) {
+                // A stored copy that will not decode: fetch it the usual way.
+                setBatchBroken(true);
+                return;
+              }
               settleThumb(false);
-              setFailed(true);
+              setThumbState({
+                ...thumb,
+                phase: thumb.retries < THUMB_RETRY_MS.length ? 'waiting' : 'failed',
+              });
             }}
           />
         ) : (

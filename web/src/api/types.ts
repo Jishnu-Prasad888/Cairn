@@ -262,6 +262,8 @@ export interface FileSummary {
   mime_type: string;
   status: string;
   content_hash?: string;
+  /** The picture's average colour ("#rrggbb"), shown while its thumbnail loads. */
+  color?: string;
 }
 
 export interface FileEnvelope {
