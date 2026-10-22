@@ -23,6 +23,8 @@ export interface Selection {
   selectAll: () => void;
   /** Select (or, with `on` false, deselect) every one of `files`. */
   setMany: (files: readonly FileSummary[], on: boolean) => void;
+  /** Make exactly `ids` the selection (drag-to-select recomputes it per move). */
+  replace: (ids: ReadonlySet<string>) => void;
   clear: () => void;
   /** The selected files, in list order. */
   selectedFiles: FileSummary[];
@@ -85,6 +87,11 @@ export function useSelection(files: readonly FileSummary[], resetKey: string): S
     [resetKey],
   );
 
+  const replace = useCallback(
+    (ids: ReadonlySet<string>) => setState({ key: resetKey, ids }),
+    [resetKey],
+  );
+
   const clear = useCallback(() => {
     anchorRef.current = null;
     setState({ key: resetKey, ids: new Set() });
@@ -118,6 +125,7 @@ export function useSelection(files: readonly FileSummary[], resetKey: string): S
     toggle,
     selectAll,
     setMany,
+    replace,
     clear,
     selectedFiles,
   };

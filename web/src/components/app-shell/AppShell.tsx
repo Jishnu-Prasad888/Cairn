@@ -24,6 +24,43 @@ import { TopBar } from './TopBar';
 import { useIndexStatus } from './useIndexStatus';
 import './AppShell.css';
 
+/** How far the page must move in one direction before the bars react. */
+const SCROLL_HIDE_SLOP = 12;
+
+/**
+ * True while the page is being scrolled down past the top bar: phones slide
+ * the bar away to give the photos the whole screen, and bring it back the
+ * moment you scroll up (CSS decides that only phones act on it).
+ */
+function useScrolledDown(): boolean {
+  const [down, setDown] = useState(false);
+  useEffect(() => {
+    let last = window.scrollY;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const y = window.scrollY;
+        if (y < 80) {
+          setDown(false);
+        } else if (Math.abs(y - last) >= SCROLL_HIDE_SLOP) {
+          setDown(y > last);
+        } else {
+          return;
+        }
+        last = y;
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+  return down;
+}
+
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   return !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
@@ -37,6 +74,7 @@ export default function AppShell() {
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { libraryId } = useLibraries();
+  const scrolledDown = useScrolledDown();
   // Files and Albums links lead back to the folder or album left open.
   useRememberSectionLocation();
 
@@ -130,7 +168,10 @@ export default function AppShell() {
   }, [navigate]);
 
   return (
-    <div className="app-shell" data-testid="app-shell">
+    <div
+      className={scrolledDown ? 'app-shell is-scrolled-down' : 'app-shell'}
+      data-testid="app-shell"
+    >
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>

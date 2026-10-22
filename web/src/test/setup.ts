@@ -16,6 +16,13 @@ import { afterEach, beforeEach } from 'vitest';
 import { clearResourceCache } from '../api/resources';
 import { clearListingCache } from '../components/media/useFileListing';
 import { forgetScrollPositions } from '../components/media/useScrollMemory';
+import { resetThumbBatch, setThumbBatching } from '../components/media/thumbBatch';
+
+// Grid thumbnails load one request per tile in tests, so a test can see each
+// tile's URL; the batcher has its own tests (thumbBatch.test.ts), which turn
+// it back on.
+setThumbBatching(false);
+afterEach(resetThumbBatch);
 
 // Results some pages keep across visits (see `cacheAs`), listings kept for
 // coming back to a grid, and the scroll positions to put it back at must not

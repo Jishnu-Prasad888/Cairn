@@ -224,7 +224,8 @@ library has to be scanned by hand.
 | GET    | `/libraries/{libraryID}/files/{fileID}/note`                | Markdown note (caption)          | cap  |
 | PUT    | `/libraries/{libraryID}/files/{fileID}/note`                | Set/replace the note (256 KiB)   | cap  |
 | DELETE | `/libraries/{libraryID}/files/{fileID}/note`                | Clear the note (204)             | cap  |
-| GET    | `/libraries/{libraryID}/files/{fileID}/thumbnail`           | JPEG thumbnail                   | cap  |
+| GET    | `/libraries/{libraryID}/files/{fileID}/thumbnail`           | JPEG thumbnail (`?size=sm`: 256px) | cap  |
+| GET    | `/libraries/{libraryID}/thumbnails?ids=…&size=sm\|md`         | Up to 64 thumbnails, one binary response | cap (per file) |
 | GET    | `/libraries/{libraryID}/files/{fileID}/preview`             | Screen-sized JPEG for the viewer | cap  |
 | GET    | `/libraries/{libraryID}/folders`                            | Child folders                    | cap  |
 | GET    | `/libraries/{libraryID}/trash`                              | Trashed files                    | cap  |

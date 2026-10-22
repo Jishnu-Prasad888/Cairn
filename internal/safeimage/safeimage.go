@@ -16,6 +16,12 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+
+	// Every photo format with a pure-Go decoder. Registering them here makes
+	// them decodable wherever the process decodes an image.
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/tiff"
+	_ "golang.org/x/image/webp"
 )
 
 const (

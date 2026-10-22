@@ -262,7 +262,7 @@ func (s *Server) handleListAlbumFiles(w http.ResponseWriter, r *http.Request, u 
 			CodeInternal, "Failed to list album files.")
 		return
 	}
-	writeJSON(w, s.logger, http.StatusOK, map[string]any{"files": toFileResponses(files)})
+	writeJSON(w, s.logger, http.StatusOK, map[string]any{"files": s.withColors(r, lib, toFileResponses(files))})
 }
 
 // writeAlbumError maps album domain errors to HTTP responses.

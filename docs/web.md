@@ -63,8 +63,20 @@ Settings and the library switcher at the foot.
   indexing count that climbs while a scan runs (polled every few seconds, only
   while the tab is visible), or its item count.
 - **Narrow screens**: below 900px the sidebar is a drawer opened from "More" in
-  the bottom bar (Home, Photos, Albums, Search, More); below 600px search is a
+  the bottom bar (Home, Photos, Search, Albums, More); below 600px search is a
   tab rather than a top-bar box.
+- **Phones** (below 600px) behave like a camera roll: the top bar slides away
+  while scrolling down; grids run edge to edge, four across; pinching a grid
+  changes the column count (remembered per browser); a long-press selects and
+  the same finger can drag to extend the selection; selection actions sit in a
+  bar at the bottom; a fast-scroll thumb with a month bubble replaces the
+  timeline ruler; and the viewer puts Share, Favorite, Rotate, Info and Trash
+  along the bottom, with a tap on the photo showing or hiding the controls.
+- **Grid zoom**: Ctrl/Cmd + wheel (or a trackpad pinch), Ctrl/Cmd + `+` / `-`
+  / `0`, and a two-finger pinch on touch screens resize the media grid's tiles
+  instead of zooming the whole page (not while a dialog or the viewer is open).
+  The choice is kept in `localStorage` per signed-in user and per device class
+  (phone, tablet, desktop).
 - Global shortcuts: `/` (search) and `?` (shortcut sheet), ignored while typing
   or while a dialog or the viewer owns the keyboard.
 

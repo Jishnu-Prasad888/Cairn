@@ -16,8 +16,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-/** Leaves two of the browser's ~six connections for API requests. */
-const MAX_ACTIVE = 4;
+/** Leaves one of the browser's ~six connections for API requests. Batched
+ * thumbnail requests (see `thumbBatch.ts`) take their turns from the same
+ * budget, so the two never crowd out the app between them. */
+const MAX_ACTIVE = 5;
 
 const loaded = new Set<string>();
 const waiting: Array<() => void> = [];
@@ -33,6 +35,24 @@ function grantNext() {
 function release() {
   active = Math.max(0, active - 1);
   grantNext();
+}
+
+/**
+ * Wait for a download slot outside a component: resolves with the function
+ * that gives it back (safe to call more than once).
+ */
+export function acquireSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    waiting.push(() => {
+      let held = true;
+      resolve(() => {
+        if (!held) return;
+        held = false;
+        release();
+      });
+    });
+    grantNext();
+  });
 }
 
 /** Test hook: forget every slot and every loaded URL. */

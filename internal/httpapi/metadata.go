@@ -156,6 +156,11 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 		return
 	}
 
+	// ?size=sm: the 256px small thumbnail a zoomed-out grid or a phone draws.
+	if r.URL.Query().Get("size") == "sm" {
+		s.serveRendition(w, r, lib.Root, f, smallThumbRendition)
+		return
+	}
 	s.serveThumbnail(w, r, lib.Root, f)
 }
 
@@ -237,7 +242,7 @@ func (s *Server) serveRendition(w http.ResponseWriter, r *http.Request, root str
 	stale := have && thumbStale(modTime, f.ModTime)
 	if !have || stale {
 		var ok bool
-		if modTime, have, stale, ok = s.makeRendition(r, root, cairnDir, f, have, kind); !ok {
+		if modTime, have, stale, ok = s.makeRendition(r, root, cairnDir, f, kind); !ok {
 			return // the client went away while waiting; nobody to answer
 		}
 		if !have {
@@ -270,9 +275,8 @@ func (s *Server) serveRendition(w http.ResponseWriter, r *http.Request, root str
 
 // makeRendition generates f's rendition kind on demand, waiting for a slot
 // of s.thumbs, which is held only for the decode. It reports the rendition's
-// state afterwards, and ok=false if the client gave up while waiting. had
-// says whether an (outdated) one existed before.
-func (s *Server) makeRendition(r *http.Request, root, cairnDir string, f *media.File, had bool, kind rendition) (
+// state afterwards, and ok=false if the client gave up while waiting.
+func (s *Server) makeRendition(r *http.Request, root, cairnDir string, f *media.File, kind rendition) (
 	modTime time.Time, have, stale, ok bool,
 ) {
 	release, ok := s.thumbs.acquire(r.Context())
@@ -291,12 +295,13 @@ func (s *Server) makeRendition(r *http.Request, root, cairnDir string, f *media.
 			return mt, true, false, true
 		}
 	}
-	// Nothing new: report the old one, if there was one.
+	// Not made here: report what is there now — one the background worker
+	// made meanwhile, or the old one — if anything.
 	mt, err := kind.modTime(cairnDir, f.ID)
-	if !had || err != nil {
+	if err != nil {
 		return time.Time{}, false, false, true
 	}
-	return mt, true, true, true
+	return mt, true, thumbStale(mt, f.ModTime), true
 }
 
 // thumbStale reports whether a thumbnail written at thumbMod predates the

@@ -181,6 +181,48 @@ Returned `image/jpeg` bytes are safe to store to disk directly. Note that
 when at-rest metadata encryption is enabled (Phase 13), thumbnails are
 decrypted transparently by the server — clients never see ciphertext.
 
+### Small thumbnails and placeholder colours
+
+`?size=sm` on the same route serves a **256 px** thumbnail (quality ~76),
+about a quarter of the bytes, for zoomed-out grids and phones. It is derived
+from the 400 px thumbnail rather than the original, so it is cheap to make.
+Processing a file makes both, and records the picture's **average colour**,
+which file listings (`/files`, search, favorites, album files) return as
+`"color": "#rrggbb"` for clients to paint while the thumbnail loads.
+
+Libraries processed by an older build catch up on their own: when a library's
+worker starts and after every scan, a background `renditions` job makes the
+small thumbnail and colour for up to 200 files at a time until none are left.
+
+### Batches
+
+```
+GET /api/v1/libraries/{libraryID}/thumbnails?ids=a,b,c&size=sm|md
+```
+
+Up to 64 stored thumbnails in one response (`size=sm`, the default, or
+`md` for 400 px), so a screen of tiles costs a few requests instead of one
+each — what matters over HTTP/1.1, where browsers hold about six connections
+per server. The body is binary (`Content-Type:
+application/vnd.cairn.thumbnails`, `Cache-Control: private, no-store`):
+
+1. the 4 bytes `CTB1`;
+2. a big-endian `uint32`: the manifest's length;
+3. the manifest, JSON: `{"items":[{"id":"a","size":1234},{"id":"b","missing":true}]}`,
+   in request order;
+4. each present item's JPEG bytes, back to back, in manifest order.
+
+A batch never decodes an original: a file without a stored thumbnail, an
+unknown id, and a file the caller may not read are all reported `missing`
+(indistinguishably), and the client fetches those through the single route,
+which makes them. A missing small thumbnail whose 400 px one exists is made on
+the spot. `400` when `ids` is empty or lists more than 64, or `size` is not
+`sm`/`md`.
+
+The web app keeps what batches return in IndexedDB, keyed by each file's
+version (mod time and size), so revisits and reloads draw thumbnails from the
+device without a request.
+
 ## Downloading (streaming)
 
 ```
@@ -412,3 +454,11 @@ client draws the first frame in the browser and uploads it with
 `PUT /api/v1/libraries/{id}/files/{fileID}/thumbnail` (needs `read` + `edit`
 on the file; videos only; the body is decoded and re-encoded, and an existing
 thumbnail is never replaced), so every later viewer gets it from the server.
+
+## Photo thumbnails
+
+The server decodes JPEG, PNG, GIF, WebP, BMP and TIFF itself. AVIF and HEIC
+have no Go decoder, so their thumbnails are made with `ffmpeg` too: AVIF with
+any ffmpeg on `PATH`, HEIC only with ffmpeg 7.1 or newer — a phone's HEIC is a
+grid of tiles, which earlier releases do not compose. Raw camera formats get
+no thumbnail.

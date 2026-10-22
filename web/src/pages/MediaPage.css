@@ -128,13 +128,73 @@
   box-shadow: var(--shadow-3);
 }
 
+/* Phones: the photos come first. A one-line header, and the toolbar is a
+   single row of chips that scrolls sideways instead of wrapping into a block
+   of buttons above the grid. */
 @media (max-width: 599px) {
+  .media-page {
+    gap: var(--space-3);
+    padding-top: var(--space-2);
+  }
+
+  .media-page .page-header {
+    flex-wrap: nowrap;
+  }
+
+  .media-page .page-header h1 {
+    font-size: var(--font-size-xl);
+  }
+
+  /* Header buttons keep their icon; the words stay as the accessible name. */
+  .media-page .header-controls {
+    flex-wrap: nowrap;
+  }
+
+  .media-page .header-controls .button {
+    width: var(--touch-target);
+    height: var(--touch-target);
+    padding: 0;
+    font-size: 0;
+    gap: 0;
+    border-radius: var(--radius-pill);
+  }
+
+  .media-toolbar {
+    gap: var(--space-2);
+  }
+
+  .media-toolbar-spacer {
+    display: none;
+  }
+
   .media-toolbar-actions {
-    width: 100%;
+    flex-wrap: nowrap;
+    width: calc(100% + 2 * var(--content-gutter));
+    margin-inline: calc(-1 * var(--content-gutter));
+    padding-inline: var(--content-gutter);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .media-toolbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .media-toolbar-actions > * {
+    flex-shrink: 0;
+  }
+
+  .media-toolbar-actions .button,
+  .media-toolbar-actions select {
+    min-height: 36px;
+    height: 36px;
+    border-radius: var(--radius-pill);
   }
 
   .media-search {
-    flex: 1;
+    flex: 1 0 180px;
+    height: 36px;
+    border-radius: var(--radius-pill);
   }
 
   .media-search input {

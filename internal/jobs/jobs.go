@@ -43,6 +43,11 @@ const KindIndex = "index"
 // thumbnails for a single media file.
 const KindProcessMedia = "process_media"
 
+// KindRenditions is the job kind that brings derived images forward for
+// files processed before they existed: the small thumbnail and the
+// placeholder colour.
+const KindRenditions = "renditions"
+
 // DefaultMaxAttempts is the default number of times a job is retried before
 // being marked permanently failed.
 const DefaultMaxAttempts = 3

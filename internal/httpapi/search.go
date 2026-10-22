@@ -92,7 +92,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, u *auth.Us
 		results = append(results, toFileResponse(res.File))
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{
-		"files":       results,
+		"files":       s.withColors(r, lib, results),
 		"next_cursor": page.NextCursor,
 		"total":       page.Total,
 	})

@@ -15,7 +15,6 @@
   contain: layout style;
 }
 
-.media-row,
 .media-date {
   position: absolute;
   top: 0;
@@ -103,6 +102,10 @@
   position: absolute;
   top: 0;
   overflow: hidden;
+  /* Each tile is its own island for layout and paint: a tile loading its
+     image or changing state never makes the browser look at its neighbours,
+     which keeps scrolling flat however many thousands of files there are. */
+  contain: strict;
   background: var(--color-fill-subtle);
   border-radius: var(--radius-media);
   -webkit-touch-callout: none;
@@ -385,4 +388,51 @@
 /* The date headings slide in with the rows they introduce. */
 .media-date {
   animation: content-in var(--duration-slow) var(--ease-out) backwards;
+}
+
+/* ------------------------------ phones -------------------------------- */
+
+/* The grid's own gestures (pinch to resize, long-press-drag to select) replace
+   the browser's page zoom over the grid; panning still scrolls. */
+@media (pointer: coarse) {
+  .media-grid {
+    touch-action: pan-x pan-y;
+  }
+}
+
+/* A camera roll: photos run edge to edge with hairline gaps and square
+   corners; only the date headings keep the page's margin. */
+@media (max-width: 599px) {
+  .media-page .media-grid-wrap,
+  .media-page .media-grid-skeleton {
+    margin-inline: calc(-1 * var(--content-gutter));
+  }
+
+  .media-page .media-grid .media-tile,
+  .media-page .media-skeleton-tile {
+    border-radius: 0;
+  }
+
+  .media-page .media-date {
+    padding-left: var(--content-gutter);
+    padding-right: var(--content-gutter);
+    font-size: var(--font-size-sm);
+  }
+
+  .media-page .media-skeleton-tiles {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .media-page .media-skeleton-heading {
+    margin-left: var(--content-gutter);
+  }
+
+  /* Selected tiles shrink inside a tinted cell, as on the desktop, but the
+     check sits a little further in from the screen's edge. */
+  .media-tile-check {
+    width: 22px;
+    height: 22px;
+    top: 6px;
+    left: 6px;
+  }
 }

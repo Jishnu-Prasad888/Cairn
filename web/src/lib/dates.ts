@@ -41,6 +41,22 @@ export function weekKey(iso: string): string {
   return keyOfDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() - back));
 }
 
+/**
+ * Formatters are built once per set of options and reused: `toLocaleDateString`
+ * builds a fresh one on every call, which made labelling the date headings of
+ * a ten-thousand-photo library take a tenth of a second.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+function formatter(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const id = JSON.stringify(options);
+  let f = formatters.get(id);
+  if (!f) {
+    f = new Intl.DateTimeFormat(undefined, options);
+    formatters.set(id, f);
+  }
+  return f;
+}
+
 function parseKey(key: string): Date | null {
   const [y, m, d] = key.split('-').map(Number);
   if (!y || !m) return null;
@@ -59,33 +75,31 @@ export function formatDayHeading(key: string, now: Date = new Date()): string {
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
   if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return formatter({ weekday: 'short', month: 'short', day: 'numeric' }).format(date);
   }
-  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  return formatter({ year: 'numeric', month: 'long', day: 'numeric' }).format(date);
 }
 
 /** "September 2026", or just "September" for the current year. */
 export function formatMonthHeading(key: string, now: Date = new Date()): string {
   const date = parseKey(key);
   if (!date) return 'Undated';
-  return date.toLocaleDateString(
-    undefined,
+  return formatter(
     date.getFullYear() === now.getFullYear()
       ? { month: 'long' }
       : { month: 'long', year: 'numeric' },
-  );
+  ).format(date);
 }
 
 /** "Week of Sep 28", with the year added before this one. */
 export function formatWeekHeading(key: string, now: Date = new Date()): string {
   const date = parseKey(key);
   if (!date) return 'Undated';
-  const day = date.toLocaleDateString(
-    undefined,
+  const day = formatter(
     date.getFullYear() === now.getFullYear()
       ? { month: 'short', day: 'numeric' }
       : { month: 'short', day: 'numeric', year: 'numeric' },
-  );
+  ).format(date);
   return `Week of ${day}`;
 }
 
@@ -99,7 +113,7 @@ export function formatDate(iso: string | undefined): string {
   if (!iso) return '';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return formatter({ year: 'numeric', month: 'short', day: 'numeric' }).format(date);
 }
 
 /** Date and time, for "Taken" and "Modified". */

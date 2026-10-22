@@ -76,10 +76,22 @@ func (p *Processor) Handle(ctx context.Context, job *jobs.Job) error {
 		p.logger.Warn("thumbnail generation failed", "file_id", fileID, "error", thumbErr)
 		// Non-fatal: continue and persist what we have.
 	}
+	// The small thumbnail and placeholder colour come from the thumbnail just
+	// made, so a zoomed-out grid never has to wait for them either.
+	var color string
+	if hasThumbnail {
+		c, err := MakeSmallThumb(cairnDir, fileID, p.keys)
+		if err != nil {
+			p.logger.Warn("small thumbnail generation failed", "file_id", fileID, "error", err)
+		}
+		color = c
+	} else if err := RemoveSmallThumb(cairnDir, fileID); err != nil {
+		p.logger.Warn("remove stale small thumbnail", "file_id", fileID, "error", err)
+	}
 
 	// Persist to media_metadata via the db passed in job context.
 	if db, ok := ctx.Value(dbKey{}).(*sql.DB); ok {
-		if err := persistMetadata(ctx, db, fileID, info, hasThumbnail); err != nil {
+		if err := persistMetadata(ctx, db, fileID, media.DetectMediaType(relPath), info, hasThumbnail, color); err != nil {
 			return fmt.Errorf("persist metadata: %w", err)
 		}
 	}
@@ -104,7 +116,7 @@ func WithDB(ctx context.Context, db *sql.DB) context.Context {
 }
 
 // persistMetadata writes extracted info to the media_metadata table.
-func persistMetadata(ctx context.Context, db *sql.DB, fileID string, info *MediaInfo, hasThumbnail bool) error {
+func persistMetadata(ctx context.Context, db *sql.DB, fileID string, mediaType media.MediaType, info *MediaInfo, hasThumbnail bool, color string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	var takenAt *string
@@ -128,9 +140,10 @@ func persistMetadata(ctx context.Context, db *sql.DB, fileID string, info *Media
 		INSERT INTO media_metadata
 			(file_id, media_type, width, height, taken_at,
 			 camera_make, camera_model, latitude, longitude,
-			 has_thumbnail, updated_at)
-		VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 has_thumbnail, color, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(file_id) DO UPDATE SET
+			media_type    = excluded.media_type,
 			width         = excluded.width,
 			height        = excluded.height,
 			taken_at      = excluded.taken_at,
@@ -139,13 +152,14 @@ func persistMetadata(ctx context.Context, db *sql.DB, fileID string, info *Media
 			latitude      = excluded.latitude,
 			longitude     = excluded.longitude,
 			has_thumbnail = excluded.has_thumbnail,
+			color         = excluded.color,
 			updated_at    = excluded.updated_at`,
-		fileID,
+		fileID, string(mediaType),
 		nullInt(info.Width), nullInt(info.Height),
 		takenAt,
 		nullStr(info.CameraMake), nullStr(info.CameraModel),
 		lat, lon,
-		ht, now,
+		ht, nullStr(color), now,
 	)
 	return err
 }

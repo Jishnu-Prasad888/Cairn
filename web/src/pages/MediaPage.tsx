@@ -37,6 +37,7 @@ import {
   type Grouping,
   type TimeScale,
 } from '../components/media/layout';
+import { FastScroller } from '../components/media/FastScroller';
 import { MediaGrid, MediaGridSkeleton } from '../components/media/MediaGrid';
 import { SelectionToolbar } from '../components/media/SelectionToolbar';
 import { Timeline } from '../components/media/Timeline';
@@ -70,6 +71,7 @@ import {
   storeTimelineOpen,
   storeTimelineScale,
 } from '../lib/timelinePreference';
+import { COMPACT_QUERY, useMediaQuery } from '../lib/useMediaQuery';
 import './MediaPage.css';
 
 export interface MediaPageConfig {
@@ -340,7 +342,9 @@ function MediaBrowser({
   // sub-folders, which the file manager's own listing deliberately is not —
   // so it gets its own always-recursive, always date-sorted query. Photos (and
   // any other non-folder timeline) already has the right list in `files`.
-  const showTimeline = Boolean(config.showTimeline) && !offline;
+  // Phones have no room for the ruler; they get the fast-scroll thumb instead.
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const showTimeline = Boolean(config.showTimeline) && !offline && !compact;
   const timelineQuery: ListingQuery = {
     q: '',
     type,
@@ -975,6 +979,8 @@ function MediaBrowser({
           onClose={() => setShareFolder(null)}
         />
       )}
+
+      {compact && ready && view === 'grid' && files.length > 0 && <FastScroller files={files} />}
 
       {timelineVisible && (
         <Timeline
