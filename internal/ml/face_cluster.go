@@ -1,6 +1,7 @@
 package ml
 
 import (
+	"math"
 	"sort"
 	"strconv"
 )
@@ -38,6 +39,14 @@ import (
 // face stays unassigned under "Who is this?" until a second photo of that
 // person arrives or someone places it by hand; otherwise every passer-by in
 // the background would become a person.
+//
+// Faces from a crowded photo (more faces than the crowd limit: a concert, a
+// class photo) are match-only. They take no part in the clustering, so they
+// never start a person or pull two together; once the people are settled,
+// each is matched against them the way a new face is (matchScore) and joins
+// the best one at or above the threshold, at most one face per person in a
+// photo. The rest stay stored but unassigned and out of "Who is this?", ready
+// to be matched should their person turn up in an uncrowded photo later.
 
 // clusterFace is one face as seen by the planner.
 type clusterFace struct {
@@ -46,6 +55,10 @@ type clusterFace struct {
 	Quality  float64 // cover preference: larger, more confident faces win
 	PersonID string  // current assignment ("" when unassigned)
 	Free     bool    // may be (re)grouped
+	// MatchOnly marks a free face from a crowded photo: it may join a person
+	// but never helps form one.
+	MatchOnly bool
+	FileID    string
 }
 
 // groupPlan is the outcome of planGroups.
@@ -82,8 +95,14 @@ func planGroups(faces []clusterFace, anchors map[string][]Exemplar, autoPeople m
 	plan := &groupPlan{Assign: map[string]string{}, Covers: map[string]string{}}
 
 	var nodes []clusterNode
+	var matchOnly []int
 	for i, f := range faces {
-		if f.Free {
+		switch {
+		case !f.Free:
+		case f.MatchOnly:
+			plan.Inspected++
+			matchOnly = append(matchOnly, i)
+		default:
 			plan.Inspected++
 			nodes = append(nodes, clusterNode{desc: f.Desc, face: i})
 		}
@@ -108,6 +127,16 @@ func planGroups(faces []clusterFace, anchors map[string][]Exemplar, autoPeople m
 		old     map[string]int // old automatic person -> faces it held
 	}
 	var cands []*candidate
+	// What each settled person looks like, for the match-only faces: anchors
+	// by their exemplars, and the faces each group gathered below.
+	people := map[string][]Exemplar{}
+	for _, pid := range anchorIDs {
+		ex := anchors[pid]
+		if len(ex) > maxExemplars {
+			ex = ex[:maxExemplars]
+		}
+		people[pid] = ex
+	}
 	for _, group := range clusterNodes(nodes, threshold) {
 		label := ""
 		var members []int
@@ -189,6 +218,13 @@ func planGroups(faces []clusterFace, anchors map[string][]Exemplar, autoPeople m
 				}
 			}
 		}
+		ex := make([]Exemplar, 0, min(len(c.members), maxExemplars))
+		for _, i := range c.members {
+			if len(ex) < maxExemplars {
+				ex = append(ex, Exemplar{Descriptor: faces[i].Desc})
+			}
+		}
+		people[key] = ex
 		cover := c.members[0]
 		for _, i := range c.members {
 			if faces[i].Quality > faces[cover].Quality {
@@ -201,6 +237,8 @@ func planGroups(faces []clusterFace, anchors map[string][]Exemplar, autoPeople m
 		}
 	}
 
+	matchCrowd(plan, faces, matchOnly, people, threshold)
+
 	for pid := range autoPeople {
 		if !used[pid] {
 			plan.Dropped = append(plan.Dropped, pid)
@@ -208,6 +246,92 @@ func planGroups(faces []clusterFace, anchors map[string][]Exemplar, autoPeople m
 	}
 	sort.Strings(plan.Dropped)
 	return plan
+}
+
+// matchCrowd places the match-only faces: each joins the settled person it
+// matches best at or above threshold, strongest matches first, so that a
+// person is found at most once in one photo. Unmatched faces stay unassigned.
+func matchCrowd(plan *groupPlan, faces []clusterFace, matchOnly []int, people map[string][]Exemplar, threshold float64) {
+	if len(matchOnly) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(people))
+	centroids := make(map[string][]float32, len(people))
+	for key, ex := range people {
+		if len(ex) == 0 {
+			continue
+		}
+		keys = append(keys, key)
+		centroids[key] = meanExemplar(ex)
+	}
+	sort.Strings(keys)
+
+	type match struct {
+		face  int
+		key   string
+		score float64
+	}
+	var matches []match
+	for _, i := range matchOnly {
+		for _, key := range keys {
+			if sc := matchScore(faces[i].Desc, centroids[key], people[key]); sc >= threshold {
+				matches = append(matches, match{i, key, sc})
+			}
+		}
+	}
+	sort.Slice(matches, func(a, b int) bool {
+		if matches[a].score != matches[b].score {
+			return matches[a].score > matches[b].score
+		}
+		if matches[a].face != matches[b].face {
+			return matches[a].face < matches[b].face
+		}
+		return matches[a].key < matches[b].key
+	})
+	placed := map[int]bool{}
+	inPhoto := map[[2]string]bool{} // (file, person) already found there
+	for _, m := range matches {
+		fileKey := [2]string{faces[m.face].FileID, m.key}
+		if placed[m.face] || inPhoto[fileKey] {
+			continue
+		}
+		placed[m.face] = true
+		inPhoto[fileKey] = true
+		plan.Assign[faces[m.face].ID] = m.key
+		if faces[m.face].PersonID != m.key {
+			plan.Assigned++
+		}
+	}
+	for _, i := range matchOnly {
+		if !placed[i] {
+			plan.Assign[faces[i].ID] = ""
+		}
+	}
+}
+
+// meanExemplar is the normalised average of a person's exemplar descriptors.
+func meanExemplar(ex []Exemplar) []float32 {
+	sum := make([]float64, len(ex[0].Descriptor))
+	for _, e := range ex {
+		for i, v := range e.Descriptor {
+			if i < len(sum) {
+				sum[i] += float64(v)
+			}
+		}
+	}
+	var norm float64
+	for _, v := range sum {
+		norm += v * v
+	}
+	out := make([]float32, len(sum))
+	if norm == 0 {
+		return out
+	}
+	inv := 1 / math.Sqrt(norm)
+	for i, v := range sum {
+		out[i] = float32(v * inv)
+	}
+	return out
 }
 
 // clusterNodes groups nodes agglomeratively (see the file comment) and returns

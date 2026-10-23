@@ -23,6 +23,8 @@ import {
   softDeleteFile,
 } from '../api/queries';
 import type { FileSummary } from '../api/types';
+import { announceViewerClosed } from '../lib/viewerClosed';
+import { readTrashConfirm, storeTrashConfirm } from '../lib/trashConfirm';
 import { ConfirmDialog, PromptDialog } from './Dialog';
 import { FolderPicker } from './FolderPicker';
 import type { ViewerAction } from './ViewerModal';
@@ -99,7 +101,10 @@ export function useFileOperations(
   }, []);
 
   const run = useCallback(
-    async (action: () => Promise<unknown>, { removes }: { removes?: FileSummary } = {}) => {
+    async (
+      action: () => Promise<unknown>,
+      { removes, onFail }: { removes?: FileSummary; onFail?: () => void } = {},
+    ) => {
       setBusy(true);
       setError(null);
       try {
@@ -125,6 +130,7 @@ export function useFileOperations(
         onChanged();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
+        onFail?.();
       } finally {
         setBusy(false);
       }
@@ -137,9 +143,18 @@ export function useFileOperations(
       // On the Trash page a file is already in the trash, so the viewer's
       // "Move to trash" would be a no-op. Offer the action the user actually
       // came there for instead.
-      setPending({ kind: permanent && action === 'trash' ? 'permanent' : action, file });
+      const kind = permanent && action === 'trash' ? 'permanent' : action;
+      if (kind === 'trash' && !readTrashConfirm()) {
+        // Not asked, but a failure still opens the dialog to say so.
+        void run(() => softDeleteFile(libFor(libraryIds, file), file.rel_path, file.id), {
+          removes: file,
+          onFail: () => setPending({ kind, file }),
+        });
+        return;
+      }
+      setPending({ kind, file });
     },
-    [permanent],
+    [permanent, run, libraryIds],
   );
 
   const dialogs = (
@@ -182,6 +197,7 @@ export function useFileOperations(
             { removes: target },
           );
         }}
+        onDontAskAgain={pending?.kind === 'trash' ? () => storeTrashConfirm(false) : undefined}
         testId="trash-dialog"
       />
 
@@ -384,5 +400,16 @@ function useViewerParam(libraryIds: readonly string[]) {
   }, [navigate, setParams]);
 
   const viewer = viewId ? file : null;
+  // However it closed (the close button, Escape, Back), tell the grid which
+  // file it closed on, so it can offer to scroll back to it.
+  const lastViewed = useRef<string | null>(null);
+  const viewerId = viewer?.id ?? null;
+  useEffect(() => {
+    if (viewerId) lastViewed.current = viewerId;
+    else if (lastViewed.current) {
+      announceViewerClosed(lastViewed.current);
+      lastViewed.current = null;
+    }
+  }, [viewerId]);
   return { viewer, viewerLibraryId: viewer ? fileLibraryId : '', openViewer, closeViewer };
 }

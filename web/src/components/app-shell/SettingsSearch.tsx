@@ -38,6 +38,12 @@ const SETTING_ENTRIES: SettingEntry[] = [
     words: 'dark light system appearance colour color mode',
   },
   {
+    label: 'Confirm before moving to trash',
+    section: 'files',
+    hint: 'Files',
+    words: 'delete trash confirm confirmation ask prompt dialog',
+  },
+  {
     label: 'Tags, sharing, duplicates and trash',
     section: 'library',
     hint: 'Library',

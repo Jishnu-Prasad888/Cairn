@@ -113,18 +113,22 @@ func extractFrame(ctx context.Context, path string, selectStream ...string) (ima
 	if bin == "" {
 		return nil, ErrNoVideoDecoder
 	}
+	// "-scale" keeps the decoded frame small before it reaches Go; the
+	// thumbnail is resized again by resizeToFit with the photo pipeline.
+	args := []string{"-i", path}
+	args = append(args, selectStream...)
+	args = append(args, "-vf", fmt.Sprintf("scale='min(%d,iw)':-2", ThumbnailSize*2))
+	return ffmpegFrame(ctx, bin, args)
+}
+
+// ffmpegFrame runs ffmpeg with args (its input and filters) and decodes the
+// one frame it writes, as a PNG, to its stdout.
+func ffmpegFrame(ctx context.Context, bin string, args []string) (image.Image, error) {
 	ctx, cancel := context.WithTimeout(ctx, videoFrameTimeout)
 	defer cancel()
 
-	// "-scale" keeps the decoded frame small before it reaches Go; the
-	// thumbnail is resized again by resizeToFit with the photo pipeline.
-	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error", "-i", path}
-	args = append(args, selectStream...)
-	args = append(args,
-		"-frames:v", "1",
-		"-vf", fmt.Sprintf("scale='min(%d,iw)':-2", ThumbnailSize*2),
-		"-f", "image2pipe", "-vcodec", "png", "-",
-	)
+	args = append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"}, args...)
+	args = append(args, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-")
 	cmd := exec.CommandContext(ctx, bin, args...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out

@@ -121,3 +121,68 @@ func TestPlanGroupsNeverMergesTwoAnchors(t *testing.T) {
 		t.Errorf("p3 -> %q; want one of the two people", got)
 	}
 }
+
+// Faces from crowded photos join people the uncrowded photos made, at most
+// once per photo, and never form a person among themselves.
+func TestPlanGroupsMatchesCrowdFacesOnlyToKnownPeople(t *testing.T) {
+	faces := []clusterFace{
+		// Ann, twice in ordinary photos: she becomes a person.
+		{ID: "a1", FileID: "f1", Desc: descOf(0, 1), Quality: 1, Free: true},
+		{ID: "a2", FileID: "f2", Desc: descOf(0, 1, 1, 0.1), Quality: 1, Free: true},
+		// A crowd photo: Ann, a near-twin of hers, and a stranger.
+		{ID: "c-ann", FileID: "crowd", Desc: descOf(0, 1, 2, 0.1), Free: true, MatchOnly: true},
+		{ID: "c-twin", FileID: "crowd", Desc: descOf(0, 1, 2, 0.2), Free: true, MatchOnly: true},
+		{ID: "c-x", FileID: "crowd", Desc: descOf(5, 1), Free: true, MatchOnly: true},
+		// The stranger again, in another crowd photo: still no one new.
+		{ID: "d-x", FileID: "crowd2", Desc: descOf(5, 1), Free: true, MatchOnly: true},
+		// Mom, named by hand, turns up in the second crowd photo.
+		{ID: "d-mom", FileID: "crowd2", Desc: descOf(7, 1), Free: true, MatchOnly: true},
+	}
+	anchors := map[string][]Exemplar{"mom": {{Descriptor: descOf(7, 1, 8, 0.1), Manual: true}}}
+	plan := planGroups(faces, anchors, nil, 0.8)
+
+	if plan.Created != 1 || len(plan.NewGroups) != 1 {
+		t.Fatalf("created %d people (%v); want only Ann", plan.Created, plan.NewGroups)
+	}
+	ann := newGroupKey(0)
+	if len(plan.NewGroups[0]) != 2 {
+		t.Errorf("Ann's new group = %v; want only her two ordinary photos", plan.NewGroups[0])
+	}
+	want := map[string]string{
+		"a1": ann, "a2": ann,
+		"c-ann":  ann, // the better match of the two in that photo
+		"c-twin": "",  // Ann is already found in this photo
+		"c-x":    "",
+		"d-x":    "",
+		"d-mom":  "mom",
+	}
+	for id, to := range want {
+		if got := plan.Assign[id]; got != to {
+			t.Errorf("%s -> %q; want %q", id, got, to)
+		}
+	}
+	if plan.Covers[ann] != "a1" && plan.Covers[ann] != "a2" {
+		t.Errorf("cover = %q; want one of Ann's ordinary photos", plan.Covers[ann])
+	}
+	if plan.Inspected != len(faces) {
+		t.Errorf("inspected %d; want %d", plan.Inspected, len(faces))
+	}
+}
+
+// A person who until now existed only through crowd faces is dropped once
+// those photos are crowded: the faces stay, unassigned.
+func TestPlanGroupsDropsPeopleMadeOnlyOfCrowdFaces(t *testing.T) {
+	faces := []clusterFace{
+		{ID: "x1", FileID: "c1", Desc: descOf(5, 1), PersonID: "p9", Free: true, MatchOnly: true},
+		{ID: "x2", FileID: "c2", Desc: descOf(5, 1), PersonID: "p9", Free: true, MatchOnly: true},
+	}
+	plan := planGroups(faces, nil, map[string]bool{"p9": true}, 0.8)
+	if plan.Created != 0 || len(plan.Dropped) != 1 || plan.Dropped[0] != "p9" {
+		t.Fatalf("plan = %+v; want p9 dropped and no one created", plan)
+	}
+	for _, id := range []string{"x1", "x2"} {
+		if to, ok := plan.Assign[id]; !ok || to != "" {
+			t.Errorf("%s -> %q (set %v); want unassigned", id, to, ok)
+		}
+	}
+}

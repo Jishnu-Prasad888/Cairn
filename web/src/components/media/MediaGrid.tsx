@@ -23,7 +23,9 @@ import {
 } from 'react';
 
 import type { FileSummary } from '../../api/types';
+import { onViewerClosed } from '../../lib/viewerClosed';
 import { Icon } from '../ui/Icon';
+import { useToast } from '../ui/Toast';
 import { MediaTile } from './MediaTile';
 import {
   type Grouping,
@@ -94,6 +96,11 @@ export interface MediaGridProps {
   favorites?: ReadonlySet<string>;
   /** Right-click or long-press menu for a single tile. */
   onContextMenu?: (file: FileSummary, x: number, y: number) => void;
+  /**
+   * The Delete key on a focused tile while nothing is selected (a selection
+   * is the toolbar's to trash).
+   */
+  onDelete?: ((file: FileSummary) => void) | undefined;
   /** Infinite scroll: more pages exist and how to fetch the next. */
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -112,6 +119,7 @@ export function MediaGrid({
   selection,
   favorites,
   onContextMenu,
+  onDelete,
   hasMore = false,
   loadingMore = false,
   onLoadMore,
@@ -273,6 +281,54 @@ export function MediaGrid({
     setFocusIndex(index);
   }, []);
 
+  // Closing the viewer after paging far through it can leave the photo last
+  // seen off screen. Offer the way back, briefly; the scroll there is smooth
+  // (unless the person asked for less motion) and ends with the tile focused.
+  const toast = useToast();
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  });
+  const revealTile = useCallback((fileId: string) => {
+    const index = filesRef.current.findIndex((f) => f.id === fileId);
+    const bounds = index < 0 ? undefined : cellBounds(layoutRef.current, index);
+    const el = containerRef.current;
+    if (!bounds || !el) return;
+    const tileTop = el.getBoundingClientRect().top + window.scrollY + bounds.top;
+    const sticky = stickyOffset();
+    const room = window.innerHeight - sticky;
+    const top = Math.max(0, tileTop - sticky - Math.max(8, (room - bounds.height) / 2));
+    const reduce =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top, behavior: reduce ? 'auto' : 'smooth' });
+    pendingFocus.current = index;
+    setFocusIndex(index);
+  }, []);
+  useEffect(
+    () =>
+      onViewerClosed((fileId, claim) => {
+        const index = filesRef.current.findIndex((f) => f.id === fileId);
+        const bounds = index < 0 ? undefined : cellBounds(layoutRef.current, index);
+        const el = containerRef.current;
+        if (!bounds || !el) return;
+        const tileTop = el.getBoundingClientRect().top + window.scrollY + bounds.top;
+        const viewTop = window.scrollY + stickyOffset();
+        const viewBottom = window.scrollY + window.innerHeight;
+        // Any of it in sight is enough: there is nothing to go back to.
+        if (tileTop + bounds.height > viewTop && tileTop < viewBottom) return;
+        if (!claim()) return;
+        const kind = filesRef.current[index]!.media_type;
+        const what = kind === 'photo' ? 'photo' : kind === 'video' ? 'video' : 'file';
+        toast({
+          message: `The ${what} you last viewed is out of view`,
+          action: { label: 'Scroll to it', onClick: () => revealTile(fileId) },
+          duration: 5000,
+        });
+      }),
+    [toast, revealTile],
+  );
+
   useEffect(() => {
     const index = pendingFocus.current;
     if (index === null) return;
@@ -371,6 +427,11 @@ export function MediaGrid({
         if (!selection || !(event.metaKey || event.ctrlKey)) return;
         event.preventDefault();
         selection.selectAll();
+        return;
+      case 'Delete':
+        if (!onDelete || selection?.active) return;
+        event.preventDefault();
+        onDelete(files[index]!);
         return;
       default:
         return;

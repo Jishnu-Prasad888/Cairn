@@ -10,10 +10,11 @@
 
 import { useEffect, useState } from 'react';
 
-import { browseLibrary, getIgnoreRules, saveIgnoreRules, triggerIndex } from '../api/queries';
-import type { IgnoreRule, LibraryListing } from '../api/queries';
+import { getIgnoreRules, saveIgnoreRules, triggerIndex } from '../api/queries';
+import type { IgnoreRule } from '../api/queries';
 import type { Library } from '../api/types';
 import { Dialog } from './Dialog';
+import { type BrowserEntry, LibraryBrowser } from './LibraryBrowser';
 import { FolderOpenIcon } from './ServerFolderBrowser';
 import { Icon } from './ui/Icon';
 import './IgnoreRulesDialog.css';
@@ -68,121 +69,6 @@ function canonical(rule: IgnoreRule, root: string): IgnoreRule {
   return { kind: rule.kind, pattern };
 }
 
-/** Walks one library's folders and files and offers each as something to ignore. */
-function LibraryBrowser({
-  library,
-  isIgnored,
-  onIgnore,
-  onClose,
-}: {
-  library: Library;
-  isIgnored: (rule: IgnoreRule) => boolean;
-  onIgnore: (rule: IgnoreRule) => void;
-  onClose: () => void;
-}) {
-  const [target, setTarget] = useState('');
-  const [listing, setListing] = useState<LibraryListing | null>(null);
-  const [failure, setFailure] = useState<{ target: string; message: string } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    browseLibrary(library.id, target)
-      .then((resp) => {
-        if (cancelled) return;
-        setListing(resp);
-        setFailure(null);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setFailure({ target, message: e instanceof Error ? e.message : String(e) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [library.id, target]);
-
-  const atRoot = !listing || listing.path === '';
-  const here = listing?.path ?? '';
-
-  const ignoreButton = (rule: IgnoreRule, label: string, title: string) => {
-    const done = isIgnored(rule);
-    return (
-      <button
-        type="button"
-        className="button ignore-browser-action"
-        onClick={() => onIgnore(rule)}
-        disabled={done}
-        title={done ? 'Already ignored' : title}
-      >
-        {done ? 'Ignored' : label}
-      </button>
-    );
-  };
-
-  return (
-    <div className="folder-browser" data-testid="library-browser">
-      <div className="folder-browser-bar">
-        <button
-          type="button"
-          className="button"
-          onClick={() => listing && setTarget(listing.parent)}
-          disabled={atRoot}
-        >
-          ↑ Up
-        </button>
-        <code className="folder-browser-path" title={here || library.root}>
-          {listing ? `/${here}` : '…'}
-        </code>
-        {!atRoot && ignoreButton({ kind: 'path', pattern: here }, 'Ignore this folder', here)}
-      </div>
-      <ul className="folder-browser-list ignore-browser-list">
-        {failure && failure.target === target && <li className="error-text">{failure.message}</li>}
-        {listing && listing.dirs.length === 0 && listing.files.length === 0 && (
-          <li className="muted">This folder is empty.</li>
-        )}
-        {listing?.dirs.map((dir) => (
-          <li key={dir.path} className="ignore-browser-row">
-            <button
-              type="button"
-              className="folder-browser-item"
-              onClick={() => setTarget(dir.path)}
-              title={`Open ${dir.name}`}
-            >
-              <span aria-hidden="true">📁</span> {dir.name}
-            </button>
-            {ignoreButton({ kind: 'path', pattern: dir.path }, 'Ignore', `Ignore ${dir.path}`)}
-          </li>
-        ))}
-        {listing?.files.map((file) => {
-          const ext = extensionOf(file.name);
-          return (
-            <li key={file.path} className="ignore-browser-row">
-              <span className="ignore-browser-file" title={file.path}>
-                <span aria-hidden="true">📄</span> {file.name}
-              </span>
-              {ext &&
-                ignoreButton(
-                  { kind: 'extension', pattern: ext },
-                  `All .${ext}`,
-                  `Ignore every .${ext} file`,
-                )}
-              {ignoreButton({ kind: 'path', pattern: file.path }, 'Ignore', `Ignore ${file.path}`)}
-            </li>
-          );
-        })}
-        {listing?.truncated && (
-          <li className="muted">Only the first files of this folder are shown.</li>
-        )}
-      </ul>
-      <div className="folder-browser-actions">
-        <button type="button" className="button" onClick={onClose}>
-          Done browsing
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function IgnoreRulesDialog({
   library,
   onClose,
@@ -229,6 +115,38 @@ export default function IgnoreRulesDialog({
     setRules((prev) => [...(prev ?? []), c]);
     setDirty(true);
     setError(null);
+  };
+
+  const ignoreButton = (rule: IgnoreRule, label: string, title: string) => {
+    const done = isIgnored(rule);
+    return (
+      <button
+        type="button"
+        className="button ignore-browser-action"
+        onClick={() => add(rule)}
+        disabled={done}
+        title={done ? 'Already ignored' : title}
+      >
+        {done ? 'Ignored' : label}
+      </button>
+    );
+  };
+
+  const browserActions = (entry: BrowserEntry) => {
+    const rule: IgnoreRule = { kind: 'path', pattern: entry.path };
+    if (entry.kind === 'here') return ignoreButton(rule, 'Ignore this folder', entry.path);
+    const ext = entry.kind === 'file' ? extensionOf(entry.name) : '';
+    return (
+      <>
+        {ext &&
+          ignoreButton(
+            { kind: 'extension', pattern: ext },
+            `All .${ext}`,
+            `Ignore every .${ext} file`,
+          )}
+        {ignoreButton(rule, 'Ignore', `Ignore ${entry.path}`)}
+      </>
+    );
   };
 
   const addTyped = () => {
@@ -354,8 +272,7 @@ export default function IgnoreRulesDialog({
         {browsing && kind === 'path' && (
           <LibraryBrowser
             library={library}
-            isIgnored={isIgnored}
-            onIgnore={add}
+            actions={browserActions}
             onClose={() => setBrowsing(false)}
           />
         )}

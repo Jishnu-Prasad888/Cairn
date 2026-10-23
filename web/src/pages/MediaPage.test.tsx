@@ -16,6 +16,7 @@ import {
 } from '../test/harness';
 import type { RouteHandler } from '../test/harness';
 import { FOCUSABLE } from '../lib/focusTrap';
+import { refreshMLSwitch } from '../api/mlSwitch';
 import MediaPage from './MediaPage';
 import type { MediaPageConfig } from './MediaPage';
 
@@ -389,6 +390,43 @@ describe('MediaPage', () => {
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
+  it('skips selected photos in face recognition', async () => {
+    const fetchMock = setup([
+      (url) =>
+        url.endsWith('/api/v1/ml/settings')
+          ? json({
+              enabled: true,
+              face_threshold: 0.5,
+              face_threshold_default: 0.5,
+              batch_size: 1,
+              crowd_limit: 0,
+            })
+          : undefined,
+      (url, init) => {
+        if (!url.endsWith('/api/v1/libraries/lib1/ml/rules')) return undefined;
+        if (init?.method === 'PUT') return json(JSON.parse(String(init.body)));
+        return json({ rules: [{ kind: 'always', path: 'IMG_0001.png' }] });
+      },
+    ]);
+    await refreshMLSwitch(true);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select clip.mp4' }));
+    fireEvent.click(await screen.findByTestId('selection-ml'));
+    const dialog = await screen.findByTestId('ml-selection-dialog');
+    expect(dialog).toHaveTextContent('1 selected item is not a photo');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Skip' }));
+
+    // The photo's old rule is replaced; the video is left alone.
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'PUT', '/api/v1/libraries/lib1/ml/rules')).toEqual({
+        rules: [{ kind: 'skip', path: 'IMG_0001.png' }],
+      });
+    });
+    expect(await screen.findByText('Photo skipped in face recognition')).toBeInTheDocument();
+  });
+
   it('keeps the selection when the trash dialog is cancelled', async () => {
     const fetchMock = setup();
 
@@ -476,6 +514,28 @@ describe('MediaPage', () => {
         'src',
         '/api/v1/libraries/lib1/files/f1/download',
       );
+    });
+  });
+
+  it('shows a loading indicator until the photo arrives', async () => {
+    setup();
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    const dialog = within(await screen.findByTestId('viewer')).getByRole('dialog');
+    expect(within(dialog).getByTestId('viewer-loading')).toHaveTextContent(/^Loading$/);
+
+    // No preview: the original is fetched, and its size said.
+    fireEvent.error(within(dialog).getByRole('img'));
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('viewer-loading')).toHaveTextContent(
+        /Loading full resolution · \d/,
+      );
+    });
+
+    fireEvent.load(within(dialog).getByRole('img'));
+    await waitFor(() => {
+      expect(within(dialog).queryByTestId('viewer-loading')).not.toBeInTheDocument();
     });
   });
 
@@ -964,6 +1024,128 @@ describe('MediaPage', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
     });
+  });
+
+  it('stops asking before trashing once told not to ask again', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'DELETE' &&
+        (url.includes('/api/v1/libraries/lib1/files/f1') ||
+          url.includes('/api/v1/libraries/lib1/files/f2'))
+          ? noContent()
+          : undefined,
+    ]);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    fireEvent.click(await screen.findByTestId('viewer-trash'));
+    const dialog = await screen.findByTestId('trash-dialog');
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: "Don't ask again" }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }));
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f1')).toBe(true);
+    });
+    expect(localStorage.getItem('cairn.trash.skipConfirm')).toBe('1');
+
+    // The next one goes straight to the trash.
+    await waitFor(() => {
+      expect(within(screen.getByTestId('viewer')).getByRole('dialog')).toHaveAccessibleName(
+        video.name,
+      );
+    });
+    fireEvent.click(screen.getByTestId('viewer-trash'));
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f2')).toBe(true);
+    });
+    expect(screen.queryByTestId('trash-dialog')).not.toBeInTheDocument();
+  });
+
+  it('trashes with the Delete key, from the viewer and from a focused tile', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'DELETE' &&
+        (url.includes('/api/v1/libraries/lib1/files/f1') ||
+          url.includes('/api/v1/libraries/lib1/files/f2'))
+          ? noContent()
+          : undefined,
+    ]);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    await screen.findByTestId('viewer');
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    fireEvent.click(
+      within(await screen.findByTestId('trash-dialog')).getByRole('button', {
+        name: 'Move to trash',
+      }),
+    );
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f1')).toBe(true);
+    });
+    fireEvent.click(
+      within(screen.getByTestId('viewer')).getByRole('button', { name: 'Close viewer' }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    });
+
+    // The video is the one tile left; nothing is selected.
+    const tile = screen.getByTestId('file-grid').querySelector<HTMLElement>('.media-tile-main');
+    fireEvent.keyDown(tile!, { key: 'Delete' });
+    fireEvent.click(
+      within(await screen.findByTestId('trash-many-dialog')).getByRole('button', {
+        name: 'Move to trash',
+      }),
+    );
+    await waitFor(() => {
+      expect(called(fetchMock, 'DELETE', '/api/v1/libraries/lib1/files/f2')).toBe(true);
+    });
+  });
+
+  it('offers to scroll back to the photo last viewed when it is out of view', async () => {
+    setup();
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    await screen.findByTestId('viewer');
+    // Paging on through the viewer scrolled the page far below the photo:
+    // the grid's top is well above the window.
+    const scrollY = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(20000);
+    const grid = screen.getByTestId('file-grid');
+    const rect = vi.spyOn(grid, 'getBoundingClientRect').mockReturnValue({
+      top: -20000,
+      bottom: -19000,
+      left: 0,
+      right: 1024,
+      width: 1024,
+      height: 1000,
+      x: 0,
+      y: -20000,
+      toJSON: () => ({}),
+    });
+    fireEvent.click(
+      within(screen.getByTestId('viewer')).getByRole('button', { name: 'Close viewer' }),
+    );
+
+    const toast = await screen.findByText('The photo you last viewed is out of view');
+    fireEvent.click(
+      within(toast.closest('[data-testid="toast"]')!).getByRole('button', { name: 'Scroll to it' }),
+    );
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
+
+    // Back in sight, closing the viewer says nothing.
+    scrollY.mockReturnValue(0);
+    rect.mockRestore();
+    fireEvent.click(screen.getByText('IMG_0001.png'));
+    await screen.findByTestId('viewer');
+    fireEvent.click(
+      within(screen.getByTestId('viewer')).getByRole('button', { name: 'Close viewer' }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/you last viewed/)).not.toBeInTheDocument();
   });
 
   it('shows the previous file after trashing the last one', async () => {

@@ -65,6 +65,22 @@ type FaceManager struct {
 	defaultThreshold float64
 	// customThreshold is set once an administrator (or the environment) chose one.
 	customThreshold atomic.Bool
+	// crowdLimit is how many faces a photo may hold before its faces are only
+	// matched to known people, never grouped into new ones (0: no limit).
+	crowdLimit atomic.Int64
+}
+
+// MaxCrowdLimit bounds the crowd-limit setting.
+const MaxCrowdLimit = 1000
+
+// CrowdLimit is how many faces a photo may hold and still introduce new
+// people; faces in a photo with more are only matched to people already
+// known. 0 means no limit.
+func (m *FaceManager) CrowdLimit() int { return int(m.crowdLimit.Load()) }
+
+// SetCrowdLimit changes the crowd limit (clamped to 0..MaxCrowdLimit).
+func (m *FaceManager) SetCrowdLimit(n int) {
+	m.crowdLimit.Store(int64(max(0, min(n, MaxCrowdLimit))))
 }
 
 // Threshold is the cosine similarity at which a face joins an existing person.
@@ -188,7 +204,7 @@ func (m *FaceManager) Status(ctx context.Context, root string) (*FaceStatus, err
 	if st.People, err = store.CountPeople(ctx); err != nil {
 		return nil, err
 	}
-	unassigned, err := store.FacesUnassigned(ctx)
+	unassigned, err := store.FacesUnassigned(ctx, m.CrowdLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +263,9 @@ func (m *FaceManager) Pass(ctx context.Context, root string) (int, error) {
 	store := NewFaceStore(db.DB())
 
 	prov := m.prov()
+	if err := m.dropSkipped(ctx, store); err != nil {
+		return 0, err
+	}
 	if n, err := store.DedupeFaces(ctx); err != nil {
 		return 0, err
 	} else if n > 0 {
@@ -368,6 +387,18 @@ func (m *FaceManager) scanFile(ctx context.Context, store *FaceStore, root strin
 	return store.RecordFaceScan(ctx, uf.FileID, prov.Name(), prov.Version(), faces)
 }
 
+// dropSkipped discards the faces of photos a rule now skips.
+func (m *FaceManager) dropSkipped(ctx context.Context, store *FaceStore) error {
+	n, err := store.DropSkippedFaces(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		m.logger.Info("discarded faces of skipped photos", "faces", n)
+	}
+	return nil
+}
+
 // FaceClusterResult reports a grouping pass outcome.
 type FaceClusterResult struct {
 	// Inspected is the number of faces that were free to be (re)grouped.
@@ -398,7 +429,10 @@ func (m *FaceManager) ClusterPass(ctx context.Context, root string) (*FaceCluste
 	defer func() { _ = db.Close() }()
 	store := NewFaceStore(db.DB())
 
-	faces, anchors, auto, err := store.groupingState(ctx)
+	if err := m.dropSkipped(ctx, store); err != nil {
+		return nil, err
+	}
+	faces, anchors, auto, err := store.groupingState(ctx, m.CrowdLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +482,7 @@ func (m *FaceManager) Unassigned(ctx context.Context, root string) ([]FaceRecord
 		return nil, err
 	}
 	defer func() { _ = db.Close() }()
-	faces, err := NewFaceStore(db.DB()).FacesUnassigned(ctx)
+	faces, err := NewFaceStore(db.DB()).FacesUnassigned(ctx, m.CrowdLimit())
 	if err != nil {
 		return nil, err
 	}

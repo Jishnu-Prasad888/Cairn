@@ -79,7 +79,8 @@ func (s *Store) AllSignatures(ctx context.Context, provider string, version int)
 		SELECT m.file_id, m.signature
 		FROM ml_signatures m
 		JOIN indexed_files f ON f.id = m.file_id
-		WHERE f.status = 'present' AND m.provider = ? AND m.version = ?`,
+		WHERE f.status = 'present' AND m.provider = ? AND m.version = ?
+		  AND NOT `+skippedSQL("f.rel_path"),
 		provider, version)
 	if err != nil {
 		return nil, fmt.Errorf("query all signatures: %w", err)
@@ -99,7 +100,8 @@ func (s *Store) AllSignatures(ctx context.Context, provider string, version int)
 }
 
 // IDsWithoutSignature returns present files that do not yet have a signature
-// from the given provider version, with their relative paths.
+// from the given provider version, with their relative paths. Photos a rule
+// skips are left out.
 func (s *Store) IDsWithoutSignature(ctx context.Context, provider string, version int) ([]UnsignedFile, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT f.id, f.rel_path
@@ -109,7 +111,8 @@ func (s *Store) IDsWithoutSignature(ctx context.Context, provider string, versio
 		  AND NOT EXISTS (
 		      SELECT 1 FROM ml_signatures m
 		      WHERE m.file_id = f.id AND m.provider = ? AND m.version = ?
-		  )`, provider, version)
+		  )
+		  AND NOT `+skippedSQL("f.rel_path"), provider, version)
 	if err != nil {
 		return nil, fmt.Errorf("list files without signature: %w", err)
 	}
@@ -149,7 +152,8 @@ func (s *Store) Similar(ctx context.Context, query uint64, limit int, excludeID 
 		SELECT m.file_id, m.signature
 		FROM ml_signatures m
 		JOIN indexed_files f ON f.id = m.file_id
-		WHERE f.status = 'present' AND m.file_id != ?`,
+		WHERE f.status = 'present' AND m.file_id != ?
+		  AND NOT `+skippedSQL("f.rel_path"),
 		excludeID)
 	if err != nil {
 		return nil, fmt.Errorf("query similar files: %w", err)
@@ -181,7 +185,8 @@ func (s *Store) SameContent(ctx context.Context, fileID string) ([]string, error
 		FROM indexed_files f
 		JOIN indexed_files q ON q.content_hash = f.content_hash
 		WHERE q.id = ? AND f.id != q.id AND f.status = 'present'
-		  AND q.content_hash IS NOT NULL AND q.content_hash != ''`, fileID)
+		  AND q.content_hash IS NOT NULL AND q.content_hash != ''
+		  AND NOT `+skippedSQL("f.rel_path"), fileID)
 	if err != nil {
 		return nil, fmt.Errorf("query identical files: %w", err)
 	}
@@ -206,6 +211,43 @@ func (s *Store) Count(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count signatures: %w", err)
 	}
 	return n, nil
+}
+
+// IsSkipped reports whether a rule leaves fileID out of machine learning.
+func (s *Store) IsSkipped(ctx context.Context, fileID string) (bool, error) {
+	var skipped bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT `+skippedSQL("f.rel_path")+` FROM indexed_files f WHERE f.id = ?`, fileID).Scan(&skipped)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check ml rules: %w", err)
+	}
+	return skipped, nil
+}
+
+// DropSkipped deletes the signatures of photos a rule now skips, so they stop
+// turning up as similar. Returns how many were removed.
+func (s *Store) DropSkipped(ctx context.Context) (int, error) {
+	// Ask first, so a pass with nothing to drop takes no write lock.
+	var pending bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM ml_signatures m JOIN indexed_files f ON f.id = m.file_id
+		WHERE `+skippedSQL("f.rel_path")+`)`).Scan(&pending); err != nil {
+		return 0, fmt.Errorf("check skipped signatures: %w", err)
+	}
+	if !pending {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM ml_signatures WHERE file_id IN (
+			SELECT f.id FROM indexed_files f WHERE `+skippedSQL("f.rel_path")+`)`)
+	if err != nil {
+		return 0, fmt.Errorf("drop skipped signatures: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // Purge deletes every derived signature. Originals are never touched.

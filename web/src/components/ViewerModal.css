@@ -225,6 +225,44 @@ video.viewer-media {
   transition: opacity var(--duration-slow) var(--ease-out);
 }
 
+/* A photo still on its way: a pill over the blurred thumbnail (or the bare
+   surround, for a photo without one). It waits a moment before showing, so a
+   photo from the cache never flashes it. */
+.viewer-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: var(--z-raised);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 10px;
+  color: var(--viewer-ink);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--viewer-background) 72%, transparent);
+  border-radius: var(--radius-pill);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: viewer-fade var(--duration-slow) var(--ease-out) 400ms backwards;
+}
+
+.viewer-loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--viewer-ink) 25%, transparent);
+  border-top-color: var(--viewer-ink);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: viewer-spin 0.8s linear infinite;
+}
+
+@keyframes viewer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .viewer-generic {
   display: flex;
   flex-direction: column;
@@ -348,6 +386,7 @@ video.viewer-media {
   overflow-y: auto;
   font-size: var(--font-size-md);
   line-height: 1.55;
+  text-align: center;
   overflow-wrap: anywhere;
 }
 
@@ -407,6 +446,7 @@ video.viewer-media {
 
 .viewer-caption-edit .viewer-note-input {
   width: 100%;
+  text-align: center;
   color: var(--viewer-ink);
   background: var(--viewer-fill);
   border-color: var(--viewer-line);

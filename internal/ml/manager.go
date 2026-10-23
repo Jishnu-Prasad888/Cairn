@@ -98,6 +98,13 @@ func (m *Manager) Pass(ctx context.Context, libraryID, root string) (int, error)
 	defer func() { _ = db.Close() }()
 	store := NewStore(db.DB())
 
+	// Photos a rule now skips lose the signatures an earlier pass made.
+	if n, err := store.DropSkipped(ctx); err != nil {
+		return 0, err
+	} else if n > 0 {
+		m.logger.Info("discarded signatures of skipped photos", "library_id", libraryID, "count", n)
+	}
+
 	files, err := store.IDsWithoutSignature(ctx, m.provider.Name(), m.provider.Version())
 	if err != nil {
 		return 0, err
@@ -300,6 +307,10 @@ func (m *Manager) Similar(ctx context.Context, libraryID, root, fileID string, l
 	defer func() { _ = db.Close() }()
 	store := NewStore(db.DB())
 
+	// A photo machine learning skips has nothing similar to show.
+	if skipped, err := store.IsSkipped(ctx, fileID); err != nil || skipped {
+		return nil, err
+	}
 	rec, err := store.Get(ctx, fileID)
 	if err != nil {
 		return nil, err

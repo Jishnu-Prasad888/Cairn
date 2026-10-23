@@ -134,6 +134,7 @@ function Favorites({
           onOpen={ops.openViewer}
           selection={selection}
           favorites={starred.ids}
+          onDelete={actions.onDeleteFile}
           onContextMenu={(file, x, y) =>
             setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
           }

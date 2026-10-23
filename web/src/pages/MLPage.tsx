@@ -34,13 +34,17 @@ import {
   purgeFaces,
   purgeSimilarity,
   runFacePass,
+  getMLRules,
   runSimilarityPass,
   setBatchSize,
+  setCrowdLimit,
   setFaceThreshold,
+  type MLRule,
 } from '../api/queries';
 import type { FaceStatus, MLStatus } from '../api/types';
 import { ConfirmDialog } from '../components/Dialog';
 import LibraryPicker from '../components/LibraryPicker';
+import MLRulesDialog from '../components/MLRulesDialog';
 import { Toggle } from '../components/ui/Toggle';
 import { useToast } from '../components/ui/Toast';
 import {
@@ -54,7 +58,7 @@ import './MLPage.css';
 import './MLPage.layout.css';
 
 /** Which card a status message belongs to, so feedback shows where you acted. */
-type Scope = 'switch' | 'similarity' | 'faces';
+type Scope = 'switch' | 'similarity' | 'faces' | 'rules';
 
 /** A pass is background work: the response says it started, nothing more. */
 type Job = { scope: Scope; message: string; error: string | null } | null;
@@ -187,6 +191,17 @@ function DangerZone({
   );
 }
 
+/** "3 folders or photos skipped, 1 always included". */
+function summarizeRules(rules: MLRule[]): string {
+  const skip = rules.filter((r) => r.kind === 'skip').length;
+  const always = rules.length - skip;
+  const parts = [];
+  if (skip)
+    parts.push(`${skip} folder${skip === 1 ? '' : 's'} or photo${skip === 1 ? '' : 's'} skipped`);
+  if (always) parts.push(`${always} always included`);
+  return `${parts.join(', ')}.`;
+}
+
 export default function MLPage() {
   const gate = useLibraryGate();
   const { user } = useAuth();
@@ -205,6 +220,10 @@ export default function MLPage() {
   const [batch, setBatch] = useState<{ value: string; saved: number } | null>(null);
   const [savingBatch, setSavingBatch] = useState(false);
   const [purging, setPurging] = useState<'similarity' | 'faces' | null>(null);
+  const [crowd, setCrowd] = useState<{ value: string; saved: number } | null>(null);
+  const [savingCrowd, setSavingCrowd] = useState(false);
+  const [rules, setRules] = useState<MLRule[] | null>(null);
+  const [editingRules, setEditingRules] = useState(false);
 
   // Face-pass polling outlives the request that started it; stop it when the
   // page goes away so it does not keep hitting the API.
@@ -235,6 +254,7 @@ export default function MLPage() {
           def: m.face_threshold_default,
         });
         setBatch({ value: String(m.batch_size), saved: m.batch_size });
+        setCrowd({ value: m.crowd_limit ? String(m.crowd_limit) : '', saved: m.crowd_limit ?? 0 });
       },
       () => setThreshold(null),
     );
@@ -253,6 +273,23 @@ export default function MLPage() {
   // this page has to re-read the status to show it moving: the stats, the
   // running badge, and the progress bar all come from here while one runs.
   const libraryId = gate.kind === 'ready' ? gate.libraryId : null;
+  const libraryOnline = gate.kind === 'ready' && gate.library.status !== 'offline';
+  // The rules are an administrator's; nobody else may read them.
+  useEffect(() => {
+    if (!libraryId || !isAdmin || !libraryOnline) return;
+    let cancelled = false;
+    getMLRules(libraryId).then(
+      (r) => {
+        if (!cancelled) setRules(r.rules ?? []);
+      },
+      () => {
+        if (!cancelled) setRules(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryId, isAdmin, libraryOnline]);
   useEffect(() => {
     if (!libraryId || !ml?.running) return;
     const interval = setInterval(() => status.reload(), 1000);
@@ -287,6 +324,23 @@ export default function MLPage() {
       })
       .catch((e: unknown) => fail('switch', e))
       .finally(() => setSavingBatch(false));
+  };
+
+  const saveCrowd = (n: number) => {
+    setSavingCrowd(true);
+    setCrowdLimit(n)
+      .then((m) => {
+        setCrowd({ value: m.crowd_limit ? String(m.crowd_limit) : '', saved: m.crowd_limit });
+        report(
+          'rules',
+          m.crowd_limit
+            ? `Saved. In photos with more than ${m.crowd_limit} faces, only people Cairn already knows are recognised. Regrouping people…`
+            : 'Saved. Every photo can introduce new people again. Regrouping people…',
+        );
+        faces.reload();
+      })
+      .catch((e: unknown) => fail('rules', e))
+      .finally(() => setSavingCrowd(false));
   };
 
   const saveThreshold = (value: number) => {
@@ -750,6 +804,113 @@ export default function MLPage() {
           )}
         </Card>
       </div>
+
+      {/* --------------------------- what to analyse ------------------------- */}
+      <Card id="ml-rules-title" title="What to analyse">
+        <p className="muted">
+          Leave screenshots, scans or whole folders out of face recognition and similar images, and
+          stop crowded photos — a concert, a class photo — from filling People with strangers.
+        </p>
+
+        {crowd && (
+          <div className="ml-block ml-field" data-testid="ml-crowd">
+            <label htmlFor="ml-crowd-input">Crowded photos: more faces than</label>
+            <div className="ml-field-row">
+              <input
+                id="ml-crowd-input"
+                type="number"
+                min={1}
+                max={1000}
+                step={1}
+                placeholder="No limit"
+                value={crowd.value}
+                disabled={!isAdmin || savingCrowd}
+                onChange={(e) => setCrowd({ ...crowd, value: e.target.value })}
+              />
+              <button
+                type="button"
+                className="button"
+                disabled={
+                  !isAdmin ||
+                  savingCrowd ||
+                  !(
+                    crowd.value.trim() === '' ||
+                    (Number.isInteger(Number(crowd.value)) &&
+                      Number(crowd.value) >= 0 &&
+                      Number(crowd.value) <= 1000)
+                  ) ||
+                  Number(crowd.value || 0) === crowd.saved
+                }
+                onClick={() => saveCrowd(Number(crowd.value || 0))}
+                data-testid="ml-crowd-save"
+              >
+                {savingCrowd ? 'Saving…' : 'Save'}
+              </button>
+              {crowd.saved > 0 && (
+                <button
+                  type="button"
+                  className="button"
+                  disabled={!isAdmin || savingCrowd}
+                  onClick={() => saveCrowd(0)}
+                >
+                  No limit
+                </button>
+              )}
+            </div>
+            <p className="ml-note">
+              In a photo with more faces than this, Cairn still recognises the people it already
+              knows from your other photos and adds the photo to them, but nobody else in it becomes
+              a new person or shows up under "Who is this?". Leave empty for no limit.
+            </p>
+          </div>
+        )}
+
+        {isAdmin && (
+          <div className="ml-block ml-field" data-testid="ml-rules">
+            <span>Skipped and always-included photos</span>
+            <p className="ml-note" data-testid="ml-rules-summary">
+              {rules === null
+                ? offline
+                  ? 'The library is offline.'
+                  : 'Loading…'
+                : rules.length === 0
+                  ? 'Every photo in this library is analysed.'
+                  : summarizeRules(rules)}
+            </p>
+            <div className="ml-actions">
+              <button
+                type="button"
+                className="button"
+                onClick={() => setEditingRules(true)}
+                disabled={offline || rules === null}
+                title={lockReason}
+                data-testid="ml-rules-edit"
+              >
+                Choose folders and photos…
+              </button>
+            </div>
+            <p className="ml-note">
+              Skipping a folder discards the faces already found there; photos you always include
+              are analysed fully, even inside a skipped folder or past the crowd limit. You can also
+              select photos in any grid and choose “Face recognition…”.
+            </p>
+          </div>
+        )}
+        <JobStatus job={job} scope="rules" onDismiss={dismiss} />
+      </Card>
+
+      {editingRules && gate.kind === 'ready' && (
+        <MLRulesDialog
+          library={gate.library}
+          onClose={() => setEditingRules(false)}
+          onSaved={(saved) => {
+            setRules(saved);
+            report('rules', 'Saved. Applying the rules in the background…');
+            faces.reload();
+            status.reload();
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={purging !== null}

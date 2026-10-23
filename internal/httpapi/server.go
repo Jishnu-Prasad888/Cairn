@@ -206,6 +206,8 @@ func (s *Server) Handler() http.Handler {
 		if s.mlRuntime != nil {
 			mux.Handle("GET /api/v1/ml/settings", s.withAuth(allowAny, s.handleGetMLSettings))
 			mux.Handle("PUT /api/v1/ml/settings", s.withAuth(allowAdmin, s.handlePutMLSettings))
+			mux.Handle("GET /api/v1/libraries/{id}/ml/rules", s.withAuth(allowAdmin, s.handleGetMLRules))
+			mux.Handle("PUT /api/v1/libraries/{id}/ml/rules", s.withAuth(allowAdmin, s.handlePutMLRules))
 			if s.faceModel != nil {
 				mux.Handle("GET /api/v1/ml/model", s.withAuth(allowAdmin, s.handleGetFaceModel))
 				mux.Handle("POST /api/v1/ml/model/download", s.withAuth(allowAdmin, s.handleDownloadFaceModel))

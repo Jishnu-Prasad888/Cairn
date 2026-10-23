@@ -115,6 +115,16 @@
   margin-bottom: 0;
 }
 
+.dialog-dont-ask {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
 .dialog-form {
   display: flex;
   flex-direction: column;

@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -49,8 +50,10 @@ func GeneratePreview(srcPath, cairnDir, fileID string, keys *crypto.Keys) (bool,
 	}
 	defer func() { _ = src.Close() }()
 
+	// A photo past the decode limits still gets a preview, from ffmpeg (see
+	// decodePhoto); it is exactly the kind that most needs one.
 	cfg, format, err := safeimage.DecodeConfig(src)
-	if err != nil || format == "gif" {
+	if (err != nil && !errors.Is(err, safeimage.ErrTooLarge)) || format == "gif" {
 		return false, nil
 	}
 	orientation := 1
@@ -64,7 +67,7 @@ func GeneratePreview(srcPath, cairnDir, fileID string, keys *crypto.Keys) (bool,
 	if _, err := src.Seek(0, io.SeekStart); err != nil {
 		return false, fmt.Errorf("rewind source for preview: %w", err)
 	}
-	img, _, err := safeimage.Decode(src)
+	img, err := decodePhoto(src, srcPath, PreviewSize)
 	if err != nil {
 		return false, nil
 	}

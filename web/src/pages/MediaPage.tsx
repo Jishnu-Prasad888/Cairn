@@ -870,6 +870,7 @@ function MediaBrowser({
                 onOpen={ops.openViewer}
                 selection={selection}
                 favorites={favorites.ids}
+                onDelete={actions.onDeleteFile}
                 onContextMenu={openMenu}
                 hasMore={listing.hasMore}
                 loadingMore={listing.loadingMore}

@@ -13,8 +13,11 @@
 
 import { type ReactElement, useCallback, useState } from 'react';
 
+import { useAuth } from '../../auth/authContext';
+import { useMLSwitch } from '../../api/mlSwitch';
 import { softDeleteFile } from '../../api/queries';
 import type { FileSummary } from '../../api/types';
+import { readTrashConfirm, storeTrashConfirm } from '../../lib/trashConfirm';
 import { AlbumPickerDialog } from '../albums/AlbumPickerDialog';
 import { ConfirmDialog } from '../Dialog';
 import { TagPickerDialog } from '../TagPickerDialog';
@@ -23,6 +26,7 @@ import { downloadUrl } from '../media';
 import type { MenuEntry, MenuItem } from '../ui/Menu';
 import { withDangerLast } from '../ui/Menu';
 import { useToast } from '../ui/Toast';
+import { MLSelectionDialog } from './MLSelectionDialog';
 import type { SelectionAction } from './SelectionToolbar';
 import type { Favorites } from './useFavorites';
 import type { Selection } from './useSelection';
@@ -50,6 +54,8 @@ export interface MediaActions {
   menuFor: (file: FileSummary) => MenuEntry[];
   /** Run by the Delete key while a selection exists. */
   onDeleteKey: (() => void) | undefined;
+  /** Run by the Delete key on a focused file when nothing is selected. */
+  onDeleteFile: ((file: FileSummary) => void) | undefined;
   dialogs: ReactElement;
 }
 
@@ -88,6 +94,11 @@ export function useMediaActions({
   const [trashing, setTrashing] = useState<FileSummary[] | null>(null);
   const [albumTargets, setAlbumTargets] = useState<FileSummary[] | null>(null);
   const [tagTargets, setTagTargets] = useState<FileSummary[] | null>(null);
+  const [mlTargets, setMlTargets] = useState<FileSummary[] | null>(null);
+  // Skipping photos in machine learning is an administrator's call.
+  const { user } = useAuth();
+  const mlOn = useMLSwitch();
+  const canML = user?.role === 'admin' && mlOn === true;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,29 +139,36 @@ export function useMediaActions({
     [favorites, toast],
   );
 
-  const confirmTrash = async () => {
-    if (!trashing) return;
+  const trash = async (targets: FileSummary[]) => {
     setBusy(true);
     setError(null);
     const results = await Promise.allSettled(
-      trashing.map((f) => softDeleteFile(f.library_id || libraryId, f.rel_path, f.id)),
+      targets.map((f) => softDeleteFile(f.library_id || libraryId, f.rel_path, f.id)),
     );
     const failed = results.filter((r) => r.status === 'rejected').length;
     setBusy(false);
     if (failed > 0) {
+      // Asked or not, a failure is shown in the dialog.
+      setTrashing(targets);
       setError(
-        `Moved ${results.length - failed} of ${trashing.length} to the trash. The rest could not be moved — they may have changed on disk.`,
+        `Moved ${results.length - failed} of ${targets.length} to the trash. The rest could not be moved — they may have changed on disk.`,
       );
       onChanged();
       return;
     }
     toast({
-      message: trashing.length === 1 ? 'Moved to trash' : `${trashing.length} items moved to trash`,
+      message: targets.length === 1 ? 'Moved to trash' : `${targets.length} items moved to trash`,
       tone: 'success',
     });
     setTrashing(null);
     selection.clear();
     onChanged();
+  };
+
+  // Asks first, unless the person has said not to.
+  const requestTrash = (targets: FileSummary[]) => {
+    if (readTrashConfirm()) setTrashing(targets);
+    else void trash(targets);
   };
 
   const files = selection.selectedFiles;
@@ -218,6 +236,17 @@ export function useMediaActions({
           },
         ]
       : []),
+    ...(canML
+      ? [
+          {
+            id: 'ml',
+            label: 'Face recognition…',
+            icon: 'people' as const,
+            onClick: () => setMlTargets(files),
+            testId: 'selection-ml',
+          },
+        ]
+      : []),
     ...(can.trash
       ? [
           {
@@ -225,7 +254,7 @@ export function useMediaActions({
             label: 'Move to trash',
             icon: 'trash' as const,
             danger: true,
-            onClick: () => setTrashing(files),
+            onClick: () => requestTrash(files),
             testId: 'selection-trash',
           },
         ]
@@ -311,7 +340,7 @@ export function useMediaActions({
         label: 'Move to trash',
         icon: 'trash',
         danger: true,
-        onSelect: () => setTrashing([file]),
+        onSelect: () => requestTrash([file]),
       });
     }
     return withDangerLast(items);
@@ -341,8 +370,27 @@ export function useMediaActions({
           setTrashing(null);
           setError(null);
         }}
-        onConfirm={() => void confirmTrash()}
+        onConfirm={() => {
+          if (trashing) void trash(trashing);
+        }}
+        onDontAskAgain={() => storeTrashConfirm(false)}
         testId="trash-many-dialog"
+      />
+      <MLSelectionDialog
+        files={mlTargets}
+        fallbackLibraryId={libraryId}
+        onClose={() => setMlTargets(null)}
+        onDone={(kind, count) => {
+          setMlTargets(null);
+          selection.clear();
+          toast({
+            message:
+              kind === 'skip'
+                ? `${count === 1 ? 'Photo' : `${count} photos`} skipped in face recognition`
+                : `${count === 1 ? 'Photo' : `${count} photos`} always included in face recognition`,
+            tone: 'success',
+          });
+        }}
       />
       <TagPickerDialog
         open={tagTargets !== null}
@@ -395,7 +443,8 @@ export function useMediaActions({
     selectionActions,
     menuFor,
     onDeleteKey:
-      can.trash && selection.active ? () => setTrashing(selection.selectedFiles) : undefined,
+      can.trash && selection.active ? () => requestTrash(selection.selectedFiles) : undefined,
+    onDeleteFile: can.trash ? (file) => requestTrash([file]) : undefined,
     dialogs,
   };
 }

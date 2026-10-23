@@ -61,7 +61,7 @@ func NewFaceStore(db *sql.DB) *FaceStore {
 }
 
 // FilesToScan returns present photos with no faces recorded for the given
-// provider version yet. The photo test uses the type the scanner recorded on
+// provider version yet, leaving out photos a rule skips. The photo test uses the type the scanner recorded on
 // the file itself: the post-scan hook runs before media-metadata jobs have
 // filled media_metadata, so depending on it would find nothing on first scan.
 func (s *FaceStore) FilesToScan(ctx context.Context, provider string, version int) ([]UnsignedFaceFile, error) {
@@ -78,6 +78,7 @@ func (s *FaceStore) FilesToScan(ctx context.Context, provider string, version in
 		      SELECT 1 FROM faces fa
 		      WHERE fa.file_id = f.id AND fa.provider = ? AND fa.version = ?
 		  )
+		  AND NOT `+skippedSQL("f.rel_path")+`
 		ORDER BY f.id`, provider, version, provider, version)
 	if err != nil {
 		return nil, fmt.Errorf("list files to face-scan: %w", err)
@@ -210,8 +211,10 @@ func (s *FaceStore) FaceByID(ctx context.Context, id string) (*FaceRecord, error
 }
 
 // FacesUnassigned returns faces that belong to no person, oldest first, with
-// their image's relative path (used to render crops).
-func (s *FaceStore) FacesUnassigned(ctx context.Context) ([]FaceRecord, error) {
+// their image's relative path (used to render crops). Faces in a photo with
+// more than crowdLimit faces (0: no limit) are left out: they are kept only
+// to be matched to people already known, never offered as someone new.
+func (s *FaceStore) FacesUnassigned(ctx context.Context, crowdLimit int) ([]FaceRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT fa.id, fa.file_id, fa.provider, fa.version, fa.x, fa.y, fa.width,
 		       fa.height, fa.confidence, fa.descriptor, fa.created_at, fa.updated_at,
@@ -219,7 +222,8 @@ func (s *FaceStore) FacesUnassigned(ctx context.Context) ([]FaceRecord, error) {
 		FROM faces fa
 		JOIN indexed_files f ON f.id = fa.file_id
 		WHERE NOT EXISTS (SELECT 1 FROM person_faces pf WHERE pf.face_id = fa.id)
-		ORDER BY fa.created_at, fa.id`)
+		  AND NOT `+crowdSQL+`
+		ORDER BY fa.created_at, fa.id`, crowdLimit, crowdLimit)
 	if err != nil {
 		return nil, fmt.Errorf("list unassigned faces: %w", err)
 	}
@@ -723,6 +727,66 @@ func (s *FaceStore) PurgeFaces(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// crowdSQL is an SQL condition true when face fa, in file f, is in a crowded
+// photo: more faces than the crowd limit (bound twice, as ? parameters; 0 is
+// no limit), and no "always" rule over the photo. The count is what detection
+// found, so deleting strangers by hand does not change which photos are
+// crowded.
+var crowdSQL = `(? > 0 AND COALESCE(
+		(SELECT fs.faces FROM face_scans fs WHERE fs.file_id = fa.file_id),
+		(SELECT COUNT(*) FROM faces x WHERE x.file_id = fa.file_id)) > ?
+	AND NOT ` + alwaysSQL("f.rel_path") + `)`
+
+// DropSkippedFaces discards the faces (and scan records) of photos a rule now
+// skips, with their assignments. People left with no faces go too when Cairn
+// named them; names a person chose are kept. Removing the rule later rescans
+// the photos. Returns the number of faces removed.
+func (s *FaceStore) DropSkippedFaces(ctx context.Context) (int, error) {
+	// Every pass calls this, nearly always with nothing to do. Ask first, so
+	// it takes no write lock then: a needless one made concurrent edits (a
+	// merge while a regroup ran) fail with SQLITE_BUSY.
+	var pending bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM indexed_files f
+		WHERE `+skippedSQL("f.rel_path")+`
+		  AND (EXISTS (SELECT 1 FROM faces fa WHERE fa.file_id = f.id)
+		       OR EXISTS (SELECT 1 FROM face_scans fs WHERE fs.file_id = f.id)))`).Scan(&pending); err != nil {
+		return 0, fmt.Errorf("check skipped faces: %w", err)
+	}
+	if !pending {
+		return 0, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("drop skipped faces begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	skipped := `SELECT f.id FROM indexed_files f WHERE ` + skippedSQL("f.rel_path")
+	res, err := tx.ExecContext(ctx, `DELETE FROM faces WHERE file_id IN (`+skipped+`)`)
+	if err != nil {
+		return 0, fmt.Errorf("drop skipped faces: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM face_scans WHERE file_id IN (`+skipped+`)`); err != nil {
+		return 0, fmt.Errorf("drop skipped face scans: %w", err)
+	}
+	if n == 0 {
+		return 0, tx.Commit()
+	}
+	for _, q := range []string{
+		`DELETE FROM person_faces WHERE face_id NOT IN (SELECT id FROM faces)`,
+		`DELETE FROM face_holds WHERE face_id NOT IN (SELECT id FROM faces)`,
+		`DELETE FROM people
+		 WHERE id NOT IN (SELECT person_id FROM person_faces)
+		   AND name GLOB 'Person [0-9]*'`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return 0, fmt.Errorf("tidy after skipped faces: %w", err)
+		}
+	}
+	return int(n), tx.Commit()
+}
+
 // PurgeStaleFaces removes faces recorded by any other provider or version:
 // descriptors from different algorithms are not comparable, so they must not
 // be mixed into clustering. People left with no faces and an automatic
@@ -896,18 +960,22 @@ func ensureAffected(res sql.Result, what string) error {
 // groupingState loads what planGroups needs: every face with its current
 // assignment (free when unassigned or held by an untouched automatic group),
 // the exemplars of every anchored person, and the untouched automatic people.
-func (s *FaceStore) groupingState(ctx context.Context) ([]clusterFace, map[string][]Exemplar, map[string]bool, error) {
+// A free face in a photo with more than crowdLimit faces (0: no limit) is
+// marked match-only.
+func (s *FaceStore) groupingState(ctx context.Context, crowdLimit int) ([]clusterFace, map[string][]Exemplar, map[string]bool, error) {
 	auto, err := s.AutoNamedPeople(ctx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT fa.id, fa.width, fa.height, fa.confidence, fa.descriptor,
+		SELECT fa.id, fa.file_id, fa.width, fa.height, fa.confidence, fa.descriptor,
 		       COALESCE(pf.person_id, ''),
-		       EXISTS (SELECT 1 FROM face_holds h WHERE h.face_id = fa.id)
+		       EXISTS (SELECT 1 FROM face_holds h WHERE h.face_id = fa.id),
+		       `+crowdSQL+`
 		FROM faces fa
+		JOIN indexed_files f ON f.id = fa.file_id
 		LEFT JOIN person_faces pf ON pf.face_id = fa.id
-		ORDER BY fa.created_at, fa.id`)
+		ORDER BY fa.created_at, fa.id`, crowdLimit, crowdLimit)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("list faces for grouping: %w", err)
 	}
@@ -915,13 +983,14 @@ func (s *FaceStore) groupingState(ctx context.Context) ([]clusterFace, map[strin
 	seen := map[string]bool{}
 	for rows.Next() {
 		var (
-			f    clusterFace
-			w, h int
-			conf float64
-			raw  []byte
-			held bool
+			f     clusterFace
+			w, h  int
+			conf  float64
+			raw   []byte
+			held  bool
+			crowd bool
 		)
-		if err := rows.Scan(&f.ID, &w, &h, &conf, &raw, &f.PersonID, &held); err != nil {
+		if err := rows.Scan(&f.ID, &f.FileID, &w, &h, &conf, &raw, &f.PersonID, &held, &crowd); err != nil {
 			_ = rows.Close()
 			return nil, nil, nil, fmt.Errorf("scan face for grouping: %w", err)
 		}
@@ -935,6 +1004,7 @@ func (s *FaceStore) groupingState(ctx context.Context) ([]clusterFace, map[strin
 		}
 		f.Quality = float64(w*h) * conf
 		f.Free = (f.PersonID == "" && !held) || auto[f.PersonID]
+		f.MatchOnly = f.Free && crowd
 		faces = append(faces, f)
 	}
 	if err := rows.Err(); err != nil {

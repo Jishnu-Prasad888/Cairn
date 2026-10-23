@@ -258,6 +258,8 @@ export interface FileSummary {
   folder_path: string;
   size_bytes: number;
   mod_time: string;
+  /** When the file joined the library (found by a scan, or uploaded); a move keeps it. */
+  added_at?: string;
   media_type: string;
   mime_type: string;
   status: string;

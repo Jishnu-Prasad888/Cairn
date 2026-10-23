@@ -765,10 +765,12 @@ paths:
         - name: sort
           in: query
           required: false
-          description: Sort field; defaults to `name`.
+          description: >-
+            Sort field; defaults to `name`. `added` orders by when the file
+            joined the library (`added_at`, kept across moves), then `mod_time`.
           schema:
             type: string
-            enum: [name, size, mod_time]
+            enum: [name, size, mod_time, added]
         - name: order
           in: query
           required: false
@@ -4646,6 +4648,10 @@ components:
         mod_time:
           type: string
           format: date-time
+        added_at:
+          type: string
+          format: date-time
+          description: When the file joined the library (found by a scan, or uploaded). A move keeps it.
         media_type:
           type: string
           enum: [photo, video, audio, document, other]

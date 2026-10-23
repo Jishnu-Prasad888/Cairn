@@ -604,13 +604,16 @@ func (s *Server) writeMediaError(w http.ResponseWriter, r *http.Request, err err
 // --- response types ---
 
 type fileResponse struct {
-	ID          string `json:"id"`
-	LibraryID   string `json:"library_id"`
-	RelPath     string `json:"rel_path"`
-	Name        string `json:"name"`
-	FolderPath  string `json:"folder_path"`
-	SizeBytes   int64  `json:"size_bytes"`
-	ModTime     string `json:"mod_time"`
+	ID         string `json:"id"`
+	LibraryID  string `json:"library_id"`
+	RelPath    string `json:"rel_path"`
+	Name       string `json:"name"`
+	FolderPath string `json:"folder_path"`
+	SizeBytes  int64  `json:"size_bytes"`
+	ModTime    string `json:"mod_time"`
+	// AddedAt is when the file joined the library: first found by a scan,
+	// or uploaded. A move keeps it.
+	AddedAt     string `json:"added_at,omitempty"`
 	MediaType   string `json:"media_type"`
 	MIMEType    string `json:"mime_type"`
 	Status      string `json:"status"`
@@ -658,11 +661,19 @@ func toFileResponse(f *media.File) fileResponse {
 		FolderPath:  f.FolderPath,
 		SizeBytes:   f.SizeBytes,
 		ModTime:     f.ModTime.UTC().Format(time.RFC3339),
+		AddedAt:     addedAt(f.FirstSeenAt),
 		MediaType:   string(f.MediaType),
 		MIMEType:    f.MIMEType,
 		Status:      string(f.Status),
 		ContentHash: f.ContentHash,
 	}
+}
+
+func addedAt(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // withColors fills in the placeholder colour of each file in out, from the
