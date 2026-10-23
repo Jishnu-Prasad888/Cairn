@@ -210,6 +210,20 @@ func (sc *Scanner) reconcileFile(
 
 	// Stage 1: unchanged — same path, size, and mtime.
 	if known && existing.SizeBytes == info.Size() && existing.ModTime.Equal(info.ModTime().UTC()) {
+		// A file Cairn wrote itself (an upload, a copy) was indexed without a
+		// hash. Hash it once now: without one, moving it in a file manager
+		// would look like a new file, which "Recently added" would show.
+		if existing.ContentHash == "" {
+			if sc.buf == nil {
+				sc.buf = make([]byte, hashBufSize)
+			}
+			hash, err := hashFile(absPath, sc.buf)
+			if err != nil {
+				return FileChange{}, fmt.Errorf("hash %s: %w", absPath, err)
+			}
+			existing.ContentHash = hash
+			existingByHash[hash] = append(existingByHash[hash], existing)
+		}
 		seenIDs[existing.ID] = struct{}{}
 		existing.LastSeenAt = now
 		existing.Status = StatusPresent

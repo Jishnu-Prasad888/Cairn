@@ -686,7 +686,7 @@ func TestListCursorPagesEverySortOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, sort := range []media.SortField{media.SortByModTime, media.SortByName, media.SortBySize} {
+	for _, sort := range []media.SortField{media.SortByModTime, media.SortByName, media.SortBySize, media.SortByAdded} {
 		for _, ord := range []media.SortOrder{media.SortAsc, media.SortDesc} {
 			var got []string
 			cursor := ""

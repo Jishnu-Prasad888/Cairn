@@ -174,6 +174,12 @@ const (
 	SortByName    SortField = "name"
 	SortBySize    SortField = "size"
 	SortByModTime SortField = "mod_time"
+	// SortByAdded orders by when the file joined the library (first seen by
+	// a scan, or uploaded), then by modification time among files that
+	// arrived together. A move keeps the date a file was added, so an old
+	// photo moved to another folder does not count as new; its modification
+	// time is no guide, since a file manager may reset it on a move.
+	SortByAdded SortField = "added"
 )
 
 // SortOrder is ascending or descending.

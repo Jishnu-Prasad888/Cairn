@@ -235,6 +235,7 @@ export default function TagsPage() {
               files={files.data}
               onOpen={ops.openViewer}
               selection={selection}
+              onDelete={actions.onDeleteFile}
               onContextMenu={(file, x, y) =>
                 setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
               }

@@ -21,10 +21,12 @@ import { ConfirmDialog } from '../components/Dialog';
 import { useFfmpegAvailable } from '../api/ffmpeg';
 import { PageHeader } from '../components/States';
 import { Icon, type IconName } from '../components/ui/Icon';
+import { Toggle } from '../components/ui/Toggle';
 import { formatDate } from '../lib/dates';
 import { MemorySettingsSection } from '../memories/MemorySettingsSection';
 import { type ThemePreference, readStoredTheme, storeTheme } from '../lib/theme';
 import { type PhotoLayout, readPhotoLayout, storePhotoLayout } from '../lib/photoLayout';
+import { readTrashConfirm, storeTrashConfirm } from '../lib/trashConfirm';
 import './SettingsPage.css';
 
 const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; icon: IconName }> = [
@@ -122,6 +124,7 @@ export default function SettingsPage() {
 
   const [theme, setTheme] = useState<ThemePreference>(() => readStoredTheme());
   const [photoLayout, setPhotoLayout] = useState<PhotoLayout>(() => readPhotoLayout());
+  const [trashConfirm, setTrashConfirm] = useState(() => readTrashConfirm());
 
   const users = useResource<User[]>(
     useCallback(async () => (await listUsers()).users ?? [], []),
@@ -158,6 +161,11 @@ export default function SettingsPage() {
   const onPhotoLayoutChange = (next: PhotoLayout) => {
     setPhotoLayout(next);
     storePhotoLayout(next);
+  };
+
+  const onTrashConfirmChange = (next: boolean) => {
+    setTrashConfirm(next);
+    storeTrashConfirm(next);
   };
 
   const confirmRevoke = () => {
@@ -306,6 +314,21 @@ export default function SettingsPage() {
                   </label>
                 ))}
               </div>
+            </Row>
+          </Section>
+
+          <Section id="files" title="Files">
+            <Row
+              title="Confirm before moving to trash"
+              description="Ask before files go to the trash. Deleting forever always asks. Remembered on this device."
+            >
+              <Toggle
+                checked={trashConfirm}
+                onChange={onTrashConfirmChange}
+                label="Confirm before moving to trash"
+                hideLabel
+                testId="settings-trash-confirm"
+              />
             </Row>
           </Section>
 

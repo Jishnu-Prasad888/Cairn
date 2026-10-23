@@ -21,7 +21,7 @@ const GROUPS: Array<{ title: string; keys: Array<[string[], string]> }> = [
       [['Space'], 'Select or deselect'],
       [['Shift', 'Click'], 'Select a range'],
       [['Ctrl', 'A'], 'Select all'],
-      [['Delete'], 'Move the selection to the trash'],
+      [['Delete'], 'Move the selection, or the focused item, to the trash'],
     ],
   },
   {
@@ -33,6 +33,7 @@ const GROUPS: Array<{ title: string; keys: Array<[string[], string]> }> = [
       [['Space'], 'Play or pause a video'],
       [['F'], 'Fullscreen'],
       [['I'], 'Details'],
+      [['Delete'], 'Move to the trash'],
       [['S'], 'Slideshow'],
       [['H'], 'Hide controls'],
     ],

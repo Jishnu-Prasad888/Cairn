@@ -177,7 +177,7 @@ func TestFaceStoreLifecycle(t *testing.T) {
 		t.Errorf("renamed person = %q, want Mum", people[0].Name)
 	}
 
-	unassigned, err := store.FacesUnassigned(ctx)
+	unassigned, err := store.FacesUnassigned(ctx, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

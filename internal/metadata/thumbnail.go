@@ -14,7 +14,6 @@ import (
 
 	"github.com/Jishnu-Prasad888/Cairn/internal/crypto"
 	"github.com/Jishnu-Prasad888/Cairn/internal/media"
-	"github.com/Jishnu-Prasad888/Cairn/internal/safeimage"
 	"golang.org/x/image/draw"
 )
 
@@ -35,7 +34,7 @@ func ThumbPath(cairnDir, fileID string) string {
 
 // GenerateThumbnail creates a JPEG thumbnail from srcPath and writes it to
 // ThumbPath(cairnDir, fileID). Photos are decoded directly, except AVIF and
-// HEIC, which go through ffmpeg; videos use their first frame, extracted with
+// HEIC, and photos past safeimage's pixel cap, which go through ffmpeg; videos use their first frame, extracted with
 // ffmpeg too. The original file is never modified; when keys are enabled the
 // on-disk thumbnail is sealed with the at-rest key. Returns (true, nil) when the thumbnail was written,
 // (false, nil) when the file has no thumbnail this server can make.
@@ -74,10 +73,10 @@ func GenerateThumbnail(srcPath, cairnDir, fileID string, keys *crypto.Keys) (boo
 	}
 	defer func() { _ = src.Close() }()
 
-	img, _, err := safeimage.Decode(src)
+	img, err := decodePhoto(src, srcPath, ThumbnailSize)
 	if err != nil {
-		// Not a supported image (or exceeds safety limits) — skip silently
-		// (audio, docs, etc.).
+		// Not a supported image (or too large even for ffmpeg) — skip
+		// silently (audio, docs, etc.).
 		return false, nil
 	}
 	if err := writeThumb(img, cairnDir, fileID, keys); err != nil {

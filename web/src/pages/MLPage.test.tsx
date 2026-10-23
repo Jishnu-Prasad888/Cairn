@@ -394,3 +394,82 @@ describe('MLPage — unavailable payloads', () => {
     });
   });
 });
+
+describe('MLPage — what to analyse', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const settings = {
+    enabled: true,
+    face_threshold: 0.5,
+    face_threshold_default: 0.5,
+    batch_size: 1,
+    crowd_limit: 0,
+  };
+
+  it('saves the crowd limit', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        url.endsWith('/api/v1/ml/settings')
+          ? json(init?.method === 'PUT' ? { ...settings, crowd_limit: 10 } : settings)
+          : undefined,
+      (url) => (url.endsWith('/ml/rules') ? json({ rules: [] }) : undefined),
+    ]);
+
+    const field = await screen.findByLabelText('Crowded photos: more faces than');
+    await waitFor(() => {
+      expect(screen.getByTestId('ml-rules-summary')).toHaveTextContent(
+        'Every photo in this library is analysed.',
+      );
+    });
+    fireEvent.change(field, { target: { value: '10' } });
+    fireEvent.click(screen.getByTestId('ml-crowd-save'));
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'PUT', '/api/v1/ml/settings')).toEqual({ crowd_limit: 10 });
+    });
+    expect(await screen.findByText(/more than 10 faces/)).toBeInTheDocument();
+  });
+
+  it('adds a skipped folder and a photo to always include', async () => {
+    const fetchMock = setup([
+      (url) => (url.endsWith('/api/v1/ml/settings') ? json(settings) : undefined),
+      (url, init) => {
+        if (!url.endsWith('/api/v1/libraries/lib1/ml/rules')) return undefined;
+        if (init?.method === 'PUT') return json(JSON.parse(String(init.body)));
+        return json({ rules: [{ kind: 'skip', path: 'Screenshots' }] });
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ml-rules-summary')).toHaveTextContent(
+        '1 folder or photo skipped.',
+      );
+    });
+    fireEvent.click(screen.getByTestId('ml-rules-edit'));
+    const dialog = await screen.findByTestId('ml-rules-dialog');
+    expect(within(dialog).getByTestId('ml-rules-skip')).toHaveTextContent('Screenshots');
+
+    fireEvent.change(within(dialog).getByTestId('ml-rule-path'), {
+      target: { value: 'Screenshots/me.png' },
+    });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Always include' }));
+    fireEvent.click(within(dialog).getByTestId('ml-rule-add'));
+    expect(within(dialog).getByTestId('ml-rules-always')).toHaveTextContent('Screenshots/me.png');
+    fireEvent.click(within(dialog).getByTestId('save-ml-rules'));
+
+    await waitFor(() => {
+      expect(bodyOf(fetchMock, 'PUT', '/api/v1/libraries/lib1/ml/rules')).toEqual({
+        rules: [
+          { kind: 'skip', path: 'Screenshots' },
+          { kind: 'always', path: 'Screenshots/me.png' },
+        ],
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ml-rules-summary')).toHaveTextContent(
+        '1 folder or photo skipped, 1 always included.',
+      );
+    });
+  });
+});

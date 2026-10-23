@@ -127,6 +127,11 @@ export interface ConfirmDialogProps {
   busy?: boolean | undefined;
   error?: string | null | undefined;
   testId?: string | undefined;
+  /**
+   * Offers a "Don't ask again" checkbox; called, just before `onConfirm`,
+   * when it is ticked. The caller remembers the choice.
+   */
+  onDontAskAgain?: (() => void) | undefined;
 }
 
 /** A yes/no dialog replacing `window.confirm`. */
@@ -142,7 +147,19 @@ export function ConfirmDialog({
   busy,
   error,
   testId,
+  onDontAskAgain,
 }: ConfirmDialogProps) {
+  // Unticked each time the dialog opens.
+  const [dontAsk, setDontAsk] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setDontAsk(false);
+  }
+  const confirm = () => {
+    if (dontAsk) onDontAskAgain?.();
+    onConfirm();
+  };
   return (
     <Dialog
       open={open}
@@ -158,7 +175,7 @@ export function ConfirmDialog({
           <button
             type="button"
             className={destructive ? 'button danger-button' : 'button primary-button'}
-            onClick={onConfirm}
+            onClick={confirm}
             disabled={busy}
           >
             {busy ? 'Working…' : confirmLabel}
@@ -167,6 +184,17 @@ export function ConfirmDialog({
       }
     >
       <div className="dialog-message">{message}</div>
+      {onDontAskAgain && (
+        <label className="dialog-dont-ask">
+          <input
+            type="checkbox"
+            checked={dontAsk}
+            onChange={(e) => setDontAsk(e.target.checked)}
+            disabled={busy}
+          />
+          <span>Don't ask again</span>
+        </label>
+      )}
       {error && (
         <p className="error-text" role="alert">
           {error}

@@ -617,6 +617,7 @@ function AlbumDetail({
           onOpen={ops.openViewer}
           selection={selection}
           favorites={favorites.ids}
+          onDelete={actions.onDeleteFile}
           onContextMenu={(file, x, y) =>
             setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
           }

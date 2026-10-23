@@ -23,6 +23,7 @@ Every file endpoint returns a `file` object with these fields:
 | `folder_path`  | string | Parent directory, `.` for the library root.                       |
 | `size_bytes`   | int    | File size in bytes.                                                |
 | `mod_time`     | string | Modification time in RFC 3339 UTC.                                |
+| `added_at`     | string | When the file joined the library (found by a scan, or uploaded), RFC 3339 UTC. A move keeps it. |
 | `media_type`   | string | One of `photo`, `video`, `audio`, `document`, `other`.           |
 | `mime_type`    | string | Best-effort MIME type.                                             |
 | `status`       | string | One of `present`, `missing`, `deleted`.                           |
@@ -89,7 +90,7 @@ Returns a page of files:
 | `recursive` | `true` / `false`                           | `false`   | Include all descendants of `folder`.                    |
 | `type`      | `photo` / `video` / `audio` / `document` / `other` | all  | Filter by media type.                                   |
 | `status`    | `present` / `missing` / `deleted`          | `present` | Filter by indexer status.                               |
-| `sort`      | `name` / `size` / `mod_time`               | `name`    | Sort field.                                             |
+| `sort`      | `name` / `size` / `mod_time` / `added`     | `name`    | Sort field. `added` is `added_at`, then `mod_time`.     |
 | `order`     | `asc` / `desc`                             | `asc`     | Sort direction.                                         |
 | `cursor`    | opaque                                     | –         | Page cursor returned as `next_cursor`.                  |
 | `limit`     | 1–200                                      | 50        | Page size.                                              |
@@ -462,3 +463,9 @@ have no Go decoder, so their thumbnails are made with `ffmpeg` too: AVIF with
 any ffmpeg on `PATH`, HEIC only with ffmpeg 7.1 or newer — a phone's HEIC is a
 grid of tiles, which earlier releases do not compose. Raw camera formats get
 no thumbnail.
+
+A photo past the safe decoder's 50-megapixel cap (a 108 MP phone camera's
+full-resolution shot, say) is also handed to `ffmpeg`, which scales it down as
+it decodes (a JPEG at 1/2, 1/4 or 1/8 resolution straight from its DCT
+blocks), so it still gets a thumbnail and a viewer preview. Without ffmpeg it
+gets neither, and the viewer shows the original.

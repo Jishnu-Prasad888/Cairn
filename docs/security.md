@@ -64,7 +64,9 @@ downloads:
 - Every response carries browser hardening headers (`nosniff`, `DENY`
   framing, `no-referrer`, a `'self'` CSP, `same-origin` COOP).
 - User-controlled image decoding is bounded: a shared safe-decoder rejects
-  frames over 30 000 px per side or 50 megapixels before allocation.
+  frames over 30 000 px per side or 50 megapixels before allocation. Photos
+  past the pixel cap go to `ffmpeg` for thumbnails and previews instead,
+  bounded at 100 megapixels after a JPEG's reduced-resolution decode.
 - Uploads are capped (`CAIRN_MAX_UPLOAD_BYTES`, default 2 GiB) at both the
   HTTP and store layers; aborted uploads never strand temp files.
 - Share-token path segments are redacted from logs (matching the

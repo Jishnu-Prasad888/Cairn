@@ -237,6 +237,34 @@ purge action without touching names or photos.
    rename/merge/delete operations, and unassign can return a face to the
    clustering pool.
 
+### Skipped photos, always-included photos, and crowds
+
+What machine learning looks at can be narrowed per library (Machine learning
+page → *What to analyse*, or select photos in any grid → *Face recognition…*;
+admin only):
+
+- **Skip** a folder (with everything under it) or a photo: it is left out of
+  face recognition and similar images. Faces and signatures already made for it
+  are discarded on the next pass, together with "Person N" groups left empty;
+  names you chose survive. Removing the rule analyses the photos again.
+- **Always include** a folder or photo: it is analysed fully, even inside a
+  skipped folder and past the crowd limit. An always rule wins over a skip
+  rule however the two are nested. One path has one kind.
+- **Crowd limit** (server-wide, `PUT /api/v1/ml/settings {"crowd_limit": N}`,
+  0 = none): in a photo where detection found more than N faces, every face is
+  still detected and stored, but only to be matched against people who exist
+  without that photo — named people and the groups the uncrowded photos form.
+  A crowd face joins the person it matches best at or above the threshold, at
+  most one face per person per photo; it never starts a person, never pulls
+  two together, and an unmatched one is not shown under "Who is this?". A face
+  you place by hand stays where you put it. Changing the limit regroups at
+  once; no photo is re-read.
+
+Rules live in the library database (`ml_rules`) and are read and replaced with
+`GET` / `PUT /api/v1/libraries/{id}/ml/rules` (`{"rules": [{"kind": "skip" |
+"always", "path": "Screenshots"}]}`; absolute paths inside the library are
+accepted). Saving applies them in the background.
+
 ### Configuration
 
 | Env var | Default | Meaning |
@@ -264,6 +292,7 @@ permission capabilities for the rest:
 - `POST /api/v1/libraries/{id}/ml/faces/pass` — enqueue a detection pass.
 - `POST /api/v1/libraries/{id}/ml/faces/cluster` — enqueue a clustering pass.
 - `POST /api/v1/libraries/{id}/ml/faces/purge` — delete all faces and assignments (names survive).
+- `GET` / `PUT /api/v1/libraries/{id}/ml/rules` — the library's skip and always-include rules (admin).
 - `GET /api/v1/libraries/{id}/faces` — unassigned faces (the clustering pool); `?person=` filters media by person in search.
 - `GET /api/v1/libraries/{id}/faces/{faceID}/image` — derived JPEG crop, gated on the owning file's read permission.
 - `DELETE /api/v1/libraries/{id}/faces/{faceID}` — delete one face for good (its photo stays recorded as scanned, so it is not detected again).

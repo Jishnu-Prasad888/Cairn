@@ -126,13 +126,16 @@ function Home({ library }: { library: Library }) {
     useCallback(async (id: string) => {
       const [recent, albums, memories, people] = await Promise.all([
         // The API filters by one type, so photos and videos are fetched
-        // separately and merged newest first.
+        // separately and merged newest first. "Added" is when a file joined
+        // the library, which a move keeps: sorting by modification time put
+        // any old photo moved to another folder at the top, since moving
+        // with a file manager may reset that time.
         Promise.all(
           (['photo', 'video'] as const).map((type) =>
             listFiles(id, {
               type,
               recursive: true,
-              sort: 'mod_time',
+              sort: 'added',
               order: 'desc',
               limit: RECENT_LIMIT,
             })
@@ -143,7 +146,11 @@ function Home({ library }: { library: Library }) {
           lists
             .flat()
             .filter((f, i, all) => all.findIndex((x) => x.id === f.id) === i)
-            .sort((a, b) => b.mod_time.localeCompare(a.mod_time))
+            .sort(
+              (a, b) =>
+                (b.added_at ?? '').localeCompare(a.added_at ?? '') ||
+                b.mod_time.localeCompare(a.mod_time),
+            )
             .slice(0, RECENT_LIMIT),
         ),
         listAlbums(id)
@@ -299,6 +306,7 @@ function Home({ library }: { library: Library }) {
               files={recent}
               onOpen={ops.openViewer}
               favorites={favorites.ids}
+              onDelete={actions.onDeleteFile}
               onContextMenu={(file, x, y) =>
                 setMenu({ anchor: { x, y }, items: actions.menuFor(file) })
               }

@@ -17,6 +17,10 @@ const settingKey = "ml.enabled"
 // thresholdKey holds the administrator's face-matching threshold.
 const thresholdKey = "ml.face_threshold"
 
+// crowdKey holds the crowd limit: how many faces a photo may hold and still
+// introduce new people.
+const crowdKey = "ml.crowd_limit"
+
 // batchKey holds how many unprocessed images must pile up before a finished
 // scan starts the models.
 const batchKey = "ml.batch_size"
@@ -138,6 +142,12 @@ func (r *Runtime) Load(ctx context.Context, def bool) error {
 			r.batch.Store(int64(n))
 		}
 	}
+	if err := r.db.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = ?`, crowdKey).Scan(&raw); err == nil {
+		var n int
+		if json.Unmarshal([]byte(raw), &n) == nil {
+			r.faces.SetCrowdLimit(n)
+		}
+	}
 	if err := r.db.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = ?`, thresholdKey).Scan(&raw); err == nil {
 		var v float64
 		if json.Unmarshal([]byte(raw), &v) == nil {
@@ -169,6 +179,44 @@ func (r *Runtime) SetFaceThreshold(ctx context.Context, v float64) error {
 		r.regroupAll()
 	}
 	return nil
+}
+
+// CrowdLimit reports how many faces a photo may hold and still introduce new
+// people (0: no limit).
+func (r *Runtime) CrowdLimit() int { return r.faces.CrowdLimit() }
+
+// SetCrowdLimit stores and applies the crowd limit (0 turns it off) and
+// regroups every online library with it in the background: faces of photos
+// over the limit then only join people already known.
+func (r *Runtime) SetCrowdLimit(ctx context.Context, n int) error {
+	r.faces.SetCrowdLimit(n)
+	var err error
+	if n := r.faces.CrowdLimit(); n == 0 {
+		_, err = r.db.ExecContext(ctx, `DELETE FROM server_settings WHERE key = ?`, crowdKey)
+	} else {
+		raw, _ := json.Marshal(n)
+		_, err = r.db.ExecContext(ctx, `
+			INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+			crowdKey, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+	}
+	if err != nil {
+		return err
+	}
+	if r.faces.Enabled() {
+		r.regroupAll()
+	}
+	return nil
+}
+
+// RulesChanged applies a library's new skip and always rules in the
+// background: what is now skipped loses its faces and signatures, what is no
+// longer skipped is analysed, and people are regrouped.
+func (r *Runtime) RulesChanged(libraryID, root string) {
+	if !r.Enabled() {
+		return
+	}
+	go r.process(libraryID, root, 1)
 }
 
 // regroupAll runs a grouping pass over every online library in the background.

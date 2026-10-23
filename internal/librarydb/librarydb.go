@@ -32,7 +32,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 11
+	SchemaVersion = 13
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB or AcquireDB to
@@ -267,6 +267,12 @@ func addIndexedFileMediaType(db *sql.DB) error {
 	if _, err := db.Exec(
 		`CREATE INDEX IF NOT EXISTS indexed_files_status_type_mod_idx
 		 ON indexed_files (status, media_type, mod_time)`); err != nil {
+		return err
+	}
+	// Covers "Recently added": newest-first by the date a file joined.
+	if _, err := db.Exec(
+		`CREATE INDEX IF NOT EXISTS indexed_files_status_type_added_idx
+		 ON indexed_files (status, media_type, first_seen_at, mod_time)`); err != nil {
 		return err
 	}
 	return nil
@@ -780,5 +786,16 @@ CREATE TABLE IF NOT EXISTS ignore_rules (
 	pattern    TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	UNIQUE (kind, pattern)
+);
+
+-- ml_rules lists paths machine learning treats specially: "skip" leaves a
+-- file, or a folder and everything under it, out of face recognition and
+-- similar images; "always" analyses it fully past skip rules and the crowd
+-- limit. One path has one kind.
+CREATE TABLE IF NOT EXISTS ml_rules (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	kind       TEXT NOT NULL CHECK (kind IN ('skip', 'always')),
+	path       TEXT NOT NULL UNIQUE,
+	created_at TEXT NOT NULL
 );
 `

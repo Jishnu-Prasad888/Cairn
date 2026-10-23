@@ -166,7 +166,8 @@ export const getIndexProgress = (id: string) =>
 
 /* ------------------------------ files ------------------------------ */
 
-export type FileSort = 'name' | 'size' | 'mod_time' | 'media_type';
+/** `added`: when a file joined the library, newest first; a move does not change it. */
+export type FileSort = 'name' | 'size' | 'mod_time' | 'added' | 'media_type';
 export type SortOrder = 'asc' | 'desc';
 export type MediaFilter = 'photo' | 'video' | 'audio' | 'document' | 'other';
 export type FileStatusFilter = 'present' | 'missing' | 'trashed';
@@ -683,6 +684,11 @@ export interface MLSettings {
   face_threshold_default: number;
   /** New, unprocessed images that must pile up before the models run. */
   batch_size: number;
+  /**
+   * Faces a photo may hold and still introduce new people; faces in a photo
+   * with more only join people already known. 0 means no limit.
+   */
+  crowd_limit: number;
 }
 
 export const getMLSettings = () => apiGet<MLSettings>('/ml/settings');
@@ -696,6 +702,37 @@ export const setFaceThreshold = (face_threshold: number) =>
 /** Run the models once this many new images are waiting (1 = every image). */
 export const setBatchSize = (batch_size: number) =>
   apiPut<MLSettings>('/ml/settings', { batch_size });
+
+/** How many faces a photo may hold and still introduce new people; 0 turns the limit off. */
+export const setCrowdLimit = (crowd_limit: number) =>
+  apiPut<MLSettings>('/ml/settings', { crowd_limit });
+
+/**
+ * A path machine learning treats specially: `skip` leaves a file, or a folder
+ * and everything in it, out of face recognition and similar images; `always`
+ * analyses it fully, past skip rules and the crowd limit.
+ */
+export interface MLRule {
+  kind: 'skip' | 'always';
+  path: string;
+}
+
+export const getMLRules = (libraryId: string) =>
+  apiGet<{ rules: MLRule[] }>(`/libraries/${libraryId}/ml/rules`);
+
+export const saveMLRules = (libraryId: string, rules: MLRule[]) =>
+  apiPut<{ rules: MLRule[] }>(`/libraries/${libraryId}/ml/rules`, { rules });
+
+/**
+ * Adds rules to a library's, replacing any rule already on the same path (one
+ * path has one kind).
+ */
+export async function addMLRules(libraryId: string, add: MLRule[]): Promise<MLRule[]> {
+  const { rules } = await getMLRules(libraryId);
+  const paths = new Set(add.map((r) => r.path));
+  const next = [...(rules ?? []).filter((r) => !paths.has(r.path)), ...add];
+  return (await saveMLRules(libraryId, next)).rules;
+}
 
 /* --------------------------- system capabilities --------------------------- */
 

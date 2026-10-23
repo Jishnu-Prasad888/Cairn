@@ -19,6 +19,10 @@ type mlSettings struct {
 	// BatchSize is how many new, unprocessed images must pile up (uploads or
 	// files moved in by hand) before the models run on them.
 	BatchSize int `json:"batch_size"`
+	// CrowdLimit is how many faces a photo may hold and still introduce new
+	// people; faces in photos with more only join people already known.
+	// 0 means no limit.
+	CrowdLimit int `json:"crowd_limit"`
 }
 
 type mlSettingsUpdate struct {
@@ -26,12 +30,14 @@ type mlSettingsUpdate struct {
 	// FaceThreshold 0 restores the default.
 	FaceThreshold *float64 `json:"face_threshold"`
 	BatchSize     *int     `json:"batch_size"`
+	// CrowdLimit 0 turns the limit off.
+	CrowdLimit *int `json:"crowd_limit"`
 }
 
 func (s *Server) currentMLSettings() mlSettings {
 	cur, def := s.mlRuntime.FaceThreshold()
 	return mlSettings{Enabled: s.mlRuntime.Enabled(), FaceThreshold: cur, FaceThresholdDefault: def,
-		BatchSize: s.mlRuntime.BatchSize()}
+		BatchSize: s.mlRuntime.BatchSize(), CrowdLimit: s.mlRuntime.CrowdLimit()}
 }
 
 // handleGetMLSettings — GET /api/v1/ml/settings
@@ -46,10 +52,23 @@ func (s *Server) handleGetMLSettings(w http.ResponseWriter, _ *http.Request, _ *
 func (s *Server) handlePutMLSettings(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	var in mlSettingsUpdate
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in); err != nil ||
-		(in.Enabled == nil && in.FaceThreshold == nil && in.BatchSize == nil) {
+		(in.Enabled == nil && in.FaceThreshold == nil && in.BatchSize == nil && in.CrowdLimit == nil) {
 		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
-			CodeBadRequest, "Body must contain \"enabled\", \"face_threshold\" and/or \"batch_size\".")
+			CodeBadRequest, "Body must contain \"enabled\", \"face_threshold\", \"batch_size\" and/or \"crowd_limit\".")
 		return
+	}
+	if n := in.CrowdLimit; n != nil {
+		if *n < 0 || *n > ml.MaxCrowdLimit {
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+				CodeBadRequest, fmt.Sprintf("crowd_limit must be between 0 and %d (0 turns it off).", ml.MaxCrowdLimit))
+			return
+		}
+		if err := s.mlRuntime.SetCrowdLimit(r.Context(), *n); err != nil {
+			s.logger.Error("save ml crowd limit", "error", err)
+			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+				CodeInternal, "Could not save the setting.")
+			return
+		}
 	}
 	if t := in.FaceThreshold; t != nil {
 		if *t < 0 || *t >= 1 {

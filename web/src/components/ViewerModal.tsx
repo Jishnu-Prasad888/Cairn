@@ -18,7 +18,7 @@
  *
  * Keyboard: ← → navigate, + − zoom, 0 fit, R / L rotate right / left,
  * Space play/pause, F fullscreen, S slideshow, I (or T) details,
- * H hide controls, Esc close.
+ * H hide controls, Delete move to trash, Esc close.
  *
  * Rotating only turns the photo on screen, for viewing; the file is untouched.
  */
@@ -27,7 +27,7 @@ import { Maximize, Minimize, X } from 'lucide-react';
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 
 import { addFavorite, getFileMetadata, listFavorites, removeFavorite } from '../api/queries';
-import type { FileMetadata, FileSummary } from '../api/types';
+import { formatBytes, type FileMetadata, type FileSummary } from '../api/types';
 import { formatDateTime } from '../lib/dates';
 import { useFocusTrap } from '../lib/focusTrap';
 import { COMPACT_QUERY, useMediaQuery } from '../lib/useMediaQuery';
@@ -204,12 +204,14 @@ export function ViewerModal({
   const [tab, setTab] = useState<PanelTab>('details');
   // Which image the photo is drawn from, and whether it has arrived, tagged
   // with the file it describes so navigating never shows the previous
-  // photo's state. `fullFailed` remembers an original the browser could not
+  // photo's state. `fullShown` marks the original, fetched for zooming over
+  // the preview, as arrived; `fullFailed` remembers one the browser could not
   // decode (HEIC, RAW) so zooming does not ask for it again.
   const [photo, setPhoto] = useState<{
     id: string;
     source: PhotoSource;
     shown: boolean;
+    fullShown?: boolean;
     fullFailed?: boolean;
   } | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<ReadonlySet<string> | null>(null);
@@ -509,6 +511,14 @@ export function ViewerModal({
             rotate(-1);
           }
           break;
+        case 'Delete':
+          // The same as the trash button: the page asks first, unless told
+          // not to, and the viewer moves on to the next file.
+          if (!busy) {
+            e.preventDefault();
+            onRequestAction('trash', file);
+          }
+          break;
         default:
           break;
       }
@@ -516,10 +526,12 @@ export function ViewerModal({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
+    busy,
     close,
-    file.media_type,
+    file,
     goNext,
     goPrev,
+    onRequestAction,
     panBy,
     resetView,
     rotate,
@@ -723,6 +735,10 @@ export function ViewerModal({
       : photoState.source === 'thumbnail'
         ? thumbnailUrl(libraryId, file)
         : downloadUrl(libraryId, file);
+  // Still on its way: the photo itself, or the original zoomed into. Only the
+  // original is worth a size, being the one that can be tens of megabytes.
+  const photoLoading = isPhoto && (!originalShown || (zoomedFull && !photoState.fullShown));
+  const loadingOriginal = photoLoading && photoSrc === downloadUrl(libraryId, file);
 
   // Fetch the previews of the photos either side, so paging to one finds it
   // in the browser cache (and the server has made it while this one is seen).
@@ -866,6 +882,7 @@ export function ViewerModal({
   );
   const trashTool = tool('trash', 'Move to trash', () => onRequestAction('trash', file), {
     disabled: busy,
+    title: 'Move to trash (Delete)',
     testId: 'viewer-trash',
   });
 
@@ -1071,6 +1088,8 @@ export function ViewerModal({
                   src={photoSrc}
                   onLoad={() => {
                     if (!photoState.shown) setPhoto({ ...photoState, shown: true });
+                    else if (zoomedFull && !photoState.fullShown)
+                      setPhoto({ ...photoState, fullShown: true });
                     refitTurn();
                   }}
                   onError={onPhotoError}
@@ -1078,6 +1097,21 @@ export function ViewerModal({
                   style={mediaStyle}
                   draggable={false}
                 />
+                {photoLoading && (
+                  <div
+                    key={`loading-${file.id}-${loadingOriginal}`}
+                    className="viewer-loading"
+                    role="status"
+                    data-testid="viewer-loading"
+                  >
+                    <span className="viewer-loading-spinner" aria-hidden="true" />
+                    <span className="viewer-loading-label">
+                      {loadingOriginal
+                        ? `Loading full resolution · ${formatBytes(file.size_bytes)}`
+                        : 'Loading'}
+                    </span>
+                  </div>
+                )}
               </>
             ) : isVideo ? (
               <>

@@ -24,6 +24,13 @@ import (
 // freshly created member account.
 func newLibraryListServer(t *testing.T) (*testClient, []library.Library, func() *testClient) {
 	t.Helper()
+	return newLibraryListServerWith(t, nil)
+}
+
+// newLibraryListServerWith is newLibraryListServer with a hook to add
+// dependencies (the ML runtime, say) before the server is built.
+func newLibraryListServerWith(t *testing.T, extra func(*Dependencies)) (*testClient, []library.Library, func() *testClient) {
+	t.Helper()
 
 	tmpDir := t.TempDir()
 	pool, err := db.Open(filepath.Join(tmpDir, "test.db"))
@@ -54,13 +61,17 @@ func newLibraryListServer(t *testing.T) (*testClient, []library.Library, func() 
 		libs = append(libs, *lib)
 	}
 
-	handler := New(Dependencies{
+	deps := Dependencies{
 		Logger:    logger,
 		DB:        pool,
 		Auth:      authSvc,
 		Authz:     authzSvc,
 		Libraries: libManager,
-	}).Handler()
+	}
+	if extra != nil {
+		extra(&deps)
+	}
+	handler := New(deps).Handler()
 
 	admin := &testClient{handler: handler}
 	admin.roundTrip(t, http.MethodPost, "/api/v1/auth/bootstrap",

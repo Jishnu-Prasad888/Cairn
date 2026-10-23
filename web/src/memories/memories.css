@@ -2505,6 +2505,7 @@
 
   .print-figure figcaption {
     margin-top: 2pt;
+    text-align: center;
     color: #555;
     font-size: 9pt;
   }

@@ -77,6 +77,16 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 			cmp = "<"
 		}
 		switch opts.Sort {
+		case SortByAdded:
+			// (first_seen_at, mod_time) in the sort direction, then rel_path.
+			cur := func(col string) string {
+				return "(SELECT " + col + " FROM indexed_files WHERE rel_path = ?)"
+			}
+			conditions = append(conditions, fmt.Sprintf(
+				"(first_seen_at %[1]s %[2]s OR (first_seen_at = %[2]s AND "+
+					"(mod_time %[1]s %[3]s OR (mod_time = %[3]s AND rel_path > ?))))",
+				cmp, cur("first_seen_at"), cur("mod_time")))
+			args = append(args, opts.Cursor, opts.Cursor, opts.Cursor, opts.Cursor, opts.Cursor)
 		case SortBySize, SortByModTime:
 			col := "size_bytes"
 			if opts.Sort == SortByModTime {
@@ -105,6 +115,8 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 		orderCol = "size_bytes"
 	case SortByModTime:
 		orderCol = "mod_time"
+	case SortByAdded:
+		orderCol = "first_seen_at"
 	}
 	dir := "ASC"
 	if opts.Order == SortDesc {
@@ -114,6 +126,9 @@ func (s *FileStore) List(ctx context.Context, opts ListOptions) (*Page, error) {
 	// rel_path breaks ties; when it is already the sort key, repeating it
 	// would only make SQLite add a sort the index already provides.
 	order := orderCol + " " + dir
+	if opts.Sort == SortByAdded {
+		order += ", mod_time " + dir
+	}
 	if orderCol != "rel_path" {
 		order += ", rel_path ASC"
 	}
