@@ -1336,6 +1336,10 @@ describe('MediaPage', () => {
 
     const panel = await screen.findByTestId('viewer-tags');
     expect(within(panel).getByText('No tags on this file.')).toBeInTheDocument();
+    const listings = () =>
+      fetchMock.mock.calls.filter(([u]) => String(u).includes('/api/v1/libraries/lib1/files?'))
+        .length;
+    const before = listings();
 
     fireEvent.change(within(panel).getByLabelText('Add a tag'), { target: { value: 'beach' } });
     fireEvent.click(within(panel).getByRole('button', { name: 'Add' }));
@@ -1346,6 +1350,10 @@ describe('MediaPage', () => {
     expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/files/f1/tags')).toEqual({
       tag_id: 't1',
     });
+    // Tagging never re-fetches the page's listing: with thousands of photos
+    // loaded that was one enormous request and a re-drawn grid per tag.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(listings()).toBe(before);
   });
 
   it('lists the memories that mention a file', async () => {

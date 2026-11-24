@@ -245,7 +245,7 @@ function MediaBrowser({
   const tagVocabulary = useTagVocabulary(openLibraryIds, showFilters);
   // While filtering by tag, tagging or untagging a file changes what matches.
   const tagsTick = useTagsChangedTick();
-  const tagRefresh = range.tags.length > 0 ? tagsTick : 0;
+  const tagRefresh = range.tags.length > 0 || tag ? tagsTick : 0;
   const [view, setViewState] = useState<'grid' | 'list'>(() => (folderMode ? readView() : 'grid'));
   const [timelineOpen, setTimelineOpenState] = useState(readTimelineOpen);
   const [timelineScale, setTimelineScaleState] = useState(readTimelineScale);

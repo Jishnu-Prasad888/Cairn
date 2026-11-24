@@ -410,7 +410,8 @@ export function useMediaActions({
             });
             selection.clear();
           }
-          onChanged();
+          // No reload: tagging does not change what a page lists, and the
+          // views that list by tag follow notifyTagsChanged on their own.
         }}
       />
       <AlbumPickerDialog
