@@ -38,6 +38,7 @@ import {
 } from '../components/States';
 import { useToast } from '../components/ui/Toast';
 import { formatDate } from '../lib/dates';
+import { markThumbLoaded } from '../lib/thumbLoading';
 import './SimilarPage.css';
 
 /** Where a library stands with the similarity pass, for the page to explain. */
@@ -228,7 +229,12 @@ function GroupModal({
                   onChange={() => toggle(file.id)}
                   aria-label={`Select ${file.name}`}
                 />
-                <img className="similar-member-thumb" src={thumbnailUrl(libraryId, file)} alt="" />
+                <img
+                  className="similar-member-thumb thumb-loading"
+                  src={thumbnailUrl(libraryId, file)}
+                  alt=""
+                  onLoad={markThumbLoaded}
+                />
                 <span className="similar-member-info">
                   <span className="similar-member-name">
                     {file.name}

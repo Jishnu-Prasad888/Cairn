@@ -210,7 +210,9 @@ library has to be scanned by hand.
 | Method | Path                                                        | Purpose                          | Auth |
 | ------ | ----------------------------------------------------------- | -------------------------------- | ---- |
 | GET    | `/libraries/{libraryID}/files`                              | Paged file listing               | cap  |
-| GET    | `/libraries/{libraryID}/files/duplicates`                   | Duplicate groups by content hash | cap  |
+| GET    | `/libraries/{libraryID}/files/duplicates`                   | Duplicate groups by content hash (`?ignored=true`: the ignored ones) | cap  |
+| PUT    | `/libraries/{libraryID}/duplicates/ignored/{hash}`          | Ignore a duplicate group (204)   | cap (library edit) |
+| DELETE | `/libraries/{libraryID}/duplicates/ignored/{hash}`          | Un-ignore a duplicate group (204) | cap (library edit) |
 | GET    | `/libraries/{libraryID}/files/{fileID}`                     | One file                         | cap  |
 | GET    | `/libraries/{libraryID}/files/{fileID}/download`            | Stream original (Range)          | cap  |
 | POST   | `/libraries/{libraryID}/files/upload`                       | Multipart upload                 | cap  |
@@ -227,8 +229,17 @@ library has to be scanned by hand.
 | GET    | `/libraries/{libraryID}/files/{fileID}/thumbnail`           | JPEG thumbnail (`?size=sm`: 256px) | cap  |
 | GET    | `/libraries/{libraryID}/thumbnails?ids=…&size=sm\|md`         | Up to 64 thumbnails, one binary response | cap (per file) |
 | GET    | `/libraries/{libraryID}/files/{fileID}/preview`             | Screen-sized JPEG for the viewer | cap  |
-| GET    | `/libraries/{libraryID}/folders`                            | Child folders                    | cap  |
+| GET    | `/libraries/{libraryID}/folders`                            | Child folders, with `size_bytes` and `mod_time` (newest file) | cap  |
+| POST   | `/libraries/{libraryID}/folders/move`                       | Rename or move a folder `{path, new_path}` | cap (move + create at destination) |
+| POST   | `/libraries/{libraryID}/folders/trash`                      | Trash every file in a folder `{path}` → `{trashed, partial}` | cap (per file) |
+| GET    | `/libraries/{libraryID}/folders/download?path=`             | The folder as a streamed zip     | cap (per file) |
 | GET    | `/libraries/{libraryID}/trash`                              | Trashed files                    | cap  |
+
+Moving a folder rewrites the path of every indexed file under it, so tags,
+albums, notes, faces and favourites stay with the files. Permission grants are
+keyed by path and stay behind, so a non-admin cannot move a folder that has
+grants inside it (409). Uploads and downloads lift the server's read/write
+timeouts for their own request; the upload size cap bounds them instead.
 
 `GET /files` and `GET /search` both take `type=` (`photo`, `video`, `audio`,
 `document`, `other`) and both filter on the same value: the media type the
@@ -243,6 +254,9 @@ the file between the typed pages.
 | POST   | `/libraries/{libraryID}/files/{fileID}/favorite`            | Favorite a file (204)            | cap  |
 | DELETE | `/libraries/{libraryID}/files/{fileID}/favorite`            | Unfavorite a file (204)          | cap  |
 | GET    | `/libraries/{libraryID}/favorites`                          | Favorited files                  | cap  |
+| PUT    | `/libraries/{libraryID}/folders/favorite?path=`             | Favorite a folder (204)          | cap  |
+| DELETE | `/libraries/{libraryID}/folders/favorite?path=`             | Unfavorite a folder (204)        | cap  |
+| GET    | `/libraries/{libraryID}/favorites/folders`                  | Favorited folders that still exist | cap  |
 | GET    | `/libraries/{libraryID}/tags`                               | List tags                        | cap  |
 | POST   | `/libraries/{libraryID}/tags`                               | Create a tag                     | cap  |
 | DELETE | `/libraries/{libraryID}/tags/{tagID}`                       | Delete a tag                     | cap  |

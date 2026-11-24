@@ -24,7 +24,7 @@ import { Icon, type IconName } from '../components/ui/Icon';
 import { Toggle } from '../components/ui/Toggle';
 import { formatDate } from '../lib/dates';
 import { MemorySettingsSection } from '../memories/MemorySettingsSection';
-import { type ThemePreference, readStoredTheme, storeTheme } from '../lib/theme';
+import { THEMES, type ThemePreference, readStoredTheme, storeTheme } from '../lib/theme';
 import { type PhotoLayout, readPhotoLayout, storePhotoLayout } from '../lib/photoLayout';
 import { readTrashConfirm, storeTrashConfirm } from '../lib/trashConfirm';
 import './SettingsPage.css';
@@ -263,7 +263,7 @@ export default function SettingsPage() {
           <Section id="appearance" title="Appearance">
             <Row
               title="Theme"
-              description="Match your device, or always use the light or dark look."
+              description="Match your device, or always use the light or dark look — or pick a colour theme below."
             >
               <div className="segmented settings-themes" role="radiogroup" aria-label="Theme">
                 {THEME_OPTIONS.map((option) => (
@@ -281,6 +281,44 @@ export default function SettingsPage() {
                     />
                     <Icon name={option.icon} />
                     <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </Row>
+            <Row
+              title="Colour theme"
+              description="A different palette for the whole app. Photos are always viewed on a dark surround."
+            >
+              <div className="theme-swatches" role="radiogroup" aria-label="Colour theme">
+                {THEMES.filter((t) => t.id !== 'light' && t.id !== 'dark').map((t) => (
+                  <label
+                    key={t.id}
+                    className={theme === t.id ? 'theme-swatch active' : 'theme-swatch'}
+                    data-testid={`theme-${t.id}`}
+                  >
+                    <input
+                      type="radio"
+                      name="theme"
+                      className="visually-hidden"
+                      value={t.id}
+                      checked={theme === t.id}
+                      onChange={() => onThemeChange(t.id)}
+                    />
+                    <span
+                      className="theme-swatch-preview"
+                      aria-hidden="true"
+                      style={{ background: t.swatch[0] }}
+                    >
+                      <span style={{ background: t.swatch[1] }} />
+                      <span style={{ background: t.swatch[2] }} />
+                      <span style={{ background: t.swatch[3] }} />
+                    </span>
+                    <span className="theme-swatch-label">
+                      {t.label}
+                      <span className="theme-swatch-mode">
+                        {t.mode === 'dark' ? 'Dark' : 'Light'}
+                      </span>
+                    </span>
                   </label>
                 ))}
               </div>

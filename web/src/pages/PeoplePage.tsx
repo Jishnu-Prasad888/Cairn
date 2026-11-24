@@ -40,6 +40,7 @@ import {
 } from '../api/queries';
 import type { FaceStatus, FaceSummary, Person } from '../api/types';
 import { ConfirmDialog, Dialog, PromptDialog } from '../components/Dialog';
+import { forgetPeopleIndex } from '../components/PersonMentions';
 import {
   EmptyState,
   ErrorState,
@@ -112,6 +113,9 @@ async function loadPeople(libraryId: string): Promise<PeopleData> {
     return { status, people: [], unassigned: [], unsupported: false };
   }
 
+  // Names may have just changed here (renamed, merged, deleted): captions
+  // linking [Name] look them up afresh.
+  forgetPeopleIndex(libraryId);
   const [peopleResp, facesResp] = await Promise.all([
     listPeople(libraryId),
     // The unassigned pool is optional: an older build may expose people but

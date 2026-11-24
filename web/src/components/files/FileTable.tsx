@@ -13,6 +13,7 @@ import type { FileSort, SortOrder } from '../../api/queries';
 import type { FileSummary, Folder } from '../../api/types';
 import { formatBytes } from '../../api/types';
 import { formatDate } from '../../lib/dates';
+import { markThumbLoaded } from '../../lib/thumbLoading';
 import { fileExtension, mediaLabel, thumbnailUrl, mediaTypeIcon } from '../media';
 import { LibraryTag } from '../LibraryTag';
 import type { Selection } from '../media/useSelection';
@@ -229,11 +230,12 @@ export function FileTable({
                     />
                   ) : file.media_type === 'photo' ? (
                     <img
-                      className="file-row-thumb"
+                      className="file-row-thumb thumb-loading"
                       src={thumbnailUrl(file.library_id || libraryId, file)}
                       alt=""
                       loading="lazy"
                       decoding="async"
+                      onLoad={markThumbLoaded}
                     />
                   ) : (
                     <span className="file-row-thumb" aria-hidden="true">

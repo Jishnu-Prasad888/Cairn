@@ -751,6 +751,7 @@ export function MemoryEditor({
 
       {mode === 'preview' ? (
         <MemoryReader
+          libraryId={libraryId}
           meta={meta}
           blocks={blocks}
           defaultInterval={settings.slideshow_interval}

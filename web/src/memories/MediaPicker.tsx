@@ -25,6 +25,7 @@ import type { Album, FileSummary, Person, Tag } from '../api/types';
 import { Dialog } from '../components/Dialog';
 import { FolderPicker } from '../components/FolderPicker';
 import { thumbnailUrl } from '../components/media';
+import { markThumbLoaded } from '../lib/thumbLoading';
 import { VideoThumb } from '../components/media/VideoThumb';
 import { toPicked } from './format';
 import type { PickedMedia } from './model';
@@ -462,7 +463,8 @@ function MediaPickerDialog({
                         />
                       ) : (
                         <img
-                          className="picker-thumb"
+                          className="picker-thumb thumb-loading"
+                          onLoad={markThumbLoaded}
                           src={thumbnailUrl(libraryId, file)}
                           alt=""
                           loading="lazy"
