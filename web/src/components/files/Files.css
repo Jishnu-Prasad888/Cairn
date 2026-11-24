@@ -144,6 +144,23 @@
   white-space: nowrap;
 }
 
+.folder-tile-fav {
+  display: inline-flex;
+  margin-left: var(--space-1);
+  vertical-align: -1px;
+  color: var(--color-warning-ink);
+}
+
+.folder-tile[draggable='true'] {
+  cursor: pointer;
+}
+
+.file-row.is-folder.is-drop-target {
+  background: var(--color-fill-active);
+  outline: 1px solid var(--color-primary-ink);
+  outline-offset: -1px;
+}
+
 .folder-tile-count {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);

@@ -562,3 +562,41 @@
     opacity: 0.5;
   }
 }
+
+/* "Drop to upload" — shown by any page (or the shell itself) while files are
+   dragged over it from the desktop. */
+.drop-overlay {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-7);
+  z-index: var(--z-dropdown);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.drop-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-on-primary);
+  background: var(--color-primary-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-3);
+}
+
+/* The ghost under the pointer while a selection is dragged: "3 items". It is
+   drawn off to the top-left for the browser to snapshot, then removed. */
+.drag-count-chip {
+  position: fixed;
+  top: -100px;
+  left: -100px;
+  padding: var(--space-2) var(--space-4);
+  font: var(--font-weight-medium) var(--font-size-sm) / 1.2 var(--font-ui);
+  color: var(--color-on-primary);
+  background: var(--color-primary-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+}

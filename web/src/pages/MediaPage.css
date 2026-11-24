@@ -107,27 +107,6 @@
   pointer-events: none;
 }
 
-.drop-overlay {
-  position: fixed;
-  left: 50%;
-  bottom: var(--space-7);
-  z-index: var(--z-dropdown);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.drop-overlay-card {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-on-primary);
-  background: var(--color-primary-strong);
-  border-radius: var(--radius-pill);
-  box-shadow: var(--shadow-3);
-}
-
 /* Phones: the photos come first. A one-line header, and the toolbar is a
    single row of chips that scrolls sideways instead of wrapping into a block
    of buttons above the grid. */

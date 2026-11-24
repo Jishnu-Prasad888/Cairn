@@ -96,6 +96,9 @@ export interface MediaGridProps {
   favorites?: ReadonlySet<string>;
   /** Right-click or long-press menu for a single tile. */
   onContextMenu?: (file: FileSummary, x: number, y: number) => void;
+  /** Tiles can be dragged (onto a folder, to move them). Off for grids where
+   * a drop has nowhere to go. A selected tile drags the whole selection. */
+  draggable?: boolean;
   /**
    * The Delete key on a focused tile while nothing is selected (a selection
    * is the toolbar's to trash).
@@ -119,6 +122,7 @@ export function MediaGrid({
   selection,
   favorites,
   onContextMenu,
+  draggable = true,
   onDelete,
   hasMore = false,
   loadingMore = false,
@@ -467,6 +471,7 @@ export function MediaGrid({
                 width={tileSize}
                 height={tileSize}
                 selected={selection?.isSelected(file.id) ?? false}
+                dragCount={!draggable ? 0 : selection?.isSelected(file.id) ? selection.size : 1}
                 selectable={selectable}
                 selecting={selecting}
                 favorite={favorites?.has(file.id) ?? false}
@@ -503,6 +508,7 @@ export function MediaGrid({
             width={cell.width}
             height={cell.height}
             selected={selection?.isSelected(cell.file.id) ?? false}
+            dragCount={!draggable ? 0 : selection?.isSelected(cell.file.id) ? selection.size : 1}
             selectable={selectable}
             selecting={selecting}
             favorite={favorites?.has(cell.file.id) ?? false}

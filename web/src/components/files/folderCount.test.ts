@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Folder } from '../../api/types';
-import { folderCountLabel } from './folderCount';
+import { folderCountLabel, sortFolders } from './folderCount';
 
 const base: Folder = { id: 'a', rel_path: 'a', name: 'a', file_count: 0 };
 
@@ -28,5 +28,45 @@ describe('folderCountLabel', () => {
         index_scanned: 40,
       }),
     ).toBe('Indexing · 40 of 1,200');
+  });
+});
+
+describe('sortFolders', () => {
+  const folders: Folder[] = [
+    { ...base, id: 'b', name: 'Beta', mod_time: '2024-03-01T00:00:00Z', size_bytes: 10 },
+    { ...base, id: 'a', name: 'alpha', mod_time: '2025-01-01T00:00:00Z', size_bytes: 5 },
+    { ...base, id: 'e', name: 'Empty' },
+    { ...base, id: 'c', name: 'Gamma', mod_time: '2023-01-01T00:00:00Z', size_bytes: 99 },
+  ];
+  const names = (list: Folder[]) => list.map((f) => f.name);
+
+  it('orders by newest file, undated last either way', () => {
+    expect(names(sortFolders(folders, 'mod_time', 'desc'))).toEqual([
+      'alpha',
+      'Beta',
+      'Gamma',
+      'Empty',
+    ]);
+    expect(names(sortFolders(folders, 'mod_time', 'asc'))).toEqual([
+      'Gamma',
+      'Beta',
+      'alpha',
+      'Empty',
+    ]);
+  });
+
+  it('orders by size and by name', () => {
+    expect(names(sortFolders(folders, 'size', 'desc'))).toEqual([
+      'Gamma',
+      'Beta',
+      'alpha',
+      'Empty',
+    ]);
+    expect(names(sortFolders(folders, 'name', 'desc'))).toEqual([
+      'Gamma',
+      'Empty',
+      'Beta',
+      'alpha',
+    ]);
   });
 });

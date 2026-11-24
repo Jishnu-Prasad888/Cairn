@@ -140,3 +140,57 @@ func parseTime(s string, out *time.Time) error {
 	*out = t
 	return nil
 }
+
+// --- favourite folders ---
+
+// FolderFavorite is a starred folder: its path and when it was starred.
+type FolderFavorite struct {
+	RelPath   string
+	CreatedAt time.Time
+}
+
+// AddFolder stars the folder at relPath. Starring it twice is not an error.
+func (s *FavoriteStore) AddFolder(ctx context.Context, relPath string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO favorite_folders (rel_path, created_at) VALUES (?, ?)`,
+		relPath, rfc3339(time.Now().UTC()))
+	if err != nil {
+		return fmt.Errorf("add favourite folder: %w", err)
+	}
+	return nil
+}
+
+// RemoveFolder un-stars the folder at relPath. Un-starring a folder that is
+// not starred is not an error.
+func (s *FavoriteStore) RemoveFolder(ctx context.Context, relPath string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM favorite_folders WHERE rel_path = ?`, relPath); err != nil {
+		return fmt.Errorf("remove favourite folder: %w", err)
+	}
+	return nil
+}
+
+// ListFolders returns the starred folders, most recently starred first.
+func (s *FavoriteStore) ListFolders(ctx context.Context) ([]FolderFavorite, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT rel_path, created_at FROM favorite_folders ORDER BY created_at DESC, rel_path`)
+	if err != nil {
+		return nil, fmt.Errorf("list favourite folders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []FolderFavorite
+	for rows.Next() {
+		var (
+			f       FolderFavorite
+			created string
+		)
+		if err := rows.Scan(&f.RelPath, &created); err != nil {
+			return nil, err
+		}
+		if err := parseTime(created, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}

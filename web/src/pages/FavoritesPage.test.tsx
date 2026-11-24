@@ -58,6 +58,31 @@ describe('FavoritesPage', () => {
     vi.restoreAllMocks();
   });
 
+  it('lists starred folders above starred files, and un-stars one from its menu', async () => {
+    const fetchMock = setup([
+      (url) =>
+        url.includes('/api/v1/libraries/lib1/favorites/folders')
+          ? json({ folders: [{ id: 'Trips', rel_path: 'Trips', name: 'Trips', file_count: 4 }] })
+          : undefined,
+      (url, init) =>
+        init?.method === 'DELETE' && url.includes('/folders/favorite?path=Trips')
+          ? noContent()
+          : undefined,
+    ]);
+
+    const grid = await screen.findByTestId('folder-grid');
+    expect(within(grid).getByText('Trips')).toBeInTheDocument();
+    expect(within(grid).getByText('(favourite)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('folder-menu-Trips'));
+    const item = await screen.findByTestId('folder-menu-favorite');
+    expect(item).toHaveTextContent('Remove from favourites');
+    fireEvent.click(item);
+    await waitFor(() =>
+      expect(called(fetchMock, 'DELETE', '/folders/favorite?path=Trips')).toBe(true),
+    );
+  });
+
   it('grids the starred files and counts them', async () => {
     setup();
 

@@ -451,6 +451,40 @@ func (s *FileStore) CountPresentUnder(ctx context.Context, folderPath string) (i
 	return n, err
 }
 
+// FolderStats is what a folder listing shows about everything under a folder:
+// how many present files it holds, their total size, and when the newest of
+// them was last modified (zero when it holds none).
+type FolderStats struct {
+	Count     int
+	SizeBytes int64
+	Latest    time.Time
+}
+
+// StatsUnder returns the FolderStats of folderPath and every folder beneath
+// it, in one indexed range scan. It lets a folder listing be sorted the same
+// ways files are: by date, by size, and by name.
+func (s *FileStore) StatsUnder(ctx context.Context, folderPath string) (FolderStats, error) {
+	var (
+		st     FolderStats
+		latest sql.NullString
+	)
+	prefix := filepath.ToSlash(folderPath) + "/"
+	lo, hi := likeutil.PrefixRange(prefix)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(size_bytes), 0), MAX(mod_time) FROM indexed_files
+		 WHERE status = ? AND rel_path >= ? AND rel_path < ? AND rel_path LIKE ? `+likeutil.EscapeClause,
+		string(FileStatusPresent), lo, hi, likeutil.Escape(prefix)+"%").Scan(&st.Count, &st.SizeBytes, &latest)
+	if err != nil {
+		return st, err
+	}
+	if latest.Valid {
+		if t, perr := time.Parse(time.RFC3339Nano, latest.String); perr == nil {
+			st.Latest = t
+		}
+	}
+	return st, nil
+}
+
 // CountsByType returns the number of present files per media type in a single
 // indexed pass, so dashboards need one query instead of one per type.
 func (s *FileStore) CountsByType(ctx context.Context) (map[MediaType]int, error) {
@@ -527,23 +561,40 @@ func (s *FileStore) ListDuplicates(ctx context.Context, opts DuplicateOptions) (
 
 	page := &DuplicatesPage{}
 
+	// Ignored groups are kept off the page; asking for them lists only those.
+	ignoreClause := `AND content_hash NOT IN (SELECT content_hash FROM duplicate_ignores)`
+	if opts.Ignored {
+		ignoreClause = `AND content_hash IN (SELECT content_hash FROM duplicate_ignores)`
+	}
+
 	// Total number of duplicate groups (distinct hashes with >1 present file).
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM (
 			SELECT content_hash FROM indexed_files
-			WHERE status = 'present' AND content_hash IS NOT NULL
+			WHERE status = 'present' AND content_hash IS NOT NULL `+ignoreClause+`
 			GROUP BY content_hash
 			HAVING COUNT(*) > 1
 		)`).Scan(&page.Total)
 	if err != nil {
 		return nil, fmt.Errorf("count duplicate groups: %w", err)
 	}
+	if opts.Ignored {
+		page.IgnoredTotal = page.Total
+	} else if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT content_hash FROM indexed_files
+			WHERE status = 'present' AND content_hash IN (SELECT content_hash FROM duplicate_ignores)
+			GROUP BY content_hash
+			HAVING COUNT(*) > 1
+		)`).Scan(&page.IgnoredTotal); err != nil {
+		return nil, fmt.Errorf("count ignored duplicate groups: %w", err)
+	}
 
 	// Next page of duplicate hashes. Fetch one extra to detect the next page.
 	hashQuery := `
 		SELECT content_hash FROM indexed_files
 		WHERE status = 'present' AND content_hash IS NOT NULL
-		AND content_hash > ?
+		AND content_hash > ? ` + ignoreClause + `
 		GROUP BY content_hash
 		HAVING COUNT(*) > 1
 		ORDER BY content_hash
@@ -595,6 +646,22 @@ func (s *FileStore) ListDuplicates(ctx context.Context, opts DuplicateOptions) (
 	}
 
 	return page, nil
+}
+
+// IgnoreDuplicate keeps the group of files sharing contentHash off the
+// duplicates page from now on. Ignoring a group twice is not an error.
+func (s *FileStore) IgnoreDuplicate(ctx context.Context, contentHash string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO duplicate_ignores (content_hash, created_at) VALUES (?, ?)`,
+		contentHash, rfc3339(time.Now().UTC()))
+	return err
+}
+
+// UnignoreDuplicate puts an ignored group back on the duplicates page.
+func (s *FileStore) UnignoreDuplicate(ctx context.Context, contentHash string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM duplicate_ignores WHERE content_hash = ?`, contentHash)
+	return err
 }
 
 // queryFiles runs a file-select query whose WHERE clause is appended to the

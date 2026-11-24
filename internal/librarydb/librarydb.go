@@ -32,7 +32,7 @@ const (
 
 	// SchemaVersion is the current version of the library-level database
 	// schema. Bump this when adding new tables or changing existing ones.
-	SchemaVersion = 13
+	SchemaVersion = 14
 )
 
 // DB wraps a per-library SQLite connection pool. Use OpenDB or AcquireDB to
@@ -797,5 +797,21 @@ CREATE TABLE IF NOT EXISTS ml_rules (
 	kind       TEXT NOT NULL CHECK (kind IN ('skip', 'always')),
 	path       TEXT NOT NULL UNIQUE,
 	created_at TEXT NOT NULL
+);
+
+-- favorite_folders are folders starred as favourites, by path. A folder has no
+-- id of its own (it is whatever is on disk), so renaming or moving it through
+-- Cairn rewrites the path here too.
+CREATE TABLE IF NOT EXISTS favorite_folders (
+	rel_path   TEXT PRIMARY KEY,
+	created_at TEXT NOT NULL
+);
+
+-- duplicate_ignores are groups of byte-identical files the user has looked at
+-- and wants kept: the duplicates page leaves a group with an ignored content
+-- hash out until it is un-ignored.
+CREATE TABLE IF NOT EXISTS duplicate_ignores (
+	content_hash TEXT PRIMARY KEY,
+	created_at   TEXT NOT NULL
 );
 `

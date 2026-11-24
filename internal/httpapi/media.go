@@ -78,6 +78,54 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, u *auth
 	})
 }
 
+// handleIgnoreDuplicate — PUT /api/v1/libraries/{id}/duplicates/ignored/{hash}
+//
+// Keeps a group of byte-identical files off the duplicates page: the user has
+// looked at it and wants every copy kept. DELETE on the same path un-ignores it.
+func (s *Server) handleIgnoreDuplicate(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	s.setDuplicateIgnored(w, r, u, true)
+}
+
+// handleUnignoreDuplicate — DELETE /api/v1/libraries/{id}/duplicates/ignored/{hash}
+func (s *Server) handleUnignoreDuplicate(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	s.setDuplicateIgnored(w, r, u, false)
+}
+
+func (s *Server) setDuplicateIgnored(w http.ResponseWriter, r *http.Request, u *auth.User, ignore bool) {
+	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeLibraryError(w, r, err)
+		return
+	}
+	hash := r.PathValue("hash")
+	if hash == "" || len(hash) > 128 {
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusBadRequest,
+			CodeBadRequest, "Invalid content hash.")
+		return
+	}
+	// The list is library-wide, so changing it is a library-level edit.
+	if !s.requireCap(w, r, u, authz.LibraryKey(lib.ID), authz.CapEdit) {
+		return
+	}
+	svc, cleanup, ok := s.openMediaService(w, r, lib)
+	if !ok {
+		return
+	}
+	defer cleanup()
+	if ignore {
+		err = svc.Store().IgnoreDuplicate(r.Context(), hash)
+	} else {
+		err = svc.Store().UnignoreDuplicate(r.Context(), hash)
+	}
+	if err != nil {
+		s.logger.Error("update duplicate ignore", "library_id", lib.ID, "error", err)
+		writeError(w, s.logger, requestIDOrEmpty(r), http.StatusInternalServerError,
+			CodeInternal, "Failed to update the duplicate group.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleFileCounts — GET /api/v1/libraries/{id}/files/counts
 func (s *Server) handleFileCounts(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
@@ -134,7 +182,10 @@ func (s *Server) handleListDuplicates(w http.ResponseWriter, r *http.Request, u 
 		return
 	}
 
-	opts := media.DuplicateOptions{Cursor: r.URL.Query().Get("cursor")}
+	opts := media.DuplicateOptions{
+		Cursor:  r.URL.Query().Get("cursor"),
+		Ignored: r.URL.Query().Get("ignored") == "true",
+	}
 	if lim := r.URL.Query().Get("limit"); lim != "" {
 		if n, err := strconv.Atoi(lim); err == nil {
 			opts.Limit = n
@@ -159,9 +210,10 @@ func (s *Server) handleListDuplicates(w http.ResponseWriter, r *http.Request, u 
 		})
 	}
 	writeJSON(w, s.logger, http.StatusOK, map[string]any{
-		"groups":      groups,
-		"next_cursor": page.NextCursor,
-		"total":       page.Total,
+		"groups":        groups,
+		"next_cursor":   page.NextCursor,
+		"total":         page.Total,
+		"ignored_total": page.IgnoredTotal,
 	})
 }
 
@@ -223,6 +275,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request, u *a
 	}
 	defer func() { _ = fh.Close() }()
 
+	liftDeadlines(w)
 	w.Header().Set("Content-Type", f.MIMEType)
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename=%q`, f.Name))
@@ -245,6 +298,8 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request, u *aut
 	if limit <= 0 {
 		limit = media.DefaultMaxUploadBytes
 	}
+	// The size cap below bounds the request instead of the clock.
+	liftDeadlines(w)
 	r.Body = http.MaxBytesReader(w, r.Body, limit+(1<<20))
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		var maxErr *http.MaxBytesError
@@ -644,6 +699,10 @@ type folderResponse struct {
 	RelPath   string `json:"rel_path"`
 	Name      string `json:"name"`
 	FileCount int    `json:"file_count"`
+	SizeBytes int64  `json:"size_bytes"`
+	// ModTime is the newest modification time under the folder (RFC 3339),
+	// so folders sort by date alongside files.
+	ModTime string `json:"mod_time,omitempty"`
 	// IndexState is "waiting" or "scanning" while the running scan still has
 	// files to record under the folder, so FileCount is not its full size.
 	IndexState string `json:"index_state,omitempty"`
@@ -718,6 +777,8 @@ func toFolderResponse(f *media.Folder) folderResponse {
 		RelPath:   f.RelPath,
 		Name:      f.Name,
 		FileCount: f.FileCount,
+		SizeBytes: f.SizeBytes,
+		ModTime:   formatOptionalTime(f.ModTime),
 	}
 }
 

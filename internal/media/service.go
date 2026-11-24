@@ -92,8 +92,13 @@ func (svc *Service) ListFolders(ctx context.Context, parent string) ([]*Folder, 
 			rel = parent + "/" + e.Name()
 		}
 		f := &Folder{ID: rel, RelPath: rel, Name: e.Name()}
-		if n, err := svc.store.CountPresentUnder(ctx, rel); err == nil {
-			f.FileCount = n
+		if st, err := svc.store.StatsUnder(ctx, rel); err == nil {
+			f.FileCount, f.SizeBytes, f.ModTime = st.Count, st.SizeBytes, st.Latest
+		}
+		if f.ModTime.IsZero() {
+			if info, err := e.Info(); err == nil {
+				f.ModTime = info.ModTime()
+			}
 		}
 		out = append(out, f)
 	}

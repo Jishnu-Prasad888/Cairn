@@ -196,7 +196,9 @@ describe('MediaPage', () => {
     ]);
 
     await screen.findByTestId('file-grid');
-    fireEvent.click(screen.getByTestId('share-folder-dir1'));
+    // Share lives in the folder's menu, with the rest of its actions.
+    fireEvent.click(screen.getByTestId('folder-menu-dir1'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Share/ }));
 
     const dialog = await screen.findByTestId('folder-share-dialog');
     fireEvent.click(within(dialog).getByTestId('make-folder-public'));
@@ -210,6 +212,122 @@ describe('MediaPage', () => {
     expect(await within(dialog).findByTestId('folder-public-url')).toHaveValue(
       `${window.location.origin}/s/tok123`,
     );
+  });
+
+  it('renames a folder from its right-click menu', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'POST' && url.endsWith('/api/v1/libraries/lib1/folders/move')
+          ? json({
+              folder: {
+                id: 'Photos 2024',
+                rel_path: 'Photos 2024',
+                name: 'Photos 2024',
+                file_count: 2,
+              },
+            })
+          : undefined,
+    ]);
+    await screen.findByTestId('file-grid');
+
+    fireEvent.contextMenu(screen.getByTestId('folder-dir1'));
+    fireEvent.click(await screen.findByTestId('folder-menu-rename'));
+    const dialog = await screen.findByTestId('folder-rename-dialog');
+    const input = within(dialog).getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'Photos 2024' } });
+    fireEvent.submit(input.closest('form')!);
+
+    await waitFor(() =>
+      expect(bodyOf(fetchMock, 'POST', '/api/v1/libraries/lib1/folders/move')).toEqual({
+        path: '2024',
+        new_path: 'Photos 2024',
+      }),
+    );
+  });
+
+  it('stars a folder as a favourite', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'PUT' && url.includes('/api/v1/libraries/lib1/folders/favorite')
+          ? noContent()
+          : undefined,
+    ]);
+    await screen.findByTestId('file-grid');
+
+    fireEvent.click(screen.getByTestId('folder-menu-dir1'));
+    fireEvent.click(await screen.findByTestId('folder-menu-favorite'));
+
+    await waitFor(() => expect(called(fetchMock, 'PUT', 'folders/favorite?path=2024')).toBe(true));
+    expect(await screen.findByText('(favourite)')).toBeInTheDocument();
+  });
+
+  it('orders folders by the chosen sort', async () => {
+    setup([
+      (url) =>
+        url.includes('/api/v1/libraries/lib1/folders')
+          ? json({
+              folders: [
+                {
+                  id: 'a',
+                  rel_path: 'Alpha',
+                  name: 'Alpha',
+                  file_count: 1,
+                  mod_time: '2020-01-01T00:00:00Z',
+                },
+                {
+                  id: 'z',
+                  rel_path: 'Zulu',
+                  name: 'Zulu',
+                  file_count: 1,
+                  mod_time: '2025-01-01T00:00:00Z',
+                },
+              ],
+            })
+          : undefined,
+    ]);
+    await screen.findByTestId('file-grid');
+    const names = () =>
+      within(screen.getByTestId('folder-grid'))
+        .getAllByRole('button', { name: /^(Alpha|Zulu)/ })
+        .map((b) => b.textContent?.slice(0, 4));
+
+    // Newest first is the default: Zulu holds the newer files.
+    expect(names()).toEqual(['Zulu', 'Alph']);
+    fireEvent.change(screen.getByTestId('sort-select'), { target: { value: 'name:asc' } });
+    await waitFor(() => expect(names()).toEqual(['Alph', 'Zulu']));
+  });
+
+  it('moves the whole selection when a selected file is dropped on a folder', async () => {
+    const fetchMock = setup([
+      (url, init) =>
+        init?.method === 'POST' && /\/files\/f[12]\/move$/.test(url)
+          ? json({ file: photo })
+          : undefined,
+    ]);
+    await screen.findByTestId('file-grid');
+    fireEvent.click(screen.getByRole('button', { name: 'Select IMG_0001.png' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select clip.mp4' }));
+
+    const data = new Map<string, string>([
+      [
+        'application/cairn-file',
+        JSON.stringify({ id: 'f1', rel_path: photo.rel_path, name: photo.name }),
+      ],
+    ]);
+    const dataTransfer = {
+      types: ['application/cairn-file'],
+      getData: (t: string) => data.get(t) ?? '',
+      dropEffect: 'move',
+    };
+    const target = screen.getByTestId('folder-dir1');
+    fireEvent.dragOver(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+
+    await waitFor(() => {
+      expect(called(fetchMock, 'POST', '/files/f1/move')).toBe(true);
+      expect(called(fetchMock, 'POST', '/files/f2/move')).toBe(true);
+    });
+    expect(await screen.findByText('Moved 2 items to 2024')).toBeInTheDocument();
   });
 
   it('sends the chosen sort to the API', async () => {

@@ -301,6 +301,8 @@ export interface DuplicatesResponse {
   groups: DuplicateGroup[];
   next_cursor?: string;
   total: number;
+  /** Groups the user chose to keep, left off the list (see ignoreDuplicate). */
+  ignored_total?: number;
 }
 
 /** A cluster of present photos whose perceptual signatures are close enough
@@ -323,6 +325,10 @@ export interface Folder {
   parent_id?: string;
   name: string;
   file_count: number;
+  /** Total size of the files under the folder. */
+  size_bytes?: number;
+  /** Newest modification time under the folder (RFC 3339), for date sorting. */
+  mod_time?: string;
   /**
    * Set while the running scan still has files to record under the folder,
    * so `file_count` is not its full size yet: "waiting" until the scan
