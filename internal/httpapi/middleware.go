@@ -133,6 +133,22 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer, e.g. to
+// lift the deadlines of a long upload or download.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// liftDeadlines removes the server-wide read and write timeouts for this one
+// request. Those protect against slow clients holding a connection forever,
+// but a large upload or download legitimately takes longer than a minute:
+// with them in place the server cut such a transfer off midway and the
+// browser could only say "the connection to the server was lost". Best
+// effort: a writer that cannot change deadlines keeps the defaults.
+func liftDeadlines(w http.ResponseWriter) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
+	_ = rc.SetWriteDeadline(time.Time{})
+}
+
 func requestIDOrEmpty(r *http.Request) string {
 	id, _ := RequestIDFrom(r.Context())
 	return id

@@ -9,7 +9,8 @@
 
 import { type MouseEvent, useMemo, useState } from 'react';
 
-import { renderMarkdown } from '../lib/markdown';
+import { useMentionLinks, usePeopleIndex } from '../components/PersonMentions';
+import { renderMarkdown, type PeopleIndex } from '../lib/markdown';
 import { formatMemoryDate } from './format';
 import { ImageBlockView } from './ImageBlockView';
 import { Lightbox } from './Lightbox';
@@ -21,20 +22,42 @@ interface Props {
   blocks: MemoryBlock[];
   defaultInterval: number;
   onImageContextMenu?: (image: MemoryImage, event: MouseEvent<HTMLElement>) => void;
+  /** The memory's library: `[Name]` then links to that person. Public pages
+   * leave it out, and brackets stay text. */
+  libraryId?: string;
 }
 
-function TextBlockReading({ markdown }: { markdown: string }) {
-  const html = useMemo(() => renderMarkdown(markdown).html, [markdown]);
+function TextBlockReading({
+  markdown,
+  people,
+}: {
+  markdown: string;
+  people: PeopleIndex | undefined;
+}) {
+  const html = useMemo(() => renderMarkdown(markdown, { people }).html, [markdown, people]);
   if (!markdown.trim()) return null;
   return <div className="reader-text md-render" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function MemoryReader({ meta, blocks, defaultInterval, onImageContextMenu }: Props) {
+export function MemoryReader({
+  meta,
+  blocks,
+  defaultInterval,
+  onImageContextMenu,
+  libraryId,
+}: Props) {
   const [open, setOpen] = useState<{ images: MemoryImage[]; id: string } | null>(null);
+  const people = usePeopleIndex(libraryId);
+  const mentions = useMentionLinks();
   const date = formatMemoryDate(meta.memory_date);
 
   return (
-    <article className="reader" aria-labelledby="reader-title" data-testid="memory-reader">
+    <article
+      className="reader"
+      aria-labelledby="reader-title"
+      data-testid="memory-reader"
+      onClick={mentions.onClick}
+    >
       <header className="reader-header">
         <h1 id="reader-title" className="reader-title">
           {meta.title || 'Untitled memory'}
@@ -51,7 +74,7 @@ export function MemoryReader({ meta, blocks, defaultInterval, onImageContextMenu
 
       {blocks.map((block) =>
         block.type === 'text' ? (
-          <TextBlockReading key={block.id} markdown={block.markdown} />
+          <TextBlockReading key={block.id} markdown={block.markdown} people={people} />
         ) : block.images.length > 0 ? (
           <section
             key={block.id}
@@ -84,6 +107,7 @@ export function MemoryReader({ meta, blocks, defaultInterval, onImageContextMenu
         startId={open?.id ?? null}
         onClose={() => setOpen(null)}
       />
+      {mentions.dialog}
     </article>
   );
 }

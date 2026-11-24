@@ -157,3 +157,41 @@ kbd {
     scroll-behavior: auto !important;
   }
 }
+
+/* Small thumbnails in lists and pickers: the same idea, as a gentle pulse of
+   the image's own background until it has loaded. */
+img.thumb-loading:not([data-loaded='true']) {
+  background-color: var(--color-fill-subtle);
+  animation: thumb-pulse 1.2s ease-in-out 300ms infinite alternate;
+}
+
+@keyframes thumb-pulse {
+  to {
+    background-color: var(--color-fill-active);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  img.thumb-loading:not([data-loaded='true']) {
+    animation: none;
+  }
+}
+
+/* A [Name] mention in rendered Markdown: reads as a link to that person. */
+a.md-mention {
+  color: var(--color-primary-ink);
+  font-weight: var(--font-weight-medium);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+a.md-mention:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* On the viewer's dark caption strip the ink colour is the viewer's own. */
+.viewer-caption a.md-mention {
+  color: inherit;
+}

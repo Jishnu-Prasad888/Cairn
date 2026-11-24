@@ -29,7 +29,10 @@ import { Breadcrumbs } from '../components/files/Breadcrumbs';
 import { FileTable } from '../components/files/FileTable';
 import { FilterPanel } from '../components/files/FilterPanel';
 import { EMPTY_RANGE, hasRangeFilters, type RangeFilters } from '../components/files/filters';
+import { sortFolders } from '../components/files/folderCount';
+import { readDrag } from '../components/files/dragPayload';
 import { FolderGrid } from '../components/files/FolderGrid';
+import { useFolderActions } from '../components/files/useFolderActions';
 import { ShareDialog } from '../components/sharing/ShareDialog';
 import {
   clampScale,
@@ -64,6 +67,7 @@ import { Menu, type MenuAnchor, type MenuEntry } from '../components/ui/Menu';
 import { useToast } from '../components/ui/Toast';
 import { useFileDrop } from '../components/upload/useFileDrop';
 import { useUploads } from '../components/upload/UploadProvider';
+import { entriesFromFiles, type UploadEntry } from '../components/upload/uploadEntries';
 import { ViewerModal } from '../components/ViewerModal';
 import {
   readTimelineOpen,
@@ -241,11 +245,18 @@ function MediaBrowser({
   const tagVocabulary = useTagVocabulary(openLibraryIds, showFilters);
   // While filtering by tag, tagging or untagging a file changes what matches.
   const tagsTick = useTagsChangedTick();
-  const tagRefresh = range.tags.length > 0 ? tagsTick : 0;
+  const tagRefresh = range.tags.length > 0 || tag ? tagsTick : 0;
   const [view, setViewState] = useState<'grid' | 'list'>(() => (folderMode ? readView() : 'grid'));
   const [timelineOpen, setTimelineOpenState] = useState(readTimelineOpen);
   const [timelineScale, setTimelineScaleState] = useState(readTimelineScale);
-  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [newFolderOpen, setNewFolderOpenState] = useState(false);
+  // Where "New folder" creates it: the open folder, or one picked from a
+  // folder's menu ("New folder inside…").
+  const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
+  const setNewFolderOpen = (open: boolean) => {
+    setNewFolderOpenState(open);
+    if (!open) setNewFolderParent(null);
+  };
   const [folderBusy, setFolderBusy] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
@@ -336,7 +347,12 @@ function MediaBrowser({
     refreshKey: uploads.completed + tagRefresh,
   });
   const listing = merged ? mergedListing : singleListing;
-  const { files, folders, total } = listing;
+  const { files, total } = listing;
+  // The server lists folders A–Z; the page's sort orders them too.
+  const folders = useMemo(
+    () => sortFolders(listing.folders, sort, order),
+    [listing.folders, sort, order],
+  );
 
   // The timeline ruler on a folder is scoped to that folder and its
   // sub-folders, which the file manager's own listing deliberately is not —
@@ -469,29 +485,89 @@ function MediaBrowser({
 
   const canUpload = !offline && (folderMode || config.type === 'photo' || config.type === 'video');
   const uploadFiles = useCallback(
-    (incoming: File[]) => {
+    (incoming: File[] | UploadEntry[]) => {
       if (incoming.length) uploads.enqueue(uploadLibraryId, incoming, folderMode ? folder : '');
     },
     [uploads, uploadLibraryId, folderMode, folder],
   );
   const drop = useFileDrop(uploadFiles, canUpload);
 
-  // Dragging a tile onto a folder or a breadcrumb moves it there. This needs a
-  // destination folder, so the merged root — several libraries with no "here" —
-  // does not offer it.
+  const folderActions = useFolderActions({
+    libraryIds: openLibraryIds,
+    fallbackLibraryId: uploadLibraryId,
+    onOpen: (f) => openFolder(f.rel_path, multiOpen ? f.library_id : undefined),
+    onChanged: listing.reload,
+    onShare: setShareFolder,
+    onNewFolderIn: (f) => {
+      setNewFolderParent(f.rel_path);
+      setNewFolderOpenState(true);
+    },
+    canManage: canManage,
+  });
+
+  // Dragging a tile onto a folder or a breadcrumb moves it there — and when
+  // the tile is part of a selection, the whole selection goes. A folder can be
+  // dragged the same way. This needs a destination folder, so the merged root
+  // (several libraries with no "here") does not offer it.
   const moveInto = async (event: React.DragEvent, destination: string) => {
     event.preventDefault();
     if (merged) return;
-    const raw = event.dataTransfer.getData('application/cairn-file');
-    if (!raw) return;
-    try {
-      const dragged = JSON.parse(raw) as { id: string; rel_path: string; name: string };
-      await moveFile(uploadLibraryId, dragged.rel_path, dragged.id, destination, dragged.name);
-      toast({ message: `Moved to ${destination || 'All files'}`, tone: 'success' });
-      listing.reload();
-    } catch (e: unknown) {
-      toast({ message: e instanceof Error ? e.message : "Couldn't move that file", tone: 'error' });
+    const dragged = readDrag(event);
+    if (!dragged) return;
+    if (dragged.folder) {
+      await folderActions.moveInto(dragged.folder, uploadLibraryId, destination);
+      return;
     }
+    const file = dragged.file;
+    if (!file) return;
+    const group = selection.isSelected(file.id) ? selection.selectedFiles : [file];
+    // Files already in the destination stay put.
+    const moving = group.filter((f) => {
+      const at = f.rel_path.lastIndexOf('/');
+      return (at < 0 ? '' : f.rel_path.slice(0, at)) !== destination;
+    });
+    if (moving.length === 0) return;
+    const results = await Promise.allSettled(
+      moving.map((f) => moveFile(uploadLibraryId, f.rel_path, f.id, destination, f.name)),
+    );
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    const where = destination ? destination.split('/').pop() : 'All files';
+    if (failed.length === 0) {
+      toast({
+        message:
+          moving.length === 1
+            ? `Moved to ${where}`
+            : `Moved ${numberFormat.format(moving.length)} items to ${where}`,
+        tone: 'success',
+      });
+    } else {
+      const why = failed[0]!.reason instanceof Error ? ` ${failed[0]!.reason.message}` : '';
+      toast({
+        message: `Couldn't move ${failed.length} of ${moving.length} items.${why}`,
+        tone: 'error',
+      });
+    }
+    if (group.length > 1) selection.clear();
+    listing.reload();
+  };
+
+  const openFolderMenu = useCallback(
+    (f: Folder, x: number, y: number) => {
+      setMenu({ anchor: { x, y }, items: folderActions.menuFor(f) });
+    },
+    [folderActions],
+  );
+
+  const folderHandlers = {
+    onDropFile: canManage ? (e: React.DragEvent, p: string) => void moveInto(e, p) : undefined,
+    onUploadInto:
+      canUpload && !merged
+        ? (f: Folder, entries: UploadEntry[]) =>
+            uploads.enqueue(f.library_id || uploadLibraryId, entries, f.rel_path)
+        : undefined,
+    onMenu: openFolderMenu,
+    draggable: canManage,
+    isFavorite: folderActions.isFavorite,
   };
 
   const { menuFor } = actions;
@@ -649,6 +725,27 @@ function MediaBrowser({
                   data-testid="upload-input"
                 />
               </label>
+              {folderMode && (
+                <label
+                  className="button upload-button"
+                  title="Upload a folder, with everything in it"
+                >
+                  <Icon name="folder" />
+                  Upload folder
+                  <input
+                    type="file"
+                    multiple
+                    className="visually-hidden"
+                    // A folder picker: each file comes with its path inside it.
+                    {...{ webkitdirectory: '', directory: '' }}
+                    onChange={(event) => {
+                      uploadFiles(entriesFromFiles(Array.from(event.target.files ?? [])));
+                      event.target.value = '';
+                    }}
+                    data-testid="upload-folder-input"
+                  />
+                </label>
+              )}
             </>
           )
         }
@@ -839,8 +936,7 @@ function MediaBrowser({
         <FolderGrid
           folders={folders}
           onOpen={(f) => openFolder(f.rel_path, multiOpen ? f.library_id : undefined)}
-          onDropFile={(e, p) => void moveInto(e, p)}
-          onShare={setShareFolder}
+          {...folderHandlers}
         />
       )}
 
@@ -853,7 +949,7 @@ function MediaBrowser({
               folders={folders}
               onOpen={ops.openViewer}
               onOpenFolder={(f) => openFolder(f.rel_path, multiOpen ? f.library_id : undefined)}
-              onShareFolder={setShareFolder}
+              folderHandlers={folderHandlers}
               selection={selection}
               showLocation={listing.searching}
               sort={listing.searching ? undefined : { sort, order }}
@@ -872,6 +968,7 @@ function MediaBrowser({
                 favorites={favorites.ids}
                 onDelete={actions.onDeleteFile}
                 onContextMenu={openMenu}
+                draggable={canManage}
                 hasMore={listing.hasMore}
                 loadingMore={listing.loadingMore}
                 onLoadMore={listing.loadMore}
@@ -937,6 +1034,7 @@ function MediaBrowser({
 
       {ops.dialogs}
       {actions.dialogs}
+      {folderActions.dialogs}
 
       <PromptDialog
         open={newFolderOpen}
@@ -944,7 +1042,11 @@ function MediaBrowser({
         label="Folder name"
         placeholder="Summer 2026"
         confirmLabel="Create"
-        hint={`The folder is created in ${primaryLibrary.name} right away.`}
+        hint={
+          newFolderParent
+            ? `The folder is created inside ${newFolderParent.split('/').pop()} right away.`
+            : `The folder is created in ${primaryLibrary.name} right away.`
+        }
         busy={folderBusy}
         error={folderError}
         onCancel={() => {
@@ -954,7 +1056,8 @@ function MediaBrowser({
         onConfirm={(name) => {
           const clean = name.trim().replace(/^\/+|\/+$/g, '');
           if (!clean) return;
-          const newPath = folder ? `${folder}/${clean}` : clean;
+          const base = newFolderParent ?? folder;
+          const newPath = base ? `${base}/${clean}` : clean;
           setFolderBusy(true);
           setFolderError(null);
           createFolder(uploadLibraryId, newPath)

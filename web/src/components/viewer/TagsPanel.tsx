@@ -6,15 +6,7 @@ import { ensureTag, notifyTagsChanged, tagKey, useTagVocabulary } from '../../ap
 import type { FileSummary, Tag } from '../../api/types';
 import { Icon } from '../ui/Icon';
 
-export function TagsPanel({
-  libraryId,
-  file,
-  onChanged,
-}: {
-  libraryId: string;
-  file: FileSummary;
-  onChanged: () => void;
-}) {
+export function TagsPanel({ libraryId, file }: { libraryId: string; file: FileSummary }) {
   const [loaded, setLoaded] = useState<{ library: Tag[]; file: Tag[] } | null>(null);
   const [tagInput, setTagInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -61,9 +53,11 @@ export function TagsPanel({
       const tag = await ensureTag(libraryId, name, libraryTags);
       await addFileTag(libraryId, file.id, tag.id);
       setReloadKey((k) => k + 1);
+      // Only views that list by tag care, and they listen for this. Reloading
+      // the page's whole listing for a tag re-fetched every loaded file and
+      // re-drew the grid, which with thousands of photos read as a reload.
       notifyTagsChanged();
       setTagInput('');
-      onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -78,7 +72,6 @@ export function TagsPanel({
       await removeFileTag(libraryId, file.id, tag.id);
       setReloadKey((k) => k + 1);
       notifyTagsChanged();
-      onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

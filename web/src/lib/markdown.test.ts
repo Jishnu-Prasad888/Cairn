@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractExcerpt, extractRefs, highlightMarkdown, renderMarkdown } from './markdown';
+import {
+  extractExcerpt,
+  extractRefs,
+  highlightMarkdown,
+  peopleIndex,
+  renderMarkdown,
+} from './markdown';
 
 const REF_TYPES = ['media', 'memory', 'album', 'person', 'tag'] as const;
 
@@ -199,5 +205,44 @@ describe('extractExcerpt', () => {
 
   it('leaves short text alone', () => {
     expect(extractExcerpt('short')).toBe('short');
+  });
+});
+
+describe('person mentions', () => {
+  const people = peopleIndex([
+    { id: 'p1', name: 'Ritesh' },
+    { id: 'p2', name: 'Anna Maria' },
+    { id: 'p3', name: '' },
+  ]);
+
+  it('links a bracketed name to the person, whatever its case', () => {
+    const { html } = renderMarkdown('Lunch with [ritesh] and [Anna Maria].', { people });
+    expect(html).toContain(
+      '<a class="md-mention" href="/people?person=p1" data-person-id="p1" data-person-name="Ritesh">ritesh</a>',
+    );
+    expect(html).toContain('data-person-id="p2"');
+  });
+
+  it('leaves unknown names, links, references and task boxes alone', () => {
+    const { html } = renderMarkdown(
+      '[nobody] [Ritesh](https://example.com) [[person:p1|Ritesh]]\n\n- [ ] task',
+      { people },
+    );
+    expect(html).toContain('[nobody]');
+    expect(html).toContain('href="https://example.com"');
+    expect(html).toContain('md-ref-person');
+    expect(html).not.toContain('md-mention');
+    expect(html).toContain('md-task');
+  });
+
+  it('renders brackets as text when no people are given', () => {
+    expect(renderMarkdown('[Ritesh]').html).toBe('<p>[Ritesh]</p>');
+  });
+
+  it('escapes what it links', () => {
+    const evil = peopleIndex([{ id: '"x', name: '<b>' }]);
+    const { html } = renderMarkdown('[<b>]', { people: evil });
+    expect(html).not.toContain('<b>');
+    expect(html).toContain('data-person-id="&quot;x"');
   });
 });

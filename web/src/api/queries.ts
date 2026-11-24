@@ -205,14 +205,50 @@ export const listFolders = (libraryId: string, parent?: string) =>
 export const createFolder = (libraryId: string, path: string) =>
   apiPost<{ folder: import('./types').Folder }>(`/libraries/${libraryId}/folders`, { path });
 
+/** Rename or move a folder (and everything in it) to `newPath`. */
+export const moveFolder = (libraryId: string, path: string, newPath: string) =>
+  apiPost<{ folder: import('./types').Folder }>(`/libraries/${libraryId}/folders/move`, {
+    path,
+    new_path: newPath,
+  });
+
+/** Move every file in a folder to the trash; the emptied folders are removed. */
+export const trashFolder = (libraryId: string, path: string) =>
+  apiPost<{ trashed: number; partial: boolean }>(`/libraries/${libraryId}/folders/trash`, {
+    path,
+  });
+
+/** Where a folder downloads from, as one zip. */
+export const folderDownloadUrl = (libraryId: string, path: string) =>
+  `${API_BASE}/libraries/${libraryId}/folders/download${query({ path })}`;
+
+export const favoriteFolder = (libraryId: string, path: string) =>
+  apiPut<void>(`/libraries/${libraryId}/folders/favorite${query({ path })}`);
+
+export const unfavoriteFolder = (libraryId: string, path: string) =>
+  apiDelete<void>(`/libraries/${libraryId}/folders/favorite${query({ path })}`);
+
+export const listFavoriteFolders = (libraryId: string) =>
+  apiGet<FolderListResponse>(`/libraries/${libraryId}/favorites/folders`);
+
 export const getFile = (libraryId: string, fileId: string) =>
   apiGet<{ file: FileSummary }>(`/libraries/${libraryId}/files/${fileId}`);
 
 export const getFileMetadata = (libraryId: string, fileId: string) =>
   apiGet<{ metadata: FileMetadata }>(`/libraries/${libraryId}/files/${fileId}/metadata`);
 
-export const listDuplicates = (libraryId: string, cursor?: string, limit = 50) =>
-  apiGet<DuplicatesResponse>(`/libraries/${libraryId}/files/duplicates${query({ cursor, limit })}`);
+export const listDuplicates = (libraryId: string, cursor?: string, limit = 50, ignored = false) =>
+  apiGet<DuplicatesResponse>(
+    `/libraries/${libraryId}/files/duplicates${query({ cursor, limit, ignored: ignored || undefined })}`,
+  );
+
+/** Keep a duplicate group off the duplicates page from now on. */
+export const ignoreDuplicate = (libraryId: string, contentHash: string) =>
+  apiPut<void>(`/libraries/${libraryId}/duplicates/ignored/${encodeURIComponent(contentHash)}`);
+
+/** Put an ignored duplicate group back on the duplicates page. */
+export const unignoreDuplicate = (libraryId: string, contentHash: string) =>
+  apiDelete<void>(`/libraries/${libraryId}/duplicates/ignored/${encodeURIComponent(contentHash)}`);
 
 /* --------------------------- file mutations -------------------------- */
 

@@ -150,6 +150,11 @@ type Folder struct {
 	ParentID  string
 	Name      string
 	FileCount int
+	// SizeBytes is the total size of the present files under the folder.
+	SizeBytes int64
+	// ModTime is when the folder last changed: the newest modification time
+	// of a file under it, or the directory's own when it holds none.
+	ModTime   time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -255,6 +260,9 @@ type DuplicatesPage struct {
 	Groups     []*DuplicateGroup
 	NextCursor string // last content hash seen; empty when this is the last page
 	Total      int    // total number of duplicate groups (without pagination)
+	// IgnoredTotal is how many groups the user has ignored, whichever list
+	// was asked for, so the page can offer to show them.
+	IgnoredTotal int
 }
 
 // DuplicateOptions controls pagination for duplicate detection.
@@ -264,6 +272,9 @@ type DuplicateOptions struct {
 	Cursor string
 	// Limit caps the number of groups per page. Defaults to 50, max 200.
 	Limit int
+	// Ignored lists the groups the user chose to keep (see IgnoreDuplicate)
+	// instead of the ones still waiting to be reviewed.
+	Ignored bool
 }
 
 // Defaults fills in zero values with sensible defaults.

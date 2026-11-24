@@ -274,3 +274,66 @@
   font-size: 12px;
   color: var(--danger);
 }
+
+/* Colour themes: one card per palette, a miniature of its page. */
+.theme-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-2);
+  width: min(100%, 420px);
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.theme-swatch:hover {
+  border-color: var(--color-border);
+}
+
+.theme-swatch.active {
+  border-color: var(--color-primary-ink);
+  box-shadow: 0 0 0 1px var(--color-primary-ink);
+}
+
+.theme-swatch:focus-within {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Background with a surface card, the primary and the accent on it. */
+.theme-swatch-preview {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 4px;
+  height: 40px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+}
+
+.theme-swatch-preview span {
+  border-radius: 3px;
+}
+
+.theme-swatch-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+}
+
+.theme-swatch-mode {
+  font-weight: normal;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}

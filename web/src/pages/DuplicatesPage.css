@@ -208,3 +208,102 @@
 .duplicates-footnote {
   font-size: var(--font-size-sm);
 }
+
+/* The thumbnail and name open the file in the viewer. */
+.dup-member-open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+}
+
+.dup-member-open:hover .dup-member-name {
+  text-decoration: underline;
+}
+
+.dup-group-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dup-group-tools .button {
+  gap: var(--space-1);
+}
+
+/* Grid view: each copy as a tile, with a large thumbnail. */
+.dup-members.is-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.dup-member.is-tile {
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.dup-member.is-tile .dup-member-open {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.dup-member.is-tile .dup-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  font-size: var(--font-size-xl);
+}
+
+.dup-member.is-tile .dup-member-check {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 1;
+}
+
+.dup-member.is-tile .dup-member-name {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.dup-member.is-tile .dup-member-badge {
+  display: block;
+  width: fit-content;
+  margin: var(--space-1) 0 0;
+}
+
+.dup-member.is-tile .dup-member-size {
+  font-size: var(--font-size-xs);
+}
+
+.dup-member.is-tile .dup-member-action,
+.dup-member.is-tile .dup-member-trash {
+  position: absolute;
+  top: var(--space-3);
+  padding: var(--space-1);
+  line-height: 0;
+  box-shadow: var(--shadow-1);
+}
+
+.dup-member.is-tile .dup-member-action {
+  right: calc(var(--space-3) + 34px);
+}
+
+.dup-member.is-tile .dup-member-trash {
+  right: var(--space-3);
+  min-height: 0;
+}

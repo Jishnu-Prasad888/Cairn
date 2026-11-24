@@ -47,8 +47,8 @@ export function thumbnailUrl(
 /**
  * The screen-sized JPEG the viewer shows in place of a photo's original: a
  * few hundred kilobytes where a camera original is tens of megabytes, with
- * the EXIF orientation already applied. Versioned like the thumbnail. A 404
- * means the original is small enough to show as it is.
+ * the EXIF orientation already applied. Versioned like the thumbnail. When
+ * the original is small enough to show as it is, the server redirects to it.
  */
 export function previewUrl(
   libraryId: string,

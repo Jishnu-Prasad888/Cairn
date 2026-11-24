@@ -172,6 +172,8 @@ func (s *Server) Handler() http.Handler {
 	// Per-user preferences.
 	mux.Handle("GET /api/v1/settings/memories", s.withAuth(allowAny, s.handleGetMemorySettings))
 	mux.Handle("PATCH /api/v1/settings/memories", s.withAuth(allowAny, s.handleUpdateMemorySettings))
+	mux.Handle("GET /api/v1/settings/albums", s.withAuth(allowAny, s.handleGetAlbumSettings))
+	mux.Handle("PATCH /api/v1/settings/albums", s.withAuth(allowAny, s.handleUpdateAlbumSettings))
 
 	// Admin surface.
 	mux.Handle("GET /api/v1/users", s.withAuth(allowAdmin, s.handleListUsers))
@@ -256,6 +258,8 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /api/v1/libraries/{id}/files", s.withAuth(allowAny, s.handleListFiles))
 		mux.Handle("GET /api/v1/libraries/{id}/files/counts", s.withAuth(allowAny, s.handleFileCounts))
 		mux.Handle("GET /api/v1/libraries/{id}/files/duplicates", s.withAuth(allowAny, s.handleListDuplicates))
+		mux.Handle("PUT /api/v1/libraries/{id}/duplicates/ignored/{hash}", s.withAuth(allowAny, s.handleIgnoreDuplicate))
+		mux.Handle("DELETE /api/v1/libraries/{id}/duplicates/ignored/{hash}", s.withAuth(allowAny, s.handleUnignoreDuplicate))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}", s.withAuth(allowAny, s.handleGetFile))
 		mux.Handle("GET /api/v1/libraries/{id}/files/{fileID}/download", s.withAuth(allowAny, s.handleDownloadFile))
 		mux.Handle("POST /api/v1/libraries/{id}/files/upload", s.withAuth(allowAny, s.handleUploadFile))
@@ -279,6 +283,12 @@ func (s *Server) Handler() http.Handler {
 		// Folders and trash.
 		mux.Handle("GET /api/v1/libraries/{id}/folders", s.withAuth(allowAny, s.handleListFolders))
 		mux.Handle("POST /api/v1/libraries/{id}/folders", s.withAuth(allowAny, s.handleCreateFolder))
+		mux.Handle("POST /api/v1/libraries/{id}/folders/move", s.withAuth(allowAny, s.handleMoveFolder))
+		mux.Handle("POST /api/v1/libraries/{id}/folders/trash", s.withAuth(allowAny, s.handleTrashFolder))
+		mux.Handle("GET /api/v1/libraries/{id}/folders/download", s.withAuth(allowAny, s.handleDownloadFolder))
+		mux.Handle("PUT /api/v1/libraries/{id}/folders/favorite", s.withAuth(allowAny, s.handleFavoriteFolder))
+		mux.Handle("DELETE /api/v1/libraries/{id}/folders/favorite", s.withAuth(allowAny, s.handleFavoriteFolder))
+		mux.Handle("GET /api/v1/libraries/{id}/favorites/folders", s.withAuth(allowAny, s.handleListFavoriteFolders))
 		mux.Handle("GET /api/v1/libraries/{id}/trash", s.withAuth(allowAny, s.handleListTrash))
 
 		// Search.

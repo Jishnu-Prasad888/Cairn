@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -166,9 +167,11 @@ func (s *Server) handleGetThumbnail(w http.ResponseWriter, r *http.Request, u *a
 
 // handleGetPreview — GET /api/v1/libraries/{id}/files/{fileID}/preview
 // Serves the screen-sized rendition the viewer shows in place of a large
-// original, making it on first request. 404 means the original serves as
-// well (it is small already, animated, or not decodable here). It is the
-// photo's content, so it needs the download capability like the original.
+// original, making it on first request. When there is none to make (the
+// original is small already, animated, or not decodable here) it redirects
+// to the original: a 404 there was right but filled the browser console with
+// an error for every small photo opened. It is the photo's content, so it
+// needs the download capability like the original.
 func (s *Server) handleGetPreview(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	lib, err := s.libraries.Get(actorCtx(r, u).Context(), r.PathValue("id"))
 	if err != nil {
@@ -205,7 +208,10 @@ func (s *Server) handleGetPreview(w http.ResponseWriter, r *http.Request, u *aut
 // rendition is a derived image of a file kept under .cairn: the grid's
 // thumbnail or the viewer's preview.
 type rendition struct {
-	name     string
+	name string
+	// original: when none can be made, redirect to the original instead of
+	// answering 404 (the viewer's preview, which the original stands in for).
+	original bool
 	modTime  func(cairnDir, fileID string) (time.Time, error)
 	read     func(cairnDir, fileID string, keys *crypto.Keys) ([]byte, time.Time, error)
 	generate func(srcPath, cairnDir, fileID string, keys *crypto.Keys) (bool, error)
@@ -217,7 +223,7 @@ var (
 		read: metadata.ReadThumb, generate: metadata.GenerateThumbnail,
 	}
 	previewRendition = rendition{
-		name: "Preview", modTime: metadata.PreviewModTime,
+		name: "Preview", original: true, modTime: metadata.PreviewModTime,
 		read: metadata.ReadPreview, generate: metadata.GeneratePreview,
 	}
 )
@@ -246,6 +252,10 @@ func (s *Server) serveRendition(w http.ResponseWriter, r *http.Request, root str
 			return // the client went away while waiting; nobody to answer
 		}
 		if !have {
+			if kind.original {
+				s.redirectToOriginal(w, r, f)
+				return
+			}
 			writeError(w, s.logger, requestIDOrEmpty(r), http.StatusNotFound,
 				CodeNotFound, kind.name+" not available for this file.")
 			return
@@ -271,6 +281,19 @@ func (s *Server) serveRendition(w http.ResponseWriter, r *http.Request, root str
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	http.ServeContent(w, r, f.ID+".jpg", modTime, bytes.NewReader(data))
+}
+
+// redirectToOriginal points the client at f's original (same version query),
+// for a rendition the original stands in for. Not cached: a later build may
+// be able to make the rendition after all.
+func (s *Server) redirectToOriginal(w http.ResponseWriter, r *http.Request, f *media.File) {
+	target := "/api/v1/libraries/" + url.PathEscape(r.PathValue("id")) +
+		"/files/" + url.PathEscape(f.ID) + "/download"
+	if v := r.URL.Query().Get("v"); v != "" {
+		target += "?v=" + url.QueryEscape(v)
+	}
+	w.Header().Set("Cache-Control", "private, no-cache")
+	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 }
 
 // makeRendition generates f's rendition kind on demand, waiting for a slot

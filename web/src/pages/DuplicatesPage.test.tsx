@@ -70,6 +70,53 @@ describe('DuplicatesPage', () => {
     expect(screen.getByTestId('dup-trash-selected')).toHaveTextContent('Move 1 to trash');
   });
 
+  it('ignores a group so it leaves the list, and lists it under Ignored', async () => {
+    const fn = mockApi([
+      (url, init) =>
+        init?.method === 'PUT' && url.includes('/duplicates/ignored/sha256-abcdef1234567890')
+          ? new Response(null, { status: 204 })
+          : undefined,
+      (url) =>
+        url.includes('/files/duplicates') && url.includes('ignored=true')
+          ? json({ groups: [group], total: 1, ignored_total: 1 })
+          : undefined,
+      (url) => (url.includes('/files/duplicates') ? json(duplicatesResponse) : undefined),
+    ]);
+    renderPage(<DuplicatesPage />);
+
+    fireEvent.click(await screen.findByTestId('dup-ignore'));
+    await waitFor(() =>
+      expect(
+        fn.mock.calls.some(
+          ([u, init]) => init?.method === 'PUT' && String(u).includes('/duplicates/ignored/'),
+        ),
+      ).toBe(true),
+    );
+    expect(screen.queryByText('IMG_0001.png')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('dup-show-ignored'));
+    expect(await screen.findByText('IMG_0001.png')).toBeInTheDocument();
+    expect(screen.getByTestId('dup-ignore')).toHaveTextContent('Show again');
+    // Ignored groups are kept on purpose: nothing to select or trash.
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
+  it('switches between list and grid', async () => {
+    setup();
+    await screen.findByText('IMG_0001.png');
+    fireEvent.click(screen.getByRole('button', { name: 'Grid' }));
+    expect(screen.getAllByTestId('dup-member')[0]).toHaveClass('is-tile');
+    fireEvent.click(screen.getByRole('button', { name: 'List' }));
+    expect(screen.getAllByTestId('dup-member')[0]).not.toHaveClass('is-tile');
+  });
+
+  it('opens a copy in the viewer', async () => {
+    setup();
+    await screen.findByText('IMG_0001.png');
+    fireEvent.click(screen.getAllByTestId('dup-open')[0]!);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
   it('links every member back to its download endpoint', async () => {
     setup();
 

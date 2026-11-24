@@ -219,12 +219,12 @@ export function AddFilesDialog({
 
         {/* Files list */}
         {displayFiles.length > 0 && (
-          <ul className="picker-results">
+          <ul className="add-files-results">
             {displayFiles.map((f) => {
               const inAlbum = alreadyIn.includes(f.id);
               return (
-                <li key={f.id} className="picker-row">
-                  <label className="picker-label">
+                <li key={f.id} className="add-files-row">
+                  <label className="add-files-label">
                     <input
                       type="checkbox"
                       aria-label={`Select ${f.name}`}
@@ -233,19 +233,19 @@ export function AddFilesDialog({
                       onChange={() => toggle(f.id)}
                     />
                     {f.media_type === 'video' ? (
-                      <VideoThumb libraryId={libraryId} fileId={f.id} className="picker-thumb" />
+                      <VideoThumb libraryId={libraryId} fileId={f.id} className="add-files-thumb" />
                     ) : f.media_type === 'photo' ? (
-                      <img className="picker-thumb" src={thumbnailUrl(libraryId, f)} alt="" />
+                      <img className="add-files-thumb" src={thumbnailUrl(libraryId, f)} alt="" />
                     ) : (
-                      <span className="picker-thumb picker-glyph" aria-hidden="true">
+                      <span className="add-files-thumb add-files-glyph" aria-hidden="true">
                         <Icon name={mediaTypeIcon(f.media_type)} size={18} />
                       </span>
                     )}
-                    <span className="picker-name" title={f.rel_path}>
+                    <span className="add-files-name" title={f.rel_path}>
                       {f.name}
                     </span>
                   </label>
-                  {inAlbum && <span className="muted picker-note">in album</span>}
+                  {inAlbum && <span className="muted add-files-note">in album</span>}
                 </li>
               );
             })}

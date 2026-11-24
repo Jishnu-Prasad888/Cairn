@@ -8,6 +8,7 @@
 import { useState } from 'react';
 
 import { Icon } from '../ui/Icon';
+import { isCairnDrag } from './dragPayload';
 import './Files.css';
 
 function crumbSegments(folderPath: string): Array<{ label: string; path: string }> {
@@ -47,8 +48,7 @@ export function Breadcrumbs({
                 aria-current={current ? 'page' : undefined}
                 onClick={() => onNavigate(crumb.path)}
                 onDragOver={(event) => {
-                  if (!onDropFile || !event.dataTransfer.types.includes('application/cairn-file'))
-                    return;
+                  if (!onDropFile || !isCairnDrag(event)) return;
                   event.preventDefault();
                   setOver(crumb.path);
                 }}

@@ -436,3 +436,42 @@
     left: 6px;
   }
 }
+
+/* ------------------------- thumbnail loading -------------------------- */
+
+/* While a tile's thumbnail is on its way, a soft band of light sweeps across
+   its placeholder colour. It is pure CSS keyed off the image's own
+   `data-loaded` flag (set on load without a React render), it only moves a
+   compositor layer (transform), and it waits a moment before showing, so a
+   thumbnail that arrives quickly — from the cache, say — never flickers. */
+.media-tile-main {
+  position: relative;
+}
+
+.media-tile-main:has(> .media-tile-img:not([data-loaded='true']))::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--color-surface) 38%, transparent) 50%,
+    transparent 80%
+  );
+  transform: translateX(-100%);
+  animation: tile-shimmer 1.5s var(--ease-standard) 300ms infinite;
+  will-change: transform;
+}
+
+@keyframes tile-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-tile-main:has(> .media-tile-img:not([data-loaded='true']))::after {
+    animation: none;
+  }
+}

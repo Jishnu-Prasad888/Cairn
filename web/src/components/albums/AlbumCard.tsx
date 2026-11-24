@@ -2,7 +2,7 @@
  * An album in the grid: the cover is the card. Title and count sit beneath
  * it, quietly, the way a printed album has its label on the spine.
  *
- * Rename, share, and delete live behind the "..." button in the corner, and
+ * Pin, rename, share, and delete live behind the "..." button in the corner, and
  * behind a right-click anywhere on the card — the same menu, two ways in.
  */
 
@@ -23,10 +23,15 @@ export function AlbumCard({
   onRename,
   onShare,
   onDelete,
+  pinned = false,
+  onTogglePin,
 }: {
   album: Album;
   libraryId: string;
   onOpen: (album: Album) => void;
+  /** Pinned to the top of the grid: marked with a pin. */
+  pinned?: boolean;
+  onTogglePin?: (album: Album) => void;
   /** Omit all three to render a plain card with no menu (the Home preview). */
   onRename?: (album: Album) => void;
   onShare?: (album: Album) => void;
@@ -40,6 +45,17 @@ export function AlbumCard({
   const itemLibraryId = album.library_id || libraryId;
 
   const items: MenuEntry[] = withDangerLast([
+    ...(onTogglePin
+      ? [
+          {
+            id: 'pin',
+            label: pinned ? 'Unpin' : 'Pin to top',
+            icon: 'pin' as const,
+            onSelect: () => onTogglePin(album),
+            testId: `pin-album-${album.id}`,
+          },
+        ]
+      : []),
     ...(onRename
       ? [
           {
@@ -113,6 +129,13 @@ export function AlbumCard({
       </button>
 
       <LibraryTag libraryId={album.library_id} corner />
+
+      {pinned && (
+        <span className="album-card-pin" title="Pinned" data-testid={`album-pinned-${album.id}`}>
+          <Icon name="pin" size={14} filled />
+          <span className="visually-hidden">Pinned</span>
+        </span>
+      )}
 
       {hasMenu && (
         <button

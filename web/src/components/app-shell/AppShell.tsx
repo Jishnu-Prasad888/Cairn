@@ -16,6 +16,9 @@ import { notifyLibraryChanged } from '../../api/libraryEvents';
 import { useToast } from '../ui/Toast';
 import { FaceModelHost } from './FaceModelHost';
 import { UploadTray } from '../upload/UploadTray';
+import { useUploads } from '../upload/UploadProvider';
+import { useFileDrop } from '../upload/useFileDrop';
+import { Icon } from '../ui/Icon';
 import { MobileNav } from './MobileNav';
 import { useRememberSectionLocation } from './sectionMemory';
 import { ShortcutsDialog } from './ShortcutsDialog';
@@ -73,7 +76,20 @@ export default function AppShell() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const { libraryId } = useLibraries();
+  const { libraryId, library } = useLibraries();
+  // Files dropped anywhere a page does not take them itself (Home, Albums,
+  // Favorites…) upload to the top of the current library. The Files, Photos
+  // and Videos pages have their own drop zone, which lands in the open folder.
+  const { enqueue } = useUploads();
+  const shellDrop = useFileDrop(
+    useCallback(
+      (entries) => {
+        if (library) enqueue(library.id, entries, '');
+      },
+      [enqueue, library],
+    ),
+    library !== null && library.status !== 'offline',
+  );
   const scrolledDown = useScrolledDown();
   // Files and Albums links lead back to the folder or album left open.
   useRememberSectionLocation();
@@ -171,6 +187,7 @@ export default function AppShell() {
     <div
       className={scrolledDown ? 'app-shell is-scrolled-down' : 'app-shell'}
       data-testid="app-shell"
+      {...shellDrop.bind}
     >
       <a className="skip-link" href="#main-content">
         Skip to content
@@ -194,6 +211,15 @@ export default function AppShell() {
         onMore={() => setDrawerOpen((open) => !open)}
         moreRef={moreRef}
       />
+
+      {shellDrop.dragging && library && (
+        <div className="drop-overlay" aria-hidden="true">
+          <div className="drop-overlay-card">
+            <Icon name="upload" size={28} />
+            <span>Drop to upload to {library.name}</span>
+          </div>
+        </div>
+      )}
 
       <UploadTray />
       <FaceModelHost />

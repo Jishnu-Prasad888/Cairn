@@ -23,6 +23,7 @@ import type { ReactNode } from 'react';
 
 import { joinRelPath, uploadFileWithProgress } from '../../api/queries';
 import { useToast } from '../ui/Toast';
+import { entriesFromFiles, type UploadEntry } from './uploadEntries';
 
 export type UploadStatus = 'queued' | 'uploading' | 'done' | 'error' | 'cancelled';
 
@@ -42,7 +43,11 @@ export interface UploadsState {
   items: UploadItem[];
   /** Bumped every time an upload finishes successfully. */
   completed: number;
-  enqueue: (libraryId: string, files: File[], folder: string) => void;
+  /**
+   * Queue files for upload into `folder`. Plain files land in it by name;
+   * entries carry a path, so a dropped folder keeps its structure.
+   */
+  enqueue: (libraryId: string, files: File[] | UploadEntry[], folder: string) => void;
   cancel: (id: number) => void;
   retry: (id: number) => void;
   /** Remove finished, failed, and cancelled entries from the tray. */
@@ -55,6 +60,10 @@ const CONCURRENCY = 2;
 
 export function UploadProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<UploadItem[]>([]);
+  const [finished, setFinished] = useState(0);
+  // Pages reload their listing when `completed` changes. A dropped folder
+  // finishes hundreds of files in a row, so the count they see moves at most
+  // about once a second (and right away when the queue drains).
   const [completed, setCompleted] = useState(0);
   const nextId = useRef(1);
   const controllers = useRef(new Map<number, AbortController>());
@@ -81,7 +90,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       })
         .then(() => {
           patch(item.id, { status: 'done', loaded: item.total });
-          setCompleted((n) => n + 1);
+          setFinished((n) => n + 1);
         })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === 'AbortError') {
@@ -97,6 +106,33 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     [patch, toast],
   );
 
+  const idle = !items.some((item) => item.status === 'queued' || item.status === 'uploading');
+  const finishedRef = useRef(0);
+  const shownRef = useRef(0);
+  // Set while a refresh went out less than a second ago.
+  const throttle = useRef(0);
+  useEffect(() => {
+    finishedRef.current = finished;
+    if (finished === shownRef.current || (throttle.current && !idle)) return;
+    const show = () => {
+      shownRef.current = finishedRef.current;
+      setCompleted(finishedRef.current);
+    };
+    // Leading edge: the first file to finish shows up at once...
+    show();
+    window.clearTimeout(throttle.current);
+    const cool = () => {
+      throttle.current = 0;
+      // ...and whatever finished during the second follows it.
+      if (finishedRef.current !== shownRef.current) {
+        show();
+        throttle.current = window.setTimeout(cool, 1000);
+      }
+    };
+    throttle.current = window.setTimeout(cool, 1000);
+  }, [finished, idle]);
+  useEffect(() => () => window.clearTimeout(throttle.current), []);
+
   // Start queued uploads whenever a slot is free.
   useEffect(() => {
     const running = items.filter((item) => item.status === 'uploading').length;
@@ -108,18 +144,24 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       .forEach(start);
   }, [items, start]);
 
-  const enqueue = useCallback((libraryId: string, files: File[], folder: string) => {
-    const added = files.map<UploadItem>((file) => ({
-      id: nextId.current++,
-      libraryId,
-      file,
-      dest: joinRelPath(folder, file.name),
-      status: 'queued',
-      loaded: 0,
-      total: file.size,
-    }));
-    setItems((list) => [...list, ...added]);
-  }, []);
+  const enqueue = useCallback(
+    (libraryId: string, files: File[] | UploadEntry[], folder: string) => {
+      const entries: UploadEntry[] = files.map((f) =>
+        f instanceof File ? entriesFromFiles([f])[0]! : f,
+      );
+      const added = entries.map<UploadItem>(({ file, relPath }) => ({
+        id: nextId.current++,
+        libraryId,
+        file,
+        dest: joinRelPath(folder, relPath),
+        status: 'queued',
+        loaded: 0,
+        total: file.size,
+      }));
+      setItems((list) => [...list, ...added]);
+    },
+    [],
+  );
 
   const cancel = useCallback(
     (id: number) => {

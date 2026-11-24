@@ -7,16 +7,21 @@
  * Columns fold away on narrow screens, name first to stay.
  */
 
+import { useState } from 'react';
+
 import type { FileSort, SortOrder } from '../../api/queries';
 import type { FileSummary, Folder } from '../../api/types';
 import { formatBytes } from '../../api/types';
 import { formatDate } from '../../lib/dates';
+import { markThumbLoaded } from '../../lib/thumbLoading';
 import { fileExtension, mediaLabel, thumbnailUrl, mediaTypeIcon } from '../media';
 import { LibraryTag } from '../LibraryTag';
 import type { Selection } from '../media/useSelection';
 import { VideoThumb } from '../media/VideoThumb';
 import { Icon } from '../ui/Icon';
+import { startFileDrag, startFolderDrag } from './dragPayload';
 import { folderCountLabel } from './folderCount';
+import { folderDropProps, type FolderTileHandlers } from './folderDrop';
 import './Files.css';
 
 interface FileTableProps {
@@ -25,7 +30,8 @@ interface FileTableProps {
   folders?: Folder[];
   onOpen: (file: FileSummary) => void;
   onOpenFolder?: (folder: Folder) => void;
-  onShareFolder?: (folder: Folder) => void;
+  /** Folder rows: menu, drag to move, drop to move in or upload into. */
+  folderHandlers?: Omit<FolderTileHandlers, 'onOpen'>;
   selection: Selection;
   /** Show where each file lives — useful for search results, noise in a folder. */
   showLocation?: boolean;
@@ -47,7 +53,7 @@ export function FileTable({
   folders = [],
   onOpen,
   onOpenFolder,
-  onShareFolder,
+  folderHandlers = {},
   selection,
   showLocation = false,
   sort,
@@ -55,6 +61,8 @@ export function FileTable({
   onMenu,
 }: FileTableProps) {
   const allSelected = files.length > 0 && selection.size === files.length;
+  const [over, setOver] = useState<string | null>(null);
+  const { onMenu: onFolderMenu, draggable: foldersDraggable, isFavorite } = folderHandlers;
 
   return (
     <table className="file-table" data-testid="file-list">
@@ -114,7 +122,20 @@ export function FileTable({
       </thead>
       <tbody>
         {folders.map((folder) => (
-          <tr key={`folder:${folder.id}`} className="file-row is-folder">
+          <tr
+            key={`folder:${folder.library_id ?? ''}:${folder.id}`}
+            className={
+              over === folder.rel_path ? 'file-row is-folder is-drop-target' : 'file-row is-folder'
+            }
+            onContextMenu={(event) => {
+              if (!onFolderMenu) return;
+              event.preventDefault();
+              onFolderMenu(folder, event.clientX, event.clientY);
+            }}
+            draggable={foldersDraggable}
+            onDragStart={(event) => startFolderDrag(event, folder)}
+            {...folderDropProps(folder, folderHandlers, setOver)}
+          >
             <td className="col-check" />
             <th scope="row" className="col-name">
               <button
@@ -126,23 +147,39 @@ export function FileTable({
                   <Icon name="folder" size={20} />
                 </span>
                 <span className="file-row-name">{folder.name}</span>
+                {isFavorite?.(folder) && (
+                  <span className="folder-tile-fav" title="Favourite">
+                    <Icon name="star" size={13} filled />
+                    <span className="visually-hidden">(favourite)</span>
+                  </span>
+                )}
                 <LibraryTag libraryId={folder.library_id} />
               </button>
             </th>
             <td className="col-type">Folder</td>
-            <td className="col-size">{folderCountLabel(folder)}</td>
-            <td className="col-date" />
+            <td className="col-size" title={folderCountLabel(folder)}>
+              {folder.size_bytes ? formatBytes(folder.size_bytes) : folderCountLabel(folder)}
+            </td>
+            <td className="col-date">
+              {folder.mod_time && (
+                <time dateTime={folder.mod_time}>{formatDate(folder.mod_time)}</time>
+              )}
+            </td>
             {showLocation && <td className="col-location" />}
             <td className="col-actions">
-              {onShareFolder && (
+              {onFolderMenu && (
                 <button
                   type="button"
                   className="icon-button"
-                  aria-label={`Share ${folder.name}`}
-                  onClick={() => onShareFolder(folder)}
-                  data-testid={`share-folder-${folder.id}`}
+                  aria-label={`More actions for ${folder.name}`}
+                  aria-haspopup="menu"
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    onFolderMenu(folder, rect.right - 200, rect.bottom + 4);
+                  }}
+                  data-testid={`folder-menu-${folder.id}`}
                 >
-                  <Icon name="share" size={16} />
+                  <Icon name="more" />
                 </button>
               )}
             </td>
@@ -154,6 +191,8 @@ export function FileTable({
             <tr
               key={file.id}
               className={selected ? 'file-row is-selected' : 'file-row'}
+              draggable={foldersDraggable}
+              onDragStart={(event) => startFileDrag(event, file, selected ? selection.size : 1)}
               onContextMenu={(event) => {
                 if (!onMenu) return;
                 event.preventDefault();
@@ -191,11 +230,12 @@ export function FileTable({
                     />
                   ) : file.media_type === 'photo' ? (
                     <img
-                      className="file-row-thumb"
+                      className="file-row-thumb thumb-loading"
                       src={thumbnailUrl(file.library_id || libraryId, file)}
                       alt=""
                       loading="lazy"
                       decoding="async"
+                      onLoad={markThumbLoaded}
                     />
                   ) : (
                     <span className="file-row-thumb" aria-hidden="true">

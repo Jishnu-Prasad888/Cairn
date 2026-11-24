@@ -173,3 +173,47 @@ func TestHandleListDuplicatesRequiresAuth(t *testing.T) {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
+
+func TestHandleIgnoreDuplicateHidesGroupUntilUnignored(t *testing.T) {
+	_, client, libID, libRoot := newSearchTestServer(t)
+	seedLibraryFileHash(t, libRoot, "a1", "a-1.txt", 10, "sha256-a")
+	seedLibraryFileHash(t, libRoot, "a2", "a-2.txt", 10, "sha256-a")
+	seedLibraryFileHash(t, libRoot, "b1", "b-1.txt", 20, "sha256-b")
+	seedLibraryFileHash(t, libRoot, "b2", "b-2.txt", 20, "sha256-b")
+	base := "/api/v1/libraries/" + libID + "/files/duplicates"
+	ignoreBase := "/api/v1/libraries/" + libID + "/duplicates/ignored"
+
+	if rec := client.do(t, http.MethodPut, ignoreBase+"/sha256-a", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("ignore status = %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	// Ignoring again is harmless.
+	if rec := client.do(t, http.MethodPut, ignoreBase+"/sha256-a", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("second ignore status = %d", rec.Code)
+	}
+
+	var counts struct {
+		IgnoredTotal int `json:"ignored_total"`
+	}
+	rec := client.do(t, http.MethodGet, base, nil)
+	body := decodeDuplicates(t, rec)
+	if body.Total != 1 || len(body.Groups) != 1 || body.Groups[0].ContentHash != "sha256-b" {
+		t.Fatalf("after ignore = total %d groups %+v, want only sha256-b", body.Total, body.Groups)
+	}
+	rec = client.do(t, http.MethodGet, base, nil)
+	if err := json.NewDecoder(rec.Body).Decode(&counts); err != nil || counts.IgnoredTotal != 1 {
+		t.Fatalf("ignored_total = %d (err %v), want 1", counts.IgnoredTotal, err)
+	}
+
+	rec = client.do(t, http.MethodGet, base+"?ignored=true", nil)
+	ignored := decodeDuplicates(t, rec)
+	if len(ignored.Groups) != 1 || ignored.Groups[0].ContentHash != "sha256-a" {
+		t.Fatalf("ignored list = %+v, want sha256-a", ignored.Groups)
+	}
+
+	if rec := client.do(t, http.MethodDelete, ignoreBase+"/sha256-a", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("unignore status = %d", rec.Code)
+	}
+	if body := decodeDuplicates(t, client.do(t, http.MethodGet, base, nil)); body.Total != 2 {
+		t.Fatalf("after unignore total = %d, want 2", body.Total)
+	}
+}

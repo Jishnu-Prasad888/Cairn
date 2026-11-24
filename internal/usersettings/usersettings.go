@@ -11,7 +11,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // Memory preference defaults.
@@ -150,25 +149,7 @@ func (s *Store) UpdateMemory(ctx context.Context, userID string, p MemoryPatch) 
 		values["autosave"] = *p.Autosave
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return MemorySettings{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	for key, v := range values {
-		raw, err := json.Marshal(v)
-		if err != nil {
-			return MemorySettings{}, err
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO user_settings (user_id, key, value, updated_at) VALUES (?, ?, ?, ?)
-			 ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-			userID, memoryPrefix+key, string(raw), now); err != nil {
-			return MemorySettings{}, fmt.Errorf("write user setting: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.write(ctx, userID, memoryPrefix, values); err != nil {
 		return MemorySettings{}, err
 	}
 	return s.Memory(ctx, userID)

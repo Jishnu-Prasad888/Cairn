@@ -19,6 +19,9 @@
  *   - ATX headings (# to ######), paragraphs (single newlines become <br>)
  *   - **bold**, __bold__, *italic*, _italic_, ~~strikethrough~~, `code`
  *   - links [text](url), autolinks <https://…>, internal [[type:id|label]]
+ *   - person mentions [Ritesh]: a bracketed name that matches someone on the
+ *     People page (pass `people` to renderMarkdown) becomes a link to them;
+ *     any other bracketed text is left exactly as typed
  *   - unordered/ordered lists (nested by indentation) and - [ ] task lists
  *   - blockquotes, fenced code blocks, tables, thematic breaks (---)
  *
@@ -87,6 +90,30 @@ export function safeUrl(url: string): string {
 
 const PLACEHOLDER = '\u0000';
 
+/** Someone a `[Name]` mention can point at. */
+export interface MentionPerson {
+  id: string;
+  name: string;
+}
+
+/** People by their name, lower-cased and trimmed (see {@link peopleIndex}). */
+export type PeopleIndex = ReadonlyMap<string, MentionPerson>;
+
+/** Index named people for {@link renderMarkdown}; unnamed ones are left out. */
+export function peopleIndex(people: readonly MentionPerson[]): PeopleIndex {
+  const index = new Map<string, MentionPerson>();
+  for (const p of people) {
+    const key = p.name.trim().toLowerCase();
+    // The first of two people sharing a name wins, consistently.
+    if (key && !index.has(key)) index.set(key, p);
+  }
+  return index;
+}
+
+// The index for the render in progress. renderMarkdown is synchronous, so a
+// module-level slot is safe and spares threading it through every block.
+let mentionPeople: PeopleIndex | undefined;
+
 /**
  * Inline Markdown → HTML. Code spans, references and links are lifted out
  * into placeholders first so emphasis never reaches inside them; everything
@@ -126,6 +153,19 @@ function renderInline(raw: string, refs: RefLink[]): string {
   text = text.replace(/<((?:https?:\/\/|mailto:)[^>\s]+)>/g, (_m, url: string) =>
     keep(`<a href="${escapeHtml(safeUrl(url))}" rel="noopener noreferrer">${escapeHtml(url)}</a>`),
   );
+
+  // [Name] — only once links and references are lifted out, so neither
+  // [text](url) nor [[type:id]] can reach here, and only for a known person.
+  const people = mentionPeople;
+  if (people && people.size > 0) {
+    text = text.replace(/\[([^[\]\n]{1,80})\](?![([])/g, (full, name: string) => {
+      const person = people.get(name.trim().toLowerCase());
+      if (!person) return full;
+      return keep(
+        `<a class="md-mention" href="/people?person=${encodeURIComponent(person.id)}" data-person-id="${escapeHtml(person.id)}" data-person-name="${escapeHtml(person.name)}">${escapeHtml(name)}</a>`,
+      );
+    });
+  }
 
   let out = emphasis(escapeHtml(text));
   out = out.replace(
@@ -236,7 +276,19 @@ function renderList(items: ListItem[], refs: RefLink[]): string {
  * Renders Markdown body text to an HTML string that is safe to inject with
  * dangerouslySetInnerHTML. Also returns the references encountered.
  */
-export function renderMarkdown(body: string): { html: string; refs: RefLink[] } {
+export function renderMarkdown(
+  body: string,
+  options: { people?: PeopleIndex | undefined } = {},
+): { html: string; refs: RefLink[] } {
+  mentionPeople = options.people;
+  try {
+    return renderBlocks(body);
+  } finally {
+    mentionPeople = undefined;
+  }
+}
+
+function renderBlocks(body: string): { html: string; refs: RefLink[] } {
   const refs: RefLink[] = [];
   const out: string[] = [];
   const lines = body.split(/\r?\n/);

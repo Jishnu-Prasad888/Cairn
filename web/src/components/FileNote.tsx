@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { apiDelete, apiGet, apiPut } from '../api/client';
 import type { FileNote as FileNoteData } from '../api/types';
 import { renderMarkdown } from '../lib/markdown';
+import { useMentionLinks, usePeopleIndex } from './PersonMentions';
 
 interface FileNoteProps {
   libraryId: string;
@@ -17,6 +18,10 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
  * The note is stored server-side (the file's note endpoint) and autosaves with
  * a short debounce — the same pattern the memories editor uses. Missing notes
  * load as empty and are never an error.
+ *
+ * Ctrl+Enter (⌘+Enter on a Mac) saves at once and shows the caption as it
+ * reads. A name in square brackets — `[Ritesh]` — links to that person on the
+ * People page.
  */
 export function FileNote({ libraryId, fileId }: FileNoteProps) {
   const [loaded, setLoaded] = useState(false);
@@ -93,7 +98,19 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
     }
   };
 
-  const preview = useMemo(() => (draft ? renderMarkdown(draft).html : ''), [draft]);
+  const hintId = useId();
+  const people = usePeopleIndex(libraryId);
+  const mentions = useMentionLinks();
+  const preview = useMemo(
+    () => (draft ? renderMarkdown(draft, { people }).html : ''),
+    [draft, people],
+  );
+
+  /** Save now (skipping the debounce) and show the caption as it reads. */
+  const finish = () => {
+    save();
+    setEditing(false);
+  };
   const hasNote = draft.trim() !== '';
 
   // Nothing to show until the stored note has been read, so a caption never
@@ -113,9 +130,21 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
               setDraft(e.target.value);
               setStatus('idle');
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                // The viewer must not also act on it.
+                e.stopPropagation();
+                finish();
+              }
+            }}
             rows={3}
             autoFocus
+            aria-describedby={hintId}
           />
+          <p id={hintId} className="viewer-note-hint">
+            Ctrl+Enter to save · [Name] links a person
+          </p>
           <div className="viewer-caption-actions">
             <span className={`note-status note-status-${status}`} role="status" aria-live="polite">
               {status === 'saving' && 'Saving…'}
@@ -130,7 +159,8 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
             <button
               type="button"
               className="viewer-caption-button primary"
-              onClick={() => setEditing(false)}
+              onClick={finish}
+              title="Save and preview (Ctrl+Enter)"
             >
               Preview
             </button>
@@ -141,6 +171,7 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
           <div
             className="viewer-caption-body"
             aria-label="Markdown note preview"
+            onClick={mentions.onClick}
             dangerouslySetInnerHTML={{ __html: preview }}
           />
           <button type="button" className="viewer-caption-button" onClick={() => setEditing(true)}>
@@ -158,6 +189,7 @@ export function FileNote({ libraryId, fileId }: FileNoteProps) {
           {error}
         </p>
       )}
+      {mentions.dialog}
     </section>
   );
 }

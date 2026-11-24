@@ -17,6 +17,7 @@ import { thumbnailUrl, mediaTypeIcon } from '../media';
 import { thumbBatchingEnabled, thumbSizeFor, useBatchedThumb } from './thumbBatch';
 import { useQueuedImage } from './thumbnailQueue';
 import { VideoThumb } from './VideoThumb';
+import { startFileDrag } from '../files/dragPayload';
 
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_SLOP = 10;
@@ -56,6 +57,9 @@ export interface MediaTileProps {
   width: number;
   height: number;
   selected: boolean;
+  /** How many files a drag of this tile moves: the selection's size when the
+   * tile is in it, otherwise 1. 0 turns dragging off. */
+  dragCount?: number;
   selectable: boolean;
   /** A selection is in progress: the check is always shown. */
   selecting: boolean;
@@ -79,6 +83,7 @@ function MediaTileImpl({
   width,
   height,
   selected,
+  dragCount = 1,
   selectable,
   selecting,
   favorite,
@@ -232,14 +237,8 @@ function MediaTileImpl({
           if (longPressed.current) return;
           onContextMenu(file, event.clientX, event.clientY);
         }}
-        draggable
-        onDragStart={(event) => {
-          event.dataTransfer.setData(
-            'application/cairn-file',
-            JSON.stringify({ id: file.id, rel_path: file.rel_path, name: file.name }),
-          );
-          event.dataTransfer.effectAllowed = 'copyMove';
-        }}
+        draggable={dragCount > 0}
+        onDragStart={(event) => startFileDrag(event, file, dragCount)}
       >
         {hasThumb && isVideo ? (
           <VideoThumb libraryId={itemLibraryId} fileId={file.id} className="media-tile-img" />

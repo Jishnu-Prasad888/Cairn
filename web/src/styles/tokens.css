@@ -205,6 +205,185 @@
   }
 }
 
+/*
+ * More themes. Each is only a palette: the derived roles above (ink, strong,
+ * fills, shadows) are mixed from these same names, so they follow. A dark
+ * theme also carries data-mode="dark", which swaps in the dark derivations.
+ * The light/dark/system choice and these are one setting (lib/theme.ts).
+ */
+:root[data-mode='dark'] {
+  color-scheme: dark;
+
+  --color-on-primary: var(--color-background);
+  --color-fill-active: var(--color-accent-soft);
+  --color-scrim: color-mix(in srgb, var(--color-background) 70%, transparent);
+  --color-sheen: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  --color-primary-strong: var(--color-primary);
+  --color-primary-strong-hover: var(--color-primary-hover);
+  --color-primary-ink: var(--color-primary);
+  --color-primary-ink-hover: var(--color-primary-hover);
+  --color-success-ink: color-mix(in srgb, var(--color-success) 75%, var(--color-text-primary));
+  --color-danger-ink: color-mix(in srgb, var(--color-danger) 75%, var(--color-text-primary));
+  --color-warning-ink: var(--color-warning);
+
+  --shadow-1: 0 1px 2px color-mix(in srgb, var(--color-background) 60%, transparent);
+  --shadow-2: 0 4px 12px color-mix(in srgb, var(--color-background) 55%, transparent);
+  --shadow-3: 0 12px 32px color-mix(in srgb, var(--color-background) 70%, transparent);
+  --shadow-clay:
+    inset 0 1px 0 var(--color-sheen),
+    0 1px 2px color-mix(in srgb, var(--color-background) 60%, transparent);
+}
+
+/* Sage: moss, lichen and river-washed stone. */
+:root[data-theme='sage'] {
+  color-scheme: light;
+
+  --color-background: #eef1e8;
+  --color-surface: #f8faf3;
+  --color-surface-elevated: #fdfefb;
+  --color-text-primary: #2f3a2f;
+  --color-text-secondary: #5d6c5b;
+  --color-text-muted: #8f9c8b;
+  --color-border: #d6decd;
+  --color-border-subtle: #e4eadc;
+  --color-primary: #5f8a5a;
+  --color-primary-hover: #4f7a4b;
+  --color-accent: #8fb07a;
+  --color-accent-soft: #cfe0c0;
+  --color-yellow: #d9b85a;
+  --color-green: #7fa36d;
+  --color-blue: #7fa3b3;
+  --color-pink: #cf8f8a;
+  --color-selection: #d3e4c6;
+  --color-success: #6f9a62;
+  --color-warning: #c9944a;
+  --color-danger: #c0645a;
+}
+
+/* Slate: cool morning light on grey stone. */
+:root[data-theme='slate'] {
+  color-scheme: light;
+
+  --color-background: #eef1f5;
+  --color-surface: #f8fafc;
+  --color-surface-elevated: #ffffff;
+  --color-text-primary: #273142;
+  --color-text-secondary: #596476;
+  --color-text-muted: #8f99a9;
+  --color-border: #d5dbe5;
+  --color-border-subtle: #e3e8ef;
+  --color-primary: #4a72b0;
+  --color-primary-hover: #3d64a0;
+  --color-accent: #6f97cf;
+  --color-accent-soft: #c9d9f0;
+  --color-yellow: #d8b24f;
+  --color-green: #6f9e7f;
+  --color-blue: #5f93c2;
+  --color-pink: #cf8ba0;
+  --color-selection: #cddcf2;
+  --color-success: #5e9a72;
+  --color-warning: #c8903e;
+  --color-danger: #c25a5a;
+}
+
+/* Lavender: dusk-pale violet and soft heather. */
+:root[data-theme='lavender'] {
+  color-scheme: light;
+
+  --color-background: #f3eff7;
+  --color-surface: #fbf8fd;
+  --color-surface-elevated: #fffeff;
+  --color-text-primary: #352d42;
+  --color-text-secondary: #695e77;
+  --color-text-muted: #9f96ac;
+  --color-border: #e0d6ea;
+  --color-border-subtle: #ebe4f2;
+  --color-primary: #8a63b8;
+  --color-primary-hover: #7a53a8;
+  --color-accent: #b48fd8;
+  --color-accent-soft: #e2d1f2;
+  --color-yellow: #dcb85c;
+  --color-green: #84a682;
+  --color-blue: #7fa0c6;
+  --color-pink: #d38ba8;
+  --color-selection: #e4d4f4;
+  --color-success: #73a07a;
+  --color-warning: #cc9548;
+  --color-danger: #c45f6e;
+}
+
+/* Midnight: deep blue night, starlight text. */
+:root[data-theme='midnight'] {
+  --color-background: #161c2b;
+  --color-surface: #1f2738;
+  --color-surface-elevated: #283146;
+  --color-text-primary: #e6ecf7;
+  --color-text-secondary: #aab5c9;
+  --color-text-muted: #78849c;
+  --color-border: #334059;
+  --color-border-subtle: #2a3448;
+  --color-primary: #7aa2f7;
+  --color-primary-hover: #8fb2fa;
+  --color-accent: #9ab8f5;
+  --color-accent-soft: #2f4063;
+  --color-yellow: #e0c070;
+  --color-green: #8fc0a0;
+  --color-blue: #7fb0e0;
+  --color-pink: #e09ab5;
+  --color-selection: #33466b;
+  --color-success: #8fc29a;
+  --color-warning: #e0b060;
+  --color-danger: #e88388;
+}
+
+/* Forest: pine shade and fern under evening light. */
+:root[data-theme='forest'] {
+  --color-background: #18221c;
+  --color-surface: #202d25;
+  --color-surface-elevated: #29382f;
+  --color-text-primary: #e5efe6;
+  --color-text-secondary: #a9bdad;
+  --color-text-muted: #788f7e;
+  --color-border: #344a3c;
+  --color-border-subtle: #2b3d32;
+  --color-primary: #8cc08a;
+  --color-primary-hover: #9dcd9a;
+  --color-accent: #b0d28a;
+  --color-accent-soft: #34503b;
+  --color-yellow: #e0c46e;
+  --color-green: #8cc08a;
+  --color-blue: #86b4c0;
+  --color-pink: #dc9a98;
+  --color-selection: #3a5a42;
+  --color-success: #92c48f;
+  --color-warning: #dcae5e;
+  --color-danger: #e08478;
+}
+
+/* Graphite: neutral charcoal with a warm amber accent. */
+:root[data-theme='graphite'] {
+  --color-background: #1c1c1e;
+  --color-surface: #262628;
+  --color-surface-elevated: #303033;
+  --color-text-primary: #ececee;
+  --color-text-secondary: #b3b3b8;
+  --color-text-muted: #818188;
+  --color-border: #3a3a3e;
+  --color-border-subtle: #303034;
+  --color-primary: #d9a066;
+  --color-primary-hover: #e6b07a;
+  --color-accent: #e8b97f;
+  --color-accent-soft: #4a3d2e;
+  --color-yellow: #e3c46b;
+  --color-green: #9cbf8c;
+  --color-blue: #8db4d0;
+  --color-pink: #dc9aa0;
+  --color-selection: #4d4033;
+  --color-success: #98bf8a;
+  --color-warning: #dcae5e;
+  --color-danger: #e0807a;
+}
+
 /* Theme-independent tokens. */
 :root {
   /* ---------- the viewer ----------

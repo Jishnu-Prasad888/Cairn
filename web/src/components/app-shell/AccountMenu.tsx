@@ -8,20 +8,18 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../../auth/authContext';
-import { readStoredTheme, storeTheme, type ThemePreference } from '../../lib/theme';
+import { readStoredTheme, storeTheme, themeInfo, type ThemePreference } from '../../lib/theme';
 import { Menu, type MenuEntry, useMenuButton } from '../ui/Menu';
 
-const THEME_LABEL: Record<ThemePreference, string> = {
-  system: 'Appearance: System',
-  light: 'Appearance: Light',
-  dark: 'Appearance: Dark',
-};
-
-const NEXT_THEME: Record<ThemePreference, ThemePreference> = {
+/** The menu cycles the basic three; from a named theme it goes back to System. */
+const NEXT_THEME: Partial<Record<ThemePreference, ThemePreference>> = {
   system: 'light',
   light: 'dark',
   dark: 'system',
 };
+
+const themeLabel = (theme: ThemePreference) =>
+  `Appearance: ${theme === 'system' ? 'System' : (themeInfo(theme)?.label ?? theme)}`;
 
 export function AccountMenu({ onShowShortcuts }: { onShowShortcuts: () => void }) {
   const { user, logout } = useAuth();
@@ -35,10 +33,10 @@ export function AccountMenu({ onShowShortcuts }: { onShowShortcuts: () => void }
   const items: MenuEntry[] = [
     {
       id: 'theme',
-      label: THEME_LABEL[theme],
-      icon: theme === 'dark' ? 'moon' : theme === 'light' ? 'sun' : 'monitor',
+      label: themeLabel(theme),
+      icon: theme === 'system' ? 'monitor' : themeInfo(theme)?.mode === 'dark' ? 'moon' : 'sun',
       onSelect: () => {
-        const next = NEXT_THEME[theme];
+        const next = NEXT_THEME[theme] ?? 'system';
         storeTheme(next);
         setTheme(next);
       },

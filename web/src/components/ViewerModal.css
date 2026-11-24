@@ -456,6 +456,13 @@ video.viewer-media {
   color: var(--viewer-ink-muted);
 }
 
+.viewer-note-hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--viewer-ink-muted);
+  text-align: center;
+}
+
 .viewer-caption-actions {
   display: flex;
   align-items: center;

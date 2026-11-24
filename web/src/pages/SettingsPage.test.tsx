@@ -87,6 +87,23 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('applies a colour theme, dark ones with the dark mode', async () => {
+    setup();
+    await screen.findByRole('heading', { name: 'Settings' });
+
+    fireEvent.click(screen.getByRole('radio', { name: /Midnight/ }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('midnight'));
+    expect(document.documentElement.dataset.mode).toBe('dark');
+    expect(localStorage.getItem('cairn.theme')).toBe('midnight');
+
+    fireEvent.click(screen.getByRole('radio', { name: /Sage/ }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('sage'));
+    expect(document.documentElement.dataset.mode).toBeUndefined();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Match system' }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBeUndefined());
+  });
+
   it('defaults the Photos layout to masonry and remembers a switch to grid', async () => {
     setup();
     await screen.findByRole('heading', { name: 'Settings' });
