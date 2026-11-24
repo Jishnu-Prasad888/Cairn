@@ -172,3 +172,49 @@
 .library-visibility-row:hover {
   background: var(--color-fill-hover);
 }
+
+.library-visibility-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Phones: one row of controls under the title. The sort menu takes the
+   room; Libraries and New album become compact icon buttons (their names
+   stay as accessible labels). */
+@media (max-width: 599px) {
+  .albums-page > .page-header .header-controls {
+    flex-wrap: nowrap;
+    width: 100%;
+  }
+
+  .albums-page > .page-header .header-controls > select {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-overflow: ellipsis;
+  }
+
+  .albums-page > .page-header .header-controls > .button,
+  .albums-page .library-visibility > .button {
+    flex: none;
+    min-width: var(--touch-target);
+    padding-inline: var(--space-3);
+  }
+
+  .albums-page .album-new-label,
+  .albums-page .library-visibility-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .albums-page .library-visibility {
+    flex: none;
+  }
+
+  /* The panel opens from the button's right edge; keep it on screen. */
+  .library-visibility-panel {
+    max-width: calc(100vw - 2 * var(--content-gutter, 16px));
+  }
+}

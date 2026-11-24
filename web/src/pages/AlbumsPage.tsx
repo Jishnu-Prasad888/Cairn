@@ -289,10 +289,11 @@ function Albums({
                   );
                   setCreating(true);
                 }}
+                aria-label="New album"
                 data-testid="new-album-button"
               >
                 <Icon name="plus" />
-                New album
+                <span className="album-new-label">New album</span>
               </button>
             )}
           </>

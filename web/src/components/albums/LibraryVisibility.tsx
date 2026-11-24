@@ -60,10 +60,14 @@ export function LibraryVisibility({
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
+        aria-label={hiddenCount > 0 ? `Libraries: ${hiddenCount} hidden` : 'Libraries'}
+        title="Choose which libraries' albums to show"
         data-testid="album-libraries-button"
       >
         <Icon name="eye-off" size={16} />
-        {hiddenCount > 0 ? `${hiddenCount} hidden` : 'Libraries'}
+        {hiddenCount > 0 && <span className="library-visibility-count">{hiddenCount}</span>}
+        {/* Phones keep the icon (and count); the words fold away. */}
+        <span className="library-visibility-text">{hiddenCount > 0 ? 'hidden' : 'Libraries'}</span>
         <Icon name="chevron-down" size={14} />
       </button>
       {open && (
