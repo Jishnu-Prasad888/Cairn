@@ -62,7 +62,12 @@ func TestPreview(t *testing.T) {
 		t.Errorf("preview = %dx%d, want 2048x1024", cfg.Width, cfg.Height)
 	}
 
-	if rec := client.roundTrip(t, http.MethodGet, base+"small-1/preview?v=1", ""); rec.Code != http.StatusNotFound {
-		t.Errorf("small photo preview = %d, want 404", rec.Code)
+	// A photo small enough to show as it is: the preview is the original.
+	rec = client.roundTrip(t, http.MethodGet, base+"small-1/preview?v=1", "")
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("small photo preview = %d, want 307", rec.Code)
+	}
+	if got, want := rec.Header().Get("Location"), base+"small-1/download?v=1"; got != want {
+		t.Errorf("redirect = %q, want %q", got, want)
 	}
 }

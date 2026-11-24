@@ -183,7 +183,7 @@ function writePanelPreference(open: boolean): void {
 }
 
 export function ViewerModal({
-  libraryId,
+  libraryId: pageLibraryId,
   file,
   siblings,
   onNavigate,
@@ -192,6 +192,9 @@ export function ViewerModal({
   onClose,
   onNearEnd,
 }: ViewerModalProps) {
+  // The file's own library wins: everything the viewer asks for (the photo,
+  // its panels) must come from where the file lives.
+  const libraryId = file.library_id || pageLibraryId;
   const [view, setView] = useState<View>(FIT);
   const zoom = view.z;
   const [dragging, setDragging] = useState(false);
@@ -749,7 +752,8 @@ export function ViewerModal({
       (f): f is FileSummary => f?.media_type === 'photo',
     );
     // Not abandoned when paging on: the photo paged to is one of them.
-    for (const f of ahead) new Image().src = previewUrl(libraryId, f);
+    // Each from its own library: with several open, neighbours can differ.
+    for (const f of ahead) new Image().src = previewUrl(f.library_id || libraryId, f);
   }, [libraryId, nextSibling, prevSibling]);
 
   const onPhotoError = () => {

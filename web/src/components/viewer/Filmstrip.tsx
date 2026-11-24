@@ -19,6 +19,9 @@ export function Filmstrip({
   index,
   onNavigate,
 }: {
+  /** The library of a sibling that does not name its own. With several
+   * libraries open the strip mixes them, and each thumbnail must come from
+   * the file's own library — asking the wrong one is a 404 and a blank. */
   libraryId: string;
   siblings: FileSummary[];
   index: number;
@@ -48,9 +51,9 @@ export function Filmstrip({
               title={item.name}
             >
               {item.media_type === 'video' ? (
-                <VideoThumb libraryId={libraryId} fileId={item.id} />
+                <VideoThumb libraryId={item.library_id || libraryId} fileId={item.id} />
               ) : item.media_type === 'photo' ? (
-                <img src={thumbnailUrl(libraryId, item)} alt="" loading="lazy" />
+                <img src={thumbnailUrl(item.library_id || libraryId, item)} alt="" loading="lazy" />
               ) : (
                 <span aria-hidden="true">
                   <Icon name={mediaTypeIcon(item.media_type)} size={18} />
