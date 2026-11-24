@@ -7,7 +7,7 @@
  * a photo from it, leaves the files exactly where they are on disk.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { matchPath, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/authContext';
@@ -24,6 +24,14 @@ import {
 import type { Album, FileSummary, Library } from '../api/types';
 import { AddFilesDialog } from '../components/albums/AddFilesDialog';
 import { AlbumCard } from '../components/albums/AlbumCard';
+import {
+  ALBUM_SORTS,
+  type AlbumSort,
+  MAX_PINNED_ALBUMS,
+  arrangeAlbums,
+  useAlbumSettings,
+} from '../components/albums/albumSettings';
+import { LibraryVisibility } from '../components/albums/LibraryVisibility';
 import { AlbumShareDialog } from '../components/albums/AlbumShareDialog';
 import { ConfirmDialog, PromptDialog } from '../components/Dialog';
 import { useFileOperations } from '../components/FileOperations';
@@ -148,7 +156,61 @@ function Albums({
   const offline = library.status === 'offline';
   const active = albumId ? (albums.data?.find((a) => a.id === albumId) ?? null) : null;
   const all = albums.data ?? [];
-  const visible = filter ? all.filter((a) => a.name.toLowerCase().includes(filter)) : all;
+  const prefs = useAlbumSettings(primaryId);
+  const arranged = arrangeAlbums(all, prefs.settings, filter, primaryId);
+  const visible = [...arranged.pinned, ...arranged.rest];
+  // Wait for the saved arrangement too, so hidden albums never flash in and
+  // the order does not jump once it arrives.
+  const ready = albums.data !== null && prefs.loaded;
+
+  // A pin on an album that has since been deleted would hold one of the five
+  // places invisibly; drop it once the album's (online) library has loaded.
+  const pinned = prefs.settings.pinned;
+  useEffect(() => {
+    if (!albums.data || !prefs.loaded || albums.loading) return;
+    const online = new Set(libraries.filter((l) => l.status !== 'offline').map((l) => l.id));
+    const exists = new Set(albums.data.map((a) => `${a.library_id || primaryId}:${a.id}`));
+    const live = pinned.filter(
+      (p) => !online.has(p.library_id) || exists.has(`${p.library_id}:${p.album_id}`),
+    );
+    if (live.length !== pinned.length) prefs.setPinned(live);
+  }, [albums.data, albums.loading, prefs, pinned, libraries, primaryId]);
+
+  const togglePin = (album: Album) => {
+    const wasPinned = prefs.isPinned(album);
+    if (!prefs.togglePin(album)) {
+      toast({
+        message: `You can pin up to ${MAX_PINNED_ALBUMS} albums. Unpin one to pin “${album.name}”.`,
+        tone: 'error',
+      });
+      return;
+    }
+    toast({
+      message: wasPinned ? `Unpinned “${album.name}”` : `Pinned “${album.name}” to the top`,
+      tone: 'success',
+    });
+  };
+
+  const card = (album: Album) => (
+    <li key={`${album.library_id ?? ''}:${album.id}`}>
+      <AlbumCard
+        album={album}
+        libraryId={primaryId}
+        onOpen={(a) => navigate(`/albums/${a.id}`)}
+        pinned={prefs.isPinned(album)}
+        onTogglePin={togglePin}
+        onRename={(a) => {
+          setEditError(null);
+          setEditing({ album: a, kind: 'rename' });
+        }}
+        onShare={(a) => setSharing(a)}
+        onDelete={(a) => {
+          setEditError(null);
+          setEditing({ album: a, kind: 'delete' });
+        }}
+      />
+    </li>
+  );
 
   if (albumId) {
     if (albums.data && !active) {
@@ -186,29 +248,54 @@ function Albums({
           albums.data && albums.data.length > 0
             ? filter
               ? `${visible.length} of ${all.length} ${all.length === 1 ? 'album' : 'albums'}`
-              : `${all.length} ${all.length === 1 ? 'album' : 'albums'}`
+              : arranged.hiddenCount > 0
+                ? `${visible.length} ${visible.length === 1 ? 'album' : 'albums'} · ${arranged.hiddenCount} hidden`
+                : `${all.length} ${all.length === 1 ? 'album' : 'albums'}`
             : undefined
         }
         controls={
-          !offline && (
-            <button
-              type="button"
-              className="button primary-button"
-              onClick={() => {
-                setPromptError(null);
-                setCreateLibraryId(
-                  libraries.some((l) => l.id === primaryId && l.status !== 'offline')
-                    ? primaryId
-                    : (libraries.find((l) => l.status !== 'offline')?.id ?? primaryId),
-                );
-                setCreating(true);
-              }}
-              data-testid="new-album-button"
-            >
-              <Icon name="plus" />
-              New album
-            </button>
-          )
+          <>
+            {all.length > 0 && (
+              <select
+                aria-label="Sort albums"
+                value={prefs.settings.sort}
+                onChange={(e) => prefs.setSort(e.target.value as AlbumSort)}
+                data-testid="album-sort"
+              >
+                {ALBUM_SORTS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {libraries.length > 1 && (
+              <LibraryVisibility
+                libraries={libraries}
+                hidden={prefs.settings.hidden_libraries}
+                onChange={prefs.setHiddenLibraries}
+              />
+            )}
+            {!offline && (
+              <button
+                type="button"
+                className="button primary-button"
+                onClick={() => {
+                  setPromptError(null);
+                  setCreateLibraryId(
+                    libraries.some((l) => l.id === primaryId && l.status !== 'offline')
+                      ? primaryId
+                      : (libraries.find((l) => l.status !== 'offline')?.id ?? primaryId),
+                  );
+                  setCreating(true);
+                }}
+                data-testid="new-album-button"
+              >
+                <Icon name="plus" />
+                New album
+              </button>
+            )}
+          </>
         }
       />
 
@@ -217,7 +304,7 @@ function Albums({
         <ErrorState message={albums.error} onRetry={albums.reload} title="Couldn't load albums" />
       )}
 
-      {albums.loading && (
+      {(albums.loading || (albums.data !== null && !prefs.loaded)) && (
         <div className="album-grid-skeleton" aria-hidden="true">
           {Array.from({ length: 8 }, (_, i) => (
             <span key={i} className="skeleton" />
@@ -225,7 +312,7 @@ function Albums({
         </div>
       )}
 
-      {albums.data !== null && all.length === 0 && (
+      {ready && all.length === 0 && (
         <EmptyState
           title="No albums yet"
           testId="albums-empty"
@@ -249,36 +336,66 @@ function Albums({
         </EmptyState>
       )}
 
-      {albums.data !== null && all.length > 0 && filter && visible.length === 0 && (
-        <EmptyState title="No albums match" testId="albums-filter-empty" icon="search">
-          <p>
-            Nothing in any library matches “{params.get('q')}”. Try fewer words, or check the
-            spelling.
-          </p>
+      {ready &&
+        all.length > 0 &&
+        filter &&
+        visible.length === 0 &&
+        arranged.hiddenMatches.length === 0 && (
+          <EmptyState title="No albums match" testId="albums-filter-empty" icon="search">
+            <p>
+              Nothing in any library matches “{params.get('q')}”. Try fewer words, or check the
+              spelling.
+            </p>
+          </EmptyState>
+        )}
+
+      {ready && !filter && all.length > 0 && visible.length === 0 && (
+        <EmptyState title="Every album is hidden" testId="albums-all-hidden" icon="eye-off">
+          <p>The libraries holding your albums are hidden. Choose which to show under Libraries.</p>
         </EmptyState>
       )}
 
-      {albums.data !== null && visible.length > 0 && (
-        <ul className="album-grid" data-testid="albums-grid" aria-label="Albums">
-          {visible.map((album) => (
-            <li key={album.id}>
-              <AlbumCard
-                album={album}
-                libraryId={primaryId}
-                onOpen={(a) => navigate(`/albums/${a.id}`)}
-                onRename={(a) => {
-                  setEditError(null);
-                  setEditing({ album: a, kind: 'rename' });
-                }}
-                onShare={(a) => setSharing(a)}
-                onDelete={(a) => {
-                  setEditError(null);
-                  setEditing({ album: a, kind: 'delete' });
-                }}
-              />
-            </li>
-          ))}
-        </ul>
+      {ready && arranged.pinned.length > 0 && (
+        <section className="album-section" aria-labelledby="albums-pinned-title">
+          <h2 id="albums-pinned-title" className="album-section-title">
+            <Icon name="pin" size={16} />
+            Pinned
+          </h2>
+          <ul className="album-grid" data-testid="albums-pinned" aria-label="Pinned albums">
+            {arranged.pinned.map(card)}
+          </ul>
+        </section>
+      )}
+
+      {ready && arranged.rest.length > 0 && (
+        <section
+          className="album-section"
+          aria-labelledby={arranged.pinned.length > 0 ? 'albums-all-title' : undefined}
+        >
+          {arranged.pinned.length > 0 && (
+            <h2 id="albums-all-title" className="album-section-title">
+              All albums
+            </h2>
+          )}
+          <ul className="album-grid" data-testid="albums-grid" aria-label="Albums">
+            {arranged.rest.map(card)}
+          </ul>
+        </section>
+      )}
+
+      {/* A search reaches hidden libraries too, but keeps their matches
+          folded away until asked for. */}
+      {ready && filter && arranged.hiddenMatches.length > 0 && (
+        <details className="album-hidden-matches" data-testid="albums-hidden-matches">
+          <summary>
+            <Icon name="chevron-right" size={16} className="album-hidden-chevron" />
+            {arranged.hiddenMatches.length}{' '}
+            {arranged.hiddenMatches.length === 1 ? 'match' : 'matches'} in hidden libraries
+          </summary>
+          <ul className="album-grid" aria-label="Albums in hidden libraries">
+            {arranged.hiddenMatches.map(card)}
+          </ul>
+        </details>
       )}
 
       <PromptDialog

@@ -172,6 +172,8 @@ func (s *Server) Handler() http.Handler {
 	// Per-user preferences.
 	mux.Handle("GET /api/v1/settings/memories", s.withAuth(allowAny, s.handleGetMemorySettings))
 	mux.Handle("PATCH /api/v1/settings/memories", s.withAuth(allowAny, s.handleUpdateMemorySettings))
+	mux.Handle("GET /api/v1/settings/albums", s.withAuth(allowAny, s.handleGetAlbumSettings))
+	mux.Handle("PATCH /api/v1/settings/albums", s.withAuth(allowAny, s.handleUpdateAlbumSettings))
 
 	// Admin surface.
 	mux.Handle("GET /api/v1/users", s.withAuth(allowAdmin, s.handleListUsers))

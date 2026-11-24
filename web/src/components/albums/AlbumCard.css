@@ -127,3 +127,20 @@
     transform: translateY(-2px);
   }
 }
+
+/* A pinned album wears a small pin on its cover's top-left corner. */
+.album-card-pin {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-raised);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--color-on-primary);
+  background: var(--color-primary-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-1);
+  pointer-events: none;
+}

@@ -1257,9 +1257,7 @@ export function ViewerModal({
               tabIndex={0}
             >
               {tab === 'details' && <DetailsPanel key={file.id} file={file} metadata={metadata} />}
-              {tab === 'tags' && (
-                <TagsPanel key={file.id} libraryId={libraryId} file={file} />
-              )}
+              {tab === 'tags' && <TagsPanel key={file.id} libraryId={libraryId} file={file} />}
               {tab === 'albums' && (
                 <AlbumsPanel
                   key={file.id}

@@ -320,6 +320,8 @@ unknown token is rejected with `400`.
 | ------ | ------------------------ | ------------------------------------ | ------- |
 | GET    | `/settings/memories`     | The caller's Memories preferences    | session |
 | PATCH  | `/settings/memories`     | Update any subset of them            | session |
+| GET    | `/settings/albums`       | Albums page: `sort`, `pinned` (≤5, latest first), `hidden_libraries` | session |
+| PATCH  | `/settings/albums`       | Update any subset of them (lists are replaced whole) | session |
 
 ### Permissions and shares (management)
 
