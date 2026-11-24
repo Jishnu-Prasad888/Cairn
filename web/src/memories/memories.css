@@ -1467,7 +1467,10 @@
   cursor: pointer;
 }
 
-.picker-thumb {
+/* Scoped to the memory picker's tiles: the album "Add files" dialog has small
+   list thumbnails of its own, and an unscoped rule here stretched them over
+   the whole page once this sheet had loaded. */
+.picker-item .picker-thumb {
   position: absolute;
   inset: 0;
   width: 100%;
