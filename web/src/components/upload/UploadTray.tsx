@@ -202,9 +202,7 @@ export function UploadTray() {
                   <span>{statusText(item)}</span>
                 </span>
                 {item.status === 'error' && (
-                  <span className="upload-item-reason">
-                    {item.error ?? 'The upload failed.'}
-                  </span>
+                  <span className="upload-item-reason">{item.error ?? 'The upload failed.'}</span>
                 )}
               </div>
               <StatusMark item={item} />
