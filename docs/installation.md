@@ -11,10 +11,47 @@ embedded — no external database server is required.
 | ------------ | ------------------ | --------------------------------------- |
 | Linux        | `amd64`, `arm64`   | Static binary; runs on Raspberry Pi     |
 | macOS        | `amd64`, `arm64`   | Intel and Apple Silicon                 |
-| Windows      | `amd64`            | Build from source; no service wrapper   |
+| Windows      | `amd64`, `arm64`   | Autostart via a scheduled task          |
 
 A 64-bit CPU is assumed. The binary needs no shared libraries
 (`CGO_ENABLED=0`).
+
+## Option 0: Install script (recommended)
+
+The install scripts pick the right binary for your OS and CPU, download the
+latest release, verify it against `SHA256SUMS`, and then ask (y/n) whether to
+install ffmpeg and set Cairn up to start automatically.
+
+**Linux / macOS**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Jishnu-Prasad888/Cairn/main/scripts/install.sh | bash
+```
+
+On Linux this offers a systemd service (run as your own user, so it can read
+your existing photo folders, or as a dedicated `cairn` system user); on macOS
+a launchd agent that starts at login. Options go after `bash -s --`:
+
+```sh
+curl -fsSL .../install.sh | bash -s -- --yes              # accept every default
+curl -fsSL .../install.sh | bash -s -- --version v1.3.1   # a specific release
+curl -fsSL .../install.sh | bash -s -- --uninstall        # remove (keeps data)
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/Jishnu-Prasad888/Cairn/main/scripts/install.ps1 | iex
+```
+
+This installs to `%LOCALAPPDATA%\Programs\Cairn`, adds it to your `PATH`, and
+offers a scheduled task that starts Cairn hidden in the background at login (or
+at boot, when run as Administrator). Set `$env:CAIRN_YES='1'`,
+`$env:CAIRN_VERSION='v1.3.1'` or `$env:CAIRN_UNINSTALL='1'` before the command
+for the same options.
+
+Run the script again at any time to upgrade; a running service is restarted on
+the new version.
 
 ## Option 1: Download a release binary
 

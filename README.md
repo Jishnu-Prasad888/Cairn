@@ -40,6 +40,22 @@ See [docs/roadmap.md](docs/roadmap.md) for the full plan.
 
 ## Quick start
 
+### Install script
+
+```sh
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/Jishnu-Prasad888/Cairn/main/scripts/install.sh | bash
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/Jishnu-Prasad888/Cairn/main/scripts/install.ps1 | iex
+```
+
+Both detect your OS and CPU, install the latest release, and ask whether to
+start Cairn automatically (systemd, launchd, or a Windows scheduled task). See
+[docs/installation.md](docs/installation.md).
+
 ### From source
 
 ```sh
