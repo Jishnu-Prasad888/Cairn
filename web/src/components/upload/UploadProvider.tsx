@@ -50,6 +50,8 @@ export interface UploadsState {
   enqueue: (libraryId: string, files: File[] | UploadEntry[], folder: string) => void;
   cancel: (id: number) => void;
   retry: (id: number) => void;
+  /** Queue every failed upload again. */
+  retryFailed: () => void;
   /** Remove finished, failed, and cancelled entries from the tray. */
   dismissFinished: () => void;
 }
@@ -183,6 +185,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     [patch],
   );
 
+  const retryFailed = useCallback(() => {
+    setItems((list) =>
+      list.map((item) => {
+        if (item.status !== 'error') return item;
+        started.current.delete(item.id);
+        return { ...item, status: 'queued', loaded: 0, error: undefined };
+      }),
+    );
+  }, []);
+
   const dismissFinished = useCallback(() => {
     setItems((list) =>
       list.filter((item) => item.status === 'queued' || item.status === 'uploading'),
@@ -201,8 +213,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }, [items]);
 
   const value = useMemo<UploadsState>(
-    () => ({ items, completed, enqueue, cancel, retry, dismissFinished }),
-    [items, completed, enqueue, cancel, retry, dismissFinished],
+    () => ({ items, completed, enqueue, cancel, retry, retryFailed, dismissFinished }),
+    [items, completed, enqueue, cancel, retry, retryFailed, dismissFinished],
   );
 
   return <UploadsContext.Provider value={value}>{children}</UploadsContext.Provider>;
@@ -214,6 +226,7 @@ const INERT: UploadsState = {
   enqueue: () => {},
   cancel: () => {},
   retry: () => {},
+  retryFailed: () => {},
   dismissFinished: () => {},
 };
 

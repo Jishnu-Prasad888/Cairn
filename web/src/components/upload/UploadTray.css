@@ -5,8 +5,9 @@
   z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
-  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  width: min(380px, calc(100vw - 2 * var(--space-4)));
   max-height: min(60vh, 480px);
+  max-height: min(60dvh, 480px);
   overflow: hidden;
   background: var(--color-surface-elevated);
   border: 1px solid var(--color-border);
@@ -57,10 +58,20 @@
   transform: rotate(180deg);
 }
 
+.upload-tray-retry {
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+}
+
+/* The card has a fixed ceiling; the header and bar stay put and only the
+   list scrolls, however many files are in it. */
 .upload-tray-list {
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
-  padding: 0 0 var(--space-2);
+  padding: var(--space-1) 0 var(--space-2);
   overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
   border-top: 1px solid var(--color-border-subtle);
 }
@@ -69,20 +80,30 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-height: 52px;
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
 }
 
-.upload-item > svg {
+.upload-item:hover {
+  background: var(--color-fill-hover);
+}
+
+.upload-item.is-error {
+  align-items: flex-start;
+}
+
+.upload-item.is-error > .upload-ring,
+.upload-item.is-error > .upload-mark,
+.upload-item.is-error > .upload-item-action,
+.upload-item.is-error > .upload-item-kind {
+  margin-top: 2px;
+}
+
+.upload-item-kind {
+  display: inline-grid;
   flex-shrink: 0;
+  place-items: center;
   color: var(--color-text-muted);
-}
-
-.upload-item.is-done > svg {
-  color: var(--color-success);
-}
-
-.upload-item.is-error > svg {
-  color: var(--color-danger);
 }
 
 .upload-item-text {
@@ -99,13 +120,91 @@
   white-space: nowrap;
 }
 
+.upload-item.is-cancelled .upload-item-name {
+  color: var(--color-text-secondary);
+}
+
 .upload-item-status {
+  display: flex;
+  min-width: 0;
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-item-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 2ch;
 }
 
 .upload-item.is-error .upload-item-status {
   color: var(--color-danger-ink);
+}
+
+/* The server's reason, in full: it wraps rather than truncating. */
+.upload-item-reason {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+  color: var(--color-danger-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Per-file progress ring. */
+.upload-ring {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.upload-ring circle {
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.upload-ring-track {
+  stroke: var(--color-border);
+}
+
+.upload-ring-fill {
+  stroke: var(--color-accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 200ms linear;
+}
+
+.upload-ring.is-waiting .upload-ring-track {
+  stroke-dasharray: 3 3;
+}
+
+.upload-mark {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+}
+
+.upload-item.is-done .upload-mark {
+  color: var(--color-surface-elevated);
+  background: var(--color-success);
+}
+
+.upload-item.is-error .upload-mark {
+  color: var(--color-danger);
+}
+
+.upload-item-action {
+  margin-left: calc(-1 * var(--space-2));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-ring-fill {
+    transition: none;
+  }
 }
 
 @media (max-width: 899px) {

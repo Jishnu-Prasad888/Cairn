@@ -99,8 +99,11 @@ describe('uploads', () => {
     act(() => requests[2]!.finish());
 
     expect(await screen.findByText('1 upload failed')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Show upload details' }));
+    // The reason sits on the file's own row, and survives collapsing the list.
     expect(screen.getByText('That file is too large.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide upload details' }));
+    expect(screen.getByText('a.jpg: That file is too large.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show upload details' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry a.jpg' }));
     await waitFor(() => expect(requests).toHaveLength(4));
@@ -109,7 +112,6 @@ describe('uploads', () => {
   it('cancels a file in flight', async () => {
     setup();
     await waitFor(() => expect(requests).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: 'Show upload details' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel a.jpg' }));
     expect(await screen.findByText('Cancelled')).toBeInTheDocument();
   });
@@ -120,5 +122,32 @@ describe('uploads', () => {
     act(() => requests[0]!.progress(1, 1));
     const bar = screen.getByRole('progressbar', { name: 'Upload progress' });
     await waitFor(() => expect(Number(bar.getAttribute('aria-valuenow'))).toBeGreaterThan(0));
+  });
+
+  it('shows each file with its folder and its own progress', async () => {
+    setup();
+    await waitFor(() => expect(requests).toHaveLength(2));
+    act(() => requests[0]!.progress(1, 2));
+    const ring = screen.getByRole('progressbar', { name: 'a.jpg progress' });
+    await waitFor(() => expect(ring).toHaveAttribute('aria-valuenow', '50'));
+    expect(screen.getAllByText('trip')).toHaveLength(3);
+    expect(screen.getByRole('progressbar', { name: 'c.jpg progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '0',
+    );
+  });
+
+  it('retries every failed upload at once', async () => {
+    setup();
+    await waitFor(() => expect(requests).toHaveLength(2));
+    act(() => requests[0]!.finish(500));
+    act(() => requests[1]!.finish(500));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    act(() => requests[2]!.finish());
+    expect(await screen.findByText('2 uploads failed')).toBeInTheDocument();
+    expect(screen.getAllByText('Request failed with status 500.')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry failed' }));
+    await waitFor(() => expect(requests).toHaveLength(5));
   });
 });
